@@ -1,0 +1,40 @@
+# dsm-dev — the complete build toolchain for dummy-ssh-manager.
+# The developer host needs Docker only (master plan §7).
+FROM golang:1.25-trixie
+
+# Pinned Wails v3 CLI version (master plan §3: pin an exact tagged version).
+ARG WAILS3_VERSION=v3.0.0-beta.15
+
+# --no-install-recommends keeps the image lean.
+# Note: libglib2.0-0t64 is the Debian 13 (trixie) name for libglib2.0-0 (t64 transition).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        libgtk-4-dev \
+        libglib2.0-dev-bin \
+        libwebkitgtk-6.0-dev \
+        libdbus-1-dev \
+        nodejs \
+        npm \
+        fuse3 \
+        libglib2.0-0t64 \
+        ca-certificates \
+        x11-apps \
+        x11-utils \
+ && rm -rf /var/lib/apt/lists/*
+
+# Pin the Wails v3 CLI next to the rest of the toolchain.
+RUN go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS3_VERSION} \
+ && ln -sf /go/bin/wails3 /usr/local/bin/wails3
+
+# The repo is mounted at /app, owned by the host user, while the container
+# runs as root: declare /app a safe git directory so `go build`'s VCS
+# stamping and git calls work (git >= 2.35.2 "dubious ownership" guard).
+RUN git config --system --add safe.directory /app
+
+WORKDIR /app
+
+# Wails subcommands are the default entrypoint (`docker run dsm-dev build`, ...);
+# the Makefile passes --entrypoint explicitly for non-wails commands.
+ENTRYPOINT ["wails3"]

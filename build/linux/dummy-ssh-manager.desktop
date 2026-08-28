@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=dummy-ssh-manager
+Exec=dummy-ssh-manager
+Icon=dummy-ssh-manager
+Categories=Development;
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false

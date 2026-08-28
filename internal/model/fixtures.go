@@ -1,0 +1,107 @@
+package model
+
+import "fmt"
+
+// GenerateFixture builds a deterministic tree payload with the given number
+// of sessions spread over 10 top-level folders with 2 subfolders each
+// (30 folders total), plus a few root-level sessions. It is test-only
+// (master plan §9 perf smoke) and exported so store/wailsvc tests can
+// reuse it.
+func GenerateFixture(sessionCount int) Payload {
+	folders := make([]Folder, 0, 30)
+	order := map[string][]string{}
+	var root []string
+	var subs []string // the 20 subfolders, in creation order
+
+	for i := 0; i < 10; i++ {
+		top := Folder{
+			ID:   NewID(),
+			Name: fmt.Sprintf("Folder-%02d", i+1),
+		}
+		folders = append(folders, top)
+		root = append(root, top.ID)
+
+		for k := 0; k < 2; k++ {
+			sub := Folder{
+				ID:       NewID(),
+				ParentID: top.ID,
+				Name:     fmt.Sprintf("Folder-%02d/%c", i+1, 'a'+rune(k)),
+			}
+			folders = append(folders, sub)
+			subs = append(subs, sub.ID)
+			order[top.ID] = append(order[top.ID], sub.ID)
+		}
+	}
+
+	sessions := make([]Session, 0, sessionCount)
+	for j := 0; j < sessionCount; j++ {
+		s := Session{
+			ID:   NewID(),
+			Name: fmt.Sprintf("Session-%04d", j+1),
+			User: "user",
+			Port: 22,
+		}
+		switch j % 2 {
+		case 0: // hostname + password auth
+			s.Host = fmt.Sprintf("host-%04d.example.com", j+1)
+			s.Auth = Auth{
+				Type:     AuthPassword,
+				Password: fmt.Sprintf("fixture-password-%04d", j+1),
+			}
+		default: // IPv4 + key auth, odd ones get a high port
+			s.Host = fmt.Sprintf("10.%d.%d.%d", (j/65536)%192+1, (j/256)%256, j%256+1)
+			if j%4 == 1 {
+				s.Port = 2222
+			}
+			s.Auth = Auth{
+				Type:    AuthKey,
+				KeyPath: fmt.Sprintf("/home/user/.ssh/id_ed25519_%04d", j+1),
+			}
+		}
+
+		// Every 20th session gets a jump host chain (1 or 2 hops).
+		switch j % 20 {
+		case 0:
+			s.JumpHosts = []JumpHost{
+				{
+					Host: "jump-01.example.com", Port: 22, User: "tunnel",
+					Auth: Auth{Type: AuthPassword, Password: "fixture-jump-pw-01"},
+				},
+			}
+		case 4:
+			s.JumpHosts = []JumpHost{
+				{
+					Host: "jump-01.example.com", Port: 22, User: "tunnel",
+					Auth: Auth{Type: AuthKey, KeyPath: "/home/user/.ssh/jump1"},
+				},
+				{
+					Host: "192.168.7.10", Port: 2200, User: "tunnel",
+					Auth: Auth{Type: AuthPassword, Password: "fixture-jump-pw-02"},
+				},
+			}
+		}
+
+		// Placement: every 30th session sits at the root level, the rest
+		// rotate across the 20 subfolders.
+		var parent string
+		if j%30 == 29 {
+			parent = ""
+			root = append(root, s.ID)
+		} else {
+			parent = subs[j%20]
+		}
+		s.FolderID = parent
+		order[parent] = append(order[parent], s.ID)
+		sessions = append(sessions, s)
+	}
+
+	// Keep Folder.Children consistent with the built order lists.
+	for i := range folders {
+		folders[i].Children = append([]string(nil), order[folders[i].ID]...)
+	}
+	return Payload{
+		Root:     root,
+		Folders:  folders,
+		Sessions: sessions,
+	}
+}

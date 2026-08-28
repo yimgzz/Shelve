@@ -2,7 +2,11 @@ module dummy-ssh-manager
 
 go 1.25.0
 
-require github.com/wailsapp/wails/v3 v3.0.0-beta.15
+require (
+	github.com/oklog/ulid/v2 v2.1.1
+	github.com/wailsapp/wails/v3 v3.0.0-beta.15
+	golang.org/x/crypto v0.53.0
+)
 
 require (
 	github.com/adrg/xdg v0.5.3 // indirect

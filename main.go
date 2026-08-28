@@ -7,6 +7,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"dummy-ssh-manager/internal/app"
+	"dummy-ssh-manager/internal/wailsvc"
 )
 
 // Wails embeds the built frontend (frontend/dist) into the binary and serves
@@ -34,12 +35,19 @@ func main() {
 		},
 		Services: []application.Service{
 			application.NewService(a.AppService()),
+			application.NewService(a.VaultService()),
+			application.NewService(a.SessionService()),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 		OnShutdown: a.Shutdown,
 	})
+
+	// Wire Go→JS events now that the runtime exists (master plan §5).
+	a.SetEmitter(wailsvc.FuncEmitter(func(event string, payload any) {
+		wailsApp.Event.Emit(event, payload)
+	}))
 
 	wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",

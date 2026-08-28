@@ -106,6 +106,10 @@ test-race: ensure-image ## Go unit tests with the race detector
 test-integration: ensure-image ## SSH integration tests (testcontainers)
 	@echo "not implemented yet (Phase 3: docker/sshd testcontainers setup)"
 
+.PHONY: smoke-vault
+smoke-vault: ensure-image ## Headless vault smoke (create→unlock→modify→lock) against a temp dir
+	$(DOCKER_RUN) --entrypoint go $(IMAGE) run ./internal/vault/smol
+
 # ----------------------------------------------------------------- lint ---
 # Note: build/ is excluded from gofmt — it holds wails-generated platform
 # assets that are not gofmt-clean upstream.

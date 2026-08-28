@@ -74,9 +74,10 @@ func Load() (Settings, error) {
 	return s, nil
 }
 
-// Save writes settings.json atomically (0600), creating the config
-// directory if needed.
+// Save normalizes unknown/zero values and writes settings.json
+// atomically (0600), creating the config directory if needed.
 func (s Settings) Save() error {
+	s.normalize()
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err

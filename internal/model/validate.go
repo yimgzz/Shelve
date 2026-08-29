@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"dummy-ssh-manager/internal/sshx"
+	"dummy-ssh-manager/internal/sshx/args"
 )
 
 const (
@@ -152,7 +152,7 @@ func (s *Session) validateFields(prefix string) []error {
 	for i, j := range s.JumpHosts {
 		errs = append(errs, j.validateFields(fmt.Sprintf("%s.jumpHosts[%d]", prefix, i))...)
 	}
-	if err := sshx.ValidateExtraArgs(s.ExtraArgs); err != nil {
+	if err := args.Validate(s.ExtraArgs); err != nil {
 		errs = append(errs, fieldErr(prefix+".extraArgs", "%s", err))
 	}
 	return errs

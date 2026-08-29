@@ -25,7 +25,7 @@ A Wails v3 project that boots a minimal window, built 100% inside Docker via a M
    - `Path()` → `$XDG_CONFIG_HOME/dummy-ssh-manager` (fallback `~/.config`), `EnsureDir()` (0700), file helpers with 0600 creation.
    - `Settings` struct per master §4 + `Load()/Save()` (atomic tmp+rename; missing file → defaults).
 5. `.gitignore` (bin/, frontend/dist/, frontend/bindings/, node_modules/, tmp/), `.dockerignore` (bin, node_modules, .git), minimal `README.md` (project title, status, build prerequisites: Docker only).
-6. Placeholder icon 1024×1024 PNG at `build/appicon.png` (simple solid-color “D” mark; final art in Phase 6).
+6. Placeholder icon 1024×1024 PNG at `build/appicon.png` (simple solid-color “D” mark; final art deferred — packaging phase cancelled 2026-08-29).
 7. Placeholder `build/linux/nfpm/nfpm.yaml` + `build/linux/Taskfile.yml` vars per Wails packaging docs (name `dummy-ssh-manager`, version 0.1.0).
 
 ## Verification

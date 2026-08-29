@@ -128,9 +128,8 @@ func (f *Folder) Validate() error {
 }
 
 // Validate checks Session invariants (master plan §4): name, host, port,
-// user, auth XOR, each jump host, and ExtraArgs (strict parser, §5/D5 —
-// Phase 3; placeholder until then). All violations are joined into one
-// error.
+// user, auth XOR, each jump host, and ExtraArgs (strict parser, §2 D5).
+// All violations are joined into one error.
 func (s *Session) Validate() error {
 	return joinErrs(s.validateFields("session")...)
 }

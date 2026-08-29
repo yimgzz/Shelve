@@ -11,7 +11,6 @@ import (
 
 	"dummy-ssh-manager/internal/config"
 	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/sshx"
 	"dummy-ssh-manager/internal/store"
 	"dummy-ssh-manager/internal/vault"
 )
@@ -234,19 +233,47 @@ func TestSessionServiceCRUDThroughService(t *testing.T) {
 
 func TestSessionServicePlaceholders(t *testing.T) {
 	ss := NewSessionService(store.New(nil), vault.New(), &recEmitter{})
-	if err := ss.ValidateExtraArgs(""); err != nil {
-		t.Fatalf("empty extra args must pass: %v", err)
-	}
-	err := ss.ValidateExtraArgs("-L 8080:localhost:80")
-	if !errors.Is(err, sshx.ErrExtraArgsNotWired) {
-		t.Fatalf("want sshx.ErrExtraArgsNotWired, got %v", err)
-	}
 	if got := ss.TestConnection("any-id"); !errors.Is(got, ErrEngineNotWired) {
 		t.Fatalf("TestConnection = %v, want ErrEngineNotWired", got)
 	}
 	const stable = "ssh engine not wired yet (Phase 3)"
 	if ss.TestConnection("a").Error() != stable || ss.TestConnection("b").Error() != stable {
 		t.Fatal("TestConnection message not stable")
+	}
+}
+
+// Real parser errors must surface verbatim through the service: the
+// session editor binds to ValidateExtraArgs for inline validation
+// (Phase 3a, master plan §6).
+func TestSessionServiceValidateExtraArgs(t *testing.T) {
+	ss := NewSessionService(store.New(nil), vault.New(), &recEmitter{})
+
+	valid := []string{
+		"",
+		"   ",
+		"-L 8080:localhost:80",
+		"-D 1080",
+		"-o ServerAliveInterval=30 -o StrictHostKeyChecking=no",
+		"ProxyJump=bob@jump:2222",
+	}
+	for _, spec := range valid {
+		if err := ss.ValidateExtraArgs(spec); err != nil {
+			t.Fatalf("ValidateExtraArgs(%q) = %v, want nil", spec, err)
+		}
+	}
+
+	invalid := []struct{ spec, wantErr string }{
+		{"-A", "unsupported flag -A"},
+		{"-R 8080:db:5432", "unsupported flag -R"},
+		{"-L 8080:db", `invalid -L spec: "8080:db" (expected [bind:]localPort:dstHost:dstPort)`},
+		{"-o Compression=yes", `unsupported -o key "Compression"`},
+		{"-L '8080:db:5432", "unbalanced quote"},
+	}
+	for _, bad := range invalid {
+		err := ss.ValidateExtraArgs(bad.spec)
+		if err == nil || err.Error() != bad.wantErr {
+			t.Fatalf("ValidateExtraArgs(%q) = %v, want %q", bad.spec, err, bad.wantErr)
+		}
 	}
 }
 

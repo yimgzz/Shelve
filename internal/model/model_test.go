@@ -4,8 +4,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"dummy-ssh-manager/internal/sshx"
 )
 
 func TestValidHostTable(t *testing.T) {
@@ -222,22 +220,27 @@ func TestJumpHostValidationRules(t *testing.T) {
 	})
 }
 
-func TestSessionExtraArgsPlaceholder(t *testing.T) {
+func TestSessionExtraArgsValidation(t *testing.T) {
 	s := validSession()
 	s.ExtraArgs = ""
 	if err := s.Validate(); err != nil {
 		t.Fatalf("empty extra args must pass: %v", err)
 	}
-	s.ExtraArgs = "-L 8080:localhost:80"
-	err := s.Validate()
-	// The Phase 2 placeholder rejects anything non-empty with the
-	// "parser not wired yet" message embedded in the field error.
-	if !strings.Contains(err.Error(), "session.extraArgs:") ||
-		!strings.Contains(err.Error(), "not wired yet") {
-		t.Fatalf("want field error wrapping the not-wired message, got: %v", err)
+	s.ExtraArgs = "-L 8080:localhost:80 -D 1080 -o StrictHostKeyChecking=no ProxyJump=bob@jump:2222"
+	if err := s.Validate(); err != nil {
+		t.Fatalf("valid extra args must pass: %v", err)
 	}
-	if !strings.Contains(err.Error(), sshx.ErrExtraArgsNotWired.Error()) {
-		t.Fatalf("want underlying message %q in %q", sshx.ErrExtraArgsNotWired.Error(), err.Error())
+	s.ExtraArgs = "-R 8080:localhost:80"
+	err := s.Validate()
+	// The strict parser error is embedded in the field error.
+	if !strings.Contains(err.Error(), "session.extraArgs:") ||
+		!strings.Contains(err.Error(), "unsupported flag -R") {
+		t.Fatalf("want field error wrapping the parser message, got: %v", err)
+	}
+	s.ExtraArgs = "-L 8080:db"
+	err = s.Validate()
+	if !strings.Contains(err.Error(), `invalid -L spec: "8080:db"`) {
+		t.Fatalf("want field error wrapping the parser message, got: %v", err)
 	}
 }
 

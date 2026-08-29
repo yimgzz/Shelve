@@ -102,8 +102,9 @@ func (s *SessionService) DuplicateSession(id string) (string, error) {
 	return s.store.DuplicateSession(id)
 }
 
-// ValidateExtraArgs delegates to the strict Extra Args parser
-// (master plan §2 D5, Phase 3); placeholder now: only "" is accepted.
+// ValidateExtraArgs runs the strict Extra Args parser (master plan
+// §2 D5, Phase 3a); error messages are user-facing and shown verbatim
+// in the session editor's inline validation.
 func (s *SessionService) ValidateExtraArgs(extraArgs string) error {
 	return sshx.ValidateExtraArgs(extraArgs)
 }

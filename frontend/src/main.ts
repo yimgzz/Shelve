@@ -19,6 +19,8 @@ import {
     type KeyPromptPayload,
 } from "./components/prompts";
 import { toast } from "./components/toasts";
+import { TermPool } from "./terminal/xterm";
+import { b64ToBytes } from "./ui/b64";
 
 // Common Wails events (pinned @wailsio/runtime v3 beta). These live under
 // Events.Types.Common in this version (master §5 names them events.Common.*).
@@ -62,9 +64,9 @@ function toSettings(raw: Record<string, unknown>): Settings {
     };
 }
 
-/** Terminate all terminals on lock. NO-OP until the real impl in 4c. */
+/** Tear down every pooled terminal instance on vault lock (Phase 4c). */
 function destroyTerminals(): void {
-    console.debug("[main] destroyTerminals no-op (implemented in 4c)");
+    TermPool.destroyAll();
 }
 
 /** Render the gate or shell depending on the vault state. */
@@ -104,6 +106,7 @@ function handleEvent(name: string, payload: unknown): void {
                     selectedID: null,
                     searchQ: "",
                     pendingSessions: {},
+                    forwards: {},
                 });
                 void mount(next);
             }
@@ -124,13 +127,33 @@ function handleEvent(name: string, payload: unknown): void {
             updateTabState(tabID, state, String(p.message ?? ""));
             break;
         }
-        case EV.TerminalData:
-        case EV.TerminalExit:
-        case EV.Forward:
+        case EV.TerminalData: {
+            // Batched b64 output → this tab's pooled terminal. Routed
+            // directly (not through store.set) so high-throughput data
+            // never triggers a full UI re-render (perf guard, §2 A6).
+            const tabID = String(p.tabID ?? "");
+            TermPool.write(tabID, b64ToBytes(String(p.data ?? "")));
+            break;
+        }
+        case EV.TerminalExit: {
+            const tabID = String(p.tabID ?? "");
+            const exitStatus = p.exitStatus != null ? Number(p.exitStatus) : undefined;
+            store.setTabExited(tabID, exitStatus);
+            break;
+        }
+        case EV.Forward: {
+            const tabID = String(p.tabID ?? "");
+            const state = String(p.state ?? "listening") as "listening" | "closed" | "failed";
+            store.setForward(tabID, {
+                spec: String(p.spec ?? ""),
+                state,
+                localAddr: p.localAddr != null ? String(p.localAddr) : undefined,
+                error: p.error != null ? String(p.error) : undefined,
+            });
+            break;
+        }
         case EV.SftpProgress:
-            // Full terminal/forward/progress routing lands with the tab
-            // and SFTP work (4c/5). Subscribed here so main.ts stays the
-            // single event owner from day one.
+            // Progress routing lands with the SFTP panel (Phase 5c).
             console.debug(`[main] ${name}`, payload);
             break;
         default:

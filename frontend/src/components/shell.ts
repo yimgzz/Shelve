@@ -11,7 +11,9 @@ import { showHostKeyPrompt, showKeyPrompt } from "./prompts";
 import { toast } from "./toasts";
 import { renderSearch } from "./search";
 import { renderTreeBody, openNewSession, openNewFolderAt } from "./tree";
-import { renderTabStrip, renderTerminalPane } from "./tabs";
+import { renderTabStrip } from "./tabs";
+import { renderTerminalView } from "./terminal-view";
+import { renderStatusBar } from "./statusbar";
 
 const MIN_LEFT = 240;
 const MAX_LEFT = 480;
@@ -133,17 +135,15 @@ export function renderShell(root: HTMLElement): void {
     const paneHost = document.createElement("div");
     paneHost.className = "terminal-pane-host";
     right.appendChild(paneHost);
-    renderTerminalPane(paneHost);
+    renderTerminalView(paneHost);
 
     root.appendChild(right);
 
-    // ---- Status band (placeholder; filled by 4c) ----
+    // ---- Status bar (active tab: user@host via jumps + forward summary) ----
     const status = document.createElement("footer");
     status.className = "status-band";
-    const statusText = document.createElement("span");
-    statusText.textContent = "Ready";
-    status.appendChild(statusText);
     root.appendChild(status);
+    renderStatusBar(status);
 
     // ---- Dev hook (remove in 4d) ----
     if (window.__dsmDev) {

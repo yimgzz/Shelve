@@ -110,6 +110,16 @@ body {
     overflow: hidden;
 }
 
+/* Port-forward summary (Phase 4c status bar). */
+.status-band .fwd {
+    color: var(--text-dim);
+}
+
+.status-band .fwd.failed {
+    color: var(--error);
+    opacity: 0.85;
+}
+
 button,
 input {
     font: inherit;

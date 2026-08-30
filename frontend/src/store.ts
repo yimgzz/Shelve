@@ -84,6 +84,16 @@ export interface Tab {
     session: SessionDTO;
     state: TabState;
     errorMessage?: string;
+    /** Present only after the remote shell reported an exit code. */
+    exitStatus?: number;
+}
+
+/** Port-forward lifecycle view cached per tab (Phase 4c, ssh:forward). */
+export interface ForwardDTO {
+    spec: string;
+    state: "listening" | "closed" | "failed";
+    localAddr?: string;
+    error?: string;
 }
 
 export interface StoreState {
@@ -101,6 +111,12 @@ export interface StoreState {
      * Never persisted.
      */
     pendingSessions: Record<string, SessionDTO>;
+    /**
+     * tabID → port-forward lifecycle cache (ssh:forward events, Phase 4c),
+     * used by the status bar. One entry per unique spec (latest state wins).
+     * Never persisted.
+     */
+    forwards: Record<string, ForwardDTO[]>;
 }
 
 export const DEFAULT_LEFT_WIDTH = 320;
@@ -122,6 +138,7 @@ export const initialState: StoreState = {
     activeTabID: null,
     leftPanelWidth: DEFAULT_LEFT_WIDTH,
     pendingSessions: {},
+    forwards: {},
 };
 
 type Listener = (state: StoreState) => void;
@@ -230,7 +247,28 @@ class Store {
             const neighbour = remaining[idx] ?? remaining[idx - 1] ?? null;
             nextActive = neighbour ? neighbour.id : null;
         }
-        this.set({ tabs: remaining, activeTabID: nextActive });
+        const forwards = { ...this.state.forwards };
+        delete forwards[tabID];
+        this.set({ tabs: remaining, activeTabID: nextActive, forwards });
+    }
+
+    /** Cache an ssh:forward lifecycle event for a tab (latest state per spec). */
+    setForward(tabID: string, fwd: ForwardDTO): void {
+        const current = this.state.forwards[tabID] || [];
+        const withoutSpec = current.filter((f) => f.spec !== fwd.spec);
+        this.set({
+            forwards: { ...this.state.forwards, [tabID]: [...withoutSpec, fwd] },
+        });
+    }
+
+    /** Mark a tab closed with an optional remote exit code (terminal:exit). */
+    setTabExited(tabID: string, exitStatus?: number): void {
+        const { tabs } = this.state;
+        this.set({
+            tabs: tabs.map((t) =>
+                t.id === tabID ? { ...t, state: "closed", exitStatus } : t,
+            ),
+        });
     }
 
     /** Look up the session snapshot for a real tabID (race safety). */

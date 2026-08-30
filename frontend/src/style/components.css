@@ -574,39 +574,86 @@
     color: var(--error);
 }
 
-/* ---------- Terminal pane (4b placeholder) ---------- */
+/* ---------- Terminal panes (Phase 4c) ---------- */
 #terminal-pane {
     height: 100%;
     display: flex;
-    min-height: 0;
+    min-width: 0;
+    position: relative;
 }
 
-.terminal-placeholder {
-    margin: auto;
+.term-pane {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    display: none; /* shown inline as "flex" when the tab is active */
+    flex-direction: column;
+    background: var(--terminal-bg);
+}
+
+.term-xterm {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 8px;
+}
+
+.term-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--terminal-bg) 55%, transparent);
+    z-index: 5;
+}
+
+.term-overlay-card {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 12px;
-    padding: 24px;
-    color: var(--text-dim);
+    min-width: 260px;
+    max-width: 420px;
+    padding: 20px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgb(0 0 0 / 30%);
     text-align: center;
-}
-
-.terminal-placeholder .tp-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 15px;
     color: var(--text);
 }
 
-.terminal-placeholder .tp-state {
-    font-size: 13px;
+.term-overlay-card .to-title {
+    font-size: 15px;
+    font-weight: 600;
 }
 
-.terminal-placeholder .tp-state.error {
-    color: var(--error);
-    max-width: 420px;
+.term-overlay-card .to-msg {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.term-overlay-card .to-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.spinner {
+    width: 26px;
+    height: 26px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* ---------- Session editor ---------- */

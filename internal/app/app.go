@@ -77,6 +77,12 @@ func New() (*App, error) {
 	sftpMgr.Attach(engine)
 	engine.OnTabClosed(sftpMgr.HandleTabClosed)
 
+	// Stale sweep on start: a previous crash could have left editor temps in
+	// tmp/ (master plan §8.8). Single-instance app (A7) → safe to delete all.
+	if err := sftpMgr.Cleanup(); err != nil {
+		log.Printf("app: sftp tmp sweep on start: %v", err)
+	}
+
 	return &App{
 		vault:           v,
 		store:           st,
@@ -84,10 +90,10 @@ func New() (*App, error) {
 		sftpMgr:         sftpMgr,
 		emitter:         emit,
 		appService:      wailsvc.NewAppService(Version),
-		vaultService:    wailsvc.NewVaultService(v, st, engine, emit),
+		vaultService:    wailsvc.NewVaultService(v, st, engine, sftpMgr, emit),
 		sessionService:  wailsvc.NewSessionService(st, v, engine, emit),
 		terminalService: wailsvc.NewTerminalService(st, v, engine),
-		sftpService:     wailsvc.NewSftpService(v, sftpMgr, config.File(config.TmpDirName)),
+		sftpService:     wailsvc.NewSftpService(v, sftpMgr),
 	}, nil
 }
 
@@ -129,8 +135,12 @@ func (a *App) Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), exitShutdownTimeout)
 	a.engine.Shutdown(ctx)
 	cancel()
-	// Release any SFTP clients the per-tab teardown hook missed (idempotent).
+	// Release any SFTP clients the per-tab teardown hook missed (idempotent),
+	// then kill live editor process groups and sweep tmp/ (master plan §8.8).
 	a.sftpMgr.CloseAll()
+	if err := a.sftpMgr.Cleanup(); err != nil {
+		log.Printf("app: sftp cleanup on shutdown: %v", err)
+	}
 	if a.vault.IsUnlocked() {
 		if err := a.store.Flush(); err != nil {
 			log.Printf("app: flush on exit failed: %v", err)

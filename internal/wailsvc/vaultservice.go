@@ -2,9 +2,11 @@ package wailsvc
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"dummy-ssh-manager/internal/config"
+	"dummy-ssh-manager/internal/sftp"
 	"dummy-ssh-manager/internal/sshengine"
 	"dummy-ssh-manager/internal/store"
 	"dummy-ssh-manager/internal/vault"
@@ -27,16 +29,20 @@ type VaultService struct {
 	vault  *vault.Vault
 	store  *store.Store
 	engine *sshengine.Manager
+	sftp   *sftp.Manager
 	path   string
 	emit   Emitter
 }
 
-// NewVaultService wires the vault lifecycle service.
-func NewVaultService(v *vault.Vault, st *store.Store, engine *sshengine.Manager, emit Emitter) *VaultService {
+// NewVaultService wires the vault lifecycle service. sftp is the shared SFTP
+// manager, cleaned up (editors killed, tmp/ swept) on Lock — the same place
+// the engine is shut down (master plan phase 5b task 2).
+func NewVaultService(v *vault.Vault, st *store.Store, engine *sshengine.Manager, sftp *sftp.Manager, emit Emitter) *VaultService {
 	return &VaultService{
 		vault:  v,
 		store:  st,
 		engine: engine,
+		sftp:   sftp,
 		path:   config.File(config.VaultFileName),
 		emit:   emit,
 	}
@@ -94,6 +100,10 @@ func (s *VaultService) Lock() error {
 	ctx, cancel := context.WithTimeout(context.Background(), lockShutdownTimeout)
 	s.engine.Shutdown(ctx)
 	cancel()
+	// Kill live editor process groups and sweep tmp/ (master plan §8.8).
+	if err := s.sftp.Cleanup(); err != nil {
+		log.Printf("vault: sftp cleanup on lock: %v", err)
+	}
 	if err := s.store.Flush(); err != nil {
 		return err
 	}

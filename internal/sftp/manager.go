@@ -77,7 +77,8 @@ var textExtensions = map[string]bool{
 // Manager lazily creates one sftp.Client per active tab (cached under the
 // tabID), remembers each tab's remote home directory (for ~ resolution), and
 // closes its clients when the tab dies or on CloseAll. All fields are
-// guarded by mu.
+// guarded by mu. Phase 5b adds the per-tab transfer queue (transferChans),
+// the remote-text-editor state machine (edits) and the temp-file sweep.
 type Manager struct {
 	mu      sync.Mutex
 	clients map[string]*sftp.Client // tabID → cached client
@@ -85,6 +86,15 @@ type Manager struct {
 	tmpDir  string                  // config tmp dir for Phase 5b edit temps
 	emit    Emitter
 	prov    TabProvider
+
+	transfersMu   sync.Mutex                   // guards transferChans
+	transferChans map[string]chan *transferJob // tabID → FIFO worker queue
+
+	editsMu sync.Mutex            // guards edits
+	edits   map[string]*editState // tabID → live text-editor state
+
+	editPoll      time.Duration // watcher poll interval (1 s default)
+	editStability time.Duration // mtime-stable window before save (3 s default)
 }
 
 // New creates an empty Manager. tmpDir is the config-directory tmp/ path
@@ -92,10 +102,14 @@ type Manager struct {
 // called before any tab operation.
 func New(tmpDir string, emit Emitter) *Manager {
 	return &Manager{
-		clients: map[string]*sftp.Client{},
-		homes:   map[string]string{},
-		tmpDir:  tmpDir,
-		emit:    emit,
+		clients:       map[string]*sftp.Client{},
+		homes:         map[string]string{},
+		tmpDir:        tmpDir,
+		emit:          emit,
+		transferChans: map[string]chan *transferJob{},
+		edits:         map[string]*editState{},
+		editPoll:      time.Second,
+		editStability: 3 * time.Second,
 	}
 }
 

@@ -2,7 +2,6 @@ package wailsvc
 
 import (
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"dummy-ssh-manager/internal/sftp"
@@ -10,21 +9,19 @@ import (
 	"dummy-ssh-manager/internal/vault"
 )
 
-// TestSftpServiceGatingAndStubs verifies every SftpService method enforces
-// the vault-unlock gate (vault.ErrLocked when locked), the browse methods
-// reach the manager (ErrNoProvider when unattached), and the Phase 5b stubs
-// return ErrSftpNotImplemented once unlocked. No live SSH connection needed.
-func TestSftpServiceGatingAndStubs(t *testing.T) {
+// TestSftpServiceGating verifies every SftpService method enforces the
+// vault-unlock gate (vault.ErrLocked when locked) and that, once unlocked, the
+// browse/transfer methods reach the manager while the dialog-free fallback and
+// idempotent cancel behave as documented. No live SSH connection needed.
+func TestSftpServiceGating(t *testing.T) {
 	isolatedXDG(t)
 	v := vault.New()
 	st := store.New(func(p []byte) error { return v.Save(p) })
 	emit := &recEmitter{}
 	eng := newTestEngine(t, emit)
-	vs := NewVaultService(v, st, eng, emit)
-
-	tmpDir := filepath.Join(t.TempDir(), "tmp")
-	mgr := sftp.New(tmpDir, emit) // no provider attached
-	svc := NewSftpService(v, mgr, tmpDir)
+	mgr := sftp.New(t.TempDir(), emit) // no provider attached
+	vs := NewVaultService(v, st, eng, mgr, emit)
+	svc := NewSftpService(v, mgr)
 
 	// While locked every method is gated.
 	if svc.IsActive("t") {
@@ -52,14 +49,14 @@ func TestSftpServiceGatingAndStubs(t *testing.T) {
 	if _, err := svc.PickLocalFiles("t", false); !errors.Is(err, vault.ErrLocked) {
 		t.Fatalf("PickLocalFiles while locked = %v, want ErrLocked", err)
 	}
-	stubErrs := []error{
+	opErrs := []error{
 		svc.Upload("t", nil, "/"),
 		svc.EditRemoteText("t", "/x"),
 		svc.CancelEdit("t"),
 	}
-	for i, err := range stubErrs {
+	for i, err := range opErrs {
 		if !errors.Is(err, vault.ErrLocked) {
-			t.Fatalf("stub[%d] while locked = %v, want ErrLocked", i, err)
+			t.Fatalf("op[%d] while locked = %v, want ErrLocked", i, err)
 		}
 	}
 
@@ -73,23 +70,26 @@ func TestSftpServiceGatingAndStubs(t *testing.T) {
 		t.Fatalf("List unlocked (no provider) = %v, want ErrNoProvider", err)
 	}
 
-	// Stubs now return the typed not-implemented error.
-	if _, err := svc.PickLocalFiles("t", true); !errors.Is(err, ErrSftpNotImplemented) {
-		t.Fatalf("PickLocalFiles = %v, want ErrSftpNotImplemented", err)
+	// Transfers need a provider → ErrNoProvider (no connection to stream).
+	if err := svc.Upload("t", nil, "/"); !errors.Is(err, sftp.ErrNoProvider) {
+		t.Fatalf("Upload = %v, want ErrNoProvider", err)
 	}
-	if err := svc.Upload("t", nil, "/"); !errors.Is(err, ErrSftpNotImplemented) {
-		t.Fatalf("Upload = %v, want ErrSftpNotImplemented", err)
+	if _, err := svc.Download("t", "/x"); !errors.Is(err, sftp.ErrNoProvider) {
+		t.Fatalf("Download = %v, want ErrNoProvider", err)
 	}
-	if _, err := svc.Download("t", "/x"); !errors.Is(err, ErrSftpNotImplemented) {
-		t.Fatalf("Download = %v, want ErrSftpNotImplemented", err)
+	if _, err := svc.DownloadThenSave("t", "/x"); !errors.Is(err, sftp.ErrNoProvider) {
+		t.Fatalf("DownloadThenSave = %v, want ErrNoProvider", err)
 	}
-	if _, err := svc.DownloadThenSave("t", "/x"); !errors.Is(err, ErrSftpNotImplemented) {
-		t.Fatalf("DownloadThenSave = %v, want ErrSftpNotImplemented", err)
+	if err := svc.EditRemoteText("t", "/x"); !errors.Is(err, sftp.ErrNoProvider) {
+		t.Fatalf("EditRemoteText = %v, want ErrNoProvider", err)
 	}
-	if err := svc.EditRemoteText("t", "/x"); !errors.Is(err, ErrSftpNotImplemented) {
-		t.Fatalf("EditRemoteText = %v, want ErrSftpNotImplemented", err)
+
+	// Dialog-free fallback: the picker is unsupported in this build.
+	if _, err := svc.PickLocalFiles("t", true); !errors.Is(err, sftp.ErrSftpDialogUnsupported) {
+		t.Fatalf("PickLocalFiles = %v, want ErrSftpDialogUnsupported", err)
 	}
-	if err := svc.CancelEdit("t"); !errors.Is(err, ErrSftpNotImplemented) {
-		t.Fatalf("CancelEdit = %v, want ErrSftpNotImplemented", err)
+	// CancelEdit on a tab with nothing editing is an idempotent no-op.
+	if err := svc.CancelEdit("t"); err != nil {
+		t.Fatalf("CancelEdit = %v, want nil", err)
 	}
 }

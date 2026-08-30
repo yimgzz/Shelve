@@ -11,6 +11,7 @@ import (
 
 	"dummy-ssh-manager/internal/config"
 	"dummy-ssh-manager/internal/model"
+	"dummy-ssh-manager/internal/sftp"
 	"dummy-ssh-manager/internal/sshengine"
 	"dummy-ssh-manager/internal/sshx/knownhosts"
 	"dummy-ssh-manager/internal/store"
@@ -73,7 +74,8 @@ func TestVaultServiceFullLifecycle(t *testing.T) {
 	v := vault.New()
 	st := store.New(func(p []byte) error { return v.Save(p) })
 	eng := newTestEngine(t, emit)
-	vs := NewVaultService(v, st, eng, emit)
+	sft := sftp.New(t.TempDir(), emit)
+	vs := NewVaultService(v, st, eng, sft, emit)
 	ss := NewSessionService(st, v, eng, emit)
 
 	// State machine: no file → create.
@@ -160,7 +162,7 @@ func TestVaultServiceFullLifecycle(t *testing.T) {
 	}
 	st2 := store.New(func(p []byte) error { return v2.Save(p) })
 	eng2 := newTestEngine(t, emit)
-	vs2 := NewVaultService(v2, st2, eng2, emit)
+	vs2 := NewVaultService(v2, st2, eng2, sftp.New(t.TempDir(), emit), emit)
 	ss2 := NewSessionService(st2, v2, eng2, emit)
 
 	if err := vs2.Unlock("wrong-password"); !errors.Is(err, vault.ErrWrongPassword) {

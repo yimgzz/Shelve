@@ -6,9 +6,13 @@
 package app
 
 import (
+	"context"
 	"log"
+	"time"
 
 	"dummy-ssh-manager/internal/config"
+	"dummy-ssh-manager/internal/sshengine"
+	"dummy-ssh-manager/internal/sshx/knownhosts"
 	"dummy-ssh-manager/internal/store"
 	"dummy-ssh-manager/internal/vault"
 	"dummy-ssh-manager/internal/wailsvc"
@@ -18,15 +22,21 @@ import (
 // and build/linux/nfpm/nfpm.yaml.
 const Version = "0.1.0"
 
+// exitShutdownTimeout bounds the engine teardown inside Shutdown on
+// app exit.
+const exitShutdownTimeout = 3 * time.Second
+
 // App is the composition root shared by all Wails services.
 type App struct {
-	vault *vault.Vault
-	store *store.Store
+	vault  *vault.Vault
+	store  *store.Store
+	engine *sshengine.Manager
 
-	appService     *wailsvc.AppService
-	vaultService   *wailsvc.VaultService
-	sessionService *wailsvc.SessionService
-	emitter        *wailsvc.LateEmitter
+	appService      *wailsvc.AppService
+	vaultService    *wailsvc.VaultService
+	sessionService  *wailsvc.SessionService
+	terminalService *wailsvc.TerminalService
+	emitter         *wailsvc.LateEmitter
 }
 
 // New constructs the app:
@@ -51,13 +61,21 @@ func New() (*App, error) {
 	})
 	emit := &wailsvc.LateEmitter{}
 
+	kh, err := knownhosts.New(config.File(config.KnownHostsFileName))
+	if err != nil {
+		return nil, err
+	}
+	engine := sshengine.New(emit, kh)
+
 	return &App{
-		vault:          v,
-		store:          st,
-		emitter:        emit,
-		appService:     wailsvc.NewAppService(Version),
-		vaultService:   wailsvc.NewVaultService(v, st, emit),
-		sessionService: wailsvc.NewSessionService(st, v, emit),
+		vault:           v,
+		store:           st,
+		engine:          engine,
+		emitter:         emit,
+		appService:      wailsvc.NewAppService(Version),
+		vaultService:    wailsvc.NewVaultService(v, st, engine, emit),
+		sessionService:  wailsvc.NewSessionService(st, v, engine, emit),
+		terminalService: wailsvc.NewTerminalService(st, v, engine),
 	}, nil
 }
 
@@ -76,15 +94,24 @@ func (a *App) SessionService() *wailsvc.SessionService {
 	return a.sessionService
 }
 
+// TerminalService returns the Wails-facing terminal-tab service.
+func (a *App) TerminalService() *wailsvc.TerminalService {
+	return a.terminalService
+}
+
 // SetEmitter wires the Wails-backed event emitter. Called from main.go
 // after the runtime is constructed (before Run).
 func (a *App) SetEmitter(e wailsvc.Emitter) {
 	a.emitter.Set(e)
 }
 
-// Shutdown flushes deferred state on application exit
-// (master plan §4: flush on exit).
+// Shutdown disconnects every live session, then flushes deferred state
+// on application exit (master plan §5 order: engine before the store
+// flush; §4: flush on exit).
 func (a *App) Shutdown() {
+	ctx, cancel := context.WithTimeout(context.Background(), exitShutdownTimeout)
+	a.engine.Shutdown(ctx)
+	cancel()
 	if a.vault.IsUnlocked() {
 		if err := a.store.Flush(); err != nil {
 			log.Printf("app: flush on exit failed: %v", err)

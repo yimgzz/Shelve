@@ -3,26 +3,24 @@ package wailsvc
 import (
 	"errors"
 
+	"dummy-ssh-manager/internal/sshengine"
 	"dummy-ssh-manager/internal/sshx"
 	"dummy-ssh-manager/internal/store"
 	"dummy-ssh-manager/internal/vault"
 )
 
-// ErrEngineNotWired is the stable placeholder returned by
-// TestConnection until the Phase 3 SSH engine lands.
-var ErrEngineNotWired = errors.New("ssh engine not wired yet (Phase 3)")
-
 // SessionService is the tree/session CRUD surface for the frontend
 // (master plan §5). Every method requires an unlocked vault.
 type SessionService struct {
-	store *store.Store
-	vault *vault.Vault
-	emit  Emitter
+	store  *store.Store
+	vault  *vault.Vault
+	engine *sshengine.Manager
+	emit   Emitter
 }
 
 // NewSessionService wires the session-tree service.
-func NewSessionService(st *store.Store, v *vault.Vault, emit Emitter) *SessionService {
-	return &SessionService{store: st, vault: v, emit: emit}
+func NewSessionService(st *store.Store, v *vault.Vault, engine *sshengine.Manager, emit Emitter) *SessionService {
+	return &SessionService{store: st, vault: v, engine: engine, emit: emit}
 }
 
 func (s *SessionService) requireUnlocked() error {
@@ -109,9 +107,18 @@ func (s *SessionService) ValidateExtraArgs(extraArgs string) error {
 	return sshx.ValidateExtraArgs(extraArgs)
 }
 
-// TestConnection is a placeholder until the Phase 3 engine: always
-// returns ErrEngineNotWired (stable message for the frontend).
-func (s *SessionService) TestConnection(sessionID string) error {
-	_ = sessionID
-	return ErrEngineNotWired
+// TestConnection dials a session draft's full hop chain without opening
+// a terminal or forwards (the editor's [Test connection] button). It
+// enforces the vault-unlock gate and the draft-validation checks first,
+// then runs the real engine dial; a successful handshake returns nil and
+// any failure is attributed to the failing hop. No tab record is created.
+func (s *SessionService) TestConnection(in SessionInput) error {
+	if err := s.requireUnlocked(); err != nil {
+		return err
+	}
+	sess := in.toModel()
+	if err := sess.Validate(); err != nil {
+		return err
+	}
+	return s.engine.TestConnection(&sess)
 }

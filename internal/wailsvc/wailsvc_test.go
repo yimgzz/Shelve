@@ -11,6 +11,8 @@ import (
 
 	"dummy-ssh-manager/internal/config"
 	"dummy-ssh-manager/internal/model"
+	"dummy-ssh-manager/internal/sshengine"
+	"dummy-ssh-manager/internal/sshx/knownhosts"
 	"dummy-ssh-manager/internal/store"
 	"dummy-ssh-manager/internal/vault"
 )
@@ -53,14 +55,26 @@ func isolatedXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 }
 
+// newTestEngine builds a throwaway engine over an isolated known_hosts
+// file.
+func newTestEngine(t *testing.T, emit Emitter) *sshengine.Manager {
+	t.Helper()
+	kh, err := knownhosts.New(filepath.Join(t.TempDir(), "known_hosts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sshengine.New(emit, kh)
+}
+
 func TestVaultServiceFullLifecycle(t *testing.T) {
 	isolatedXDG(t)
 	emit := &recEmitter{}
 
 	v := vault.New()
 	st := store.New(func(p []byte) error { return v.Save(p) })
-	vs := NewVaultService(v, st, emit)
-	ss := NewSessionService(st, v, emit)
+	eng := newTestEngine(t, emit)
+	vs := NewVaultService(v, st, eng, emit)
+	ss := NewSessionService(st, v, eng, emit)
 
 	// State machine: no file → create.
 	dto, err := vs.Status()
@@ -145,8 +159,9 @@ func TestVaultServiceFullLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	st2 := store.New(func(p []byte) error { return v2.Save(p) })
-	vs2 := NewVaultService(v2, st2, emit)
-	ss2 := NewSessionService(st2, v2, emit)
+	eng2 := newTestEngine(t, emit)
+	vs2 := NewVaultService(v2, st2, eng2, emit)
+	ss2 := NewSessionService(st2, v2, eng2, emit)
 
 	if err := vs2.Unlock("wrong-password"); !errors.Is(err, vault.ErrWrongPassword) {
 		t.Fatalf("wrong pw: %v", err)
@@ -180,7 +195,7 @@ func TestSessionServiceCRUDThroughService(t *testing.T) {
 	if err := v.Create(config.File(config.VaultFileName), "correct-pw-abc", []byte(`{"root":[],"folders":[],"sessions":[]}`)); err != nil {
 		t.Fatal(err)
 	}
-	ss := NewSessionService(st, v, &recEmitter{})
+	ss := NewSessionService(st, v, newTestEngine(t, &recEmitter{}), &recEmitter{})
 
 	f1, err := ss.CreateFolder("", "F1")
 	if err != nil {
@@ -231,14 +246,46 @@ func TestSessionServiceCRUDThroughService(t *testing.T) {
 	}
 }
 
-func TestSessionServicePlaceholders(t *testing.T) {
-	ss := NewSessionService(store.New(nil), vault.New(), &recEmitter{})
-	if got := ss.TestConnection("any-id"); !errors.Is(got, ErrEngineNotWired) {
-		t.Fatalf("TestConnection = %v, want ErrEngineNotWired", got)
+// TestConnection is bound to the engine (phase 3d): a locked vault
+// refuses attempts before any network traffic.
+func TestSessionServiceTestConnectionGating(t *testing.T) {
+	emit := &recEmitter{}
+	ss := NewSessionService(store.New(nil), vault.New(), newTestEngine(t, emit), emit)
+	err := ss.TestConnection(SessionInput{
+		Name: "x", Host: "x.example.com", Port: 22, User: "x",
+		AuthType: model.AuthPassword, Password: "pp",
+	})
+	if !errors.Is(err, vault.ErrLocked) {
+		t.Fatalf("TestConnection while locked: %v, want ErrLocked", err)
 	}
-	const stable = "ssh engine not wired yet (Phase 3)"
-	if ss.TestConnection("a").Error() != stable || ss.TestConnection("b").Error() != stable {
-		t.Fatal("TestConnection message not stable")
+	if n := emit.count(); n != 0 {
+		t.Fatalf("events emitted for a locked-attempt: %d, want 0", n)
+	}
+}
+
+// TestSessionServiceTestConnectionDialChain proves the phase 3d wiring:
+// the placeholder is gone and TestConnection runs the real engine dial,
+// surfacing a hop-attributed failure.
+func TestSessionServiceTestConnectionDialChain(t *testing.T) {
+	isolatedXDG(t)
+	v := vault.New()
+	st := store.New(func(p []byte) error { return v.Save(p) })
+	emit := &recEmitter{}
+	eng := newTestEngine(t, emit)
+	ss := NewSessionService(st, v, eng, emit)
+	if err := v.Create(config.File(config.VaultFileName), "master-pw-01",
+		[]byte(`{"root":[],"folders":[],"sessions":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	err := ss.TestConnection(SessionInput{
+		Name: "x", Host: "127.0.0.1", Port: 1, User: "u",
+		AuthType: model.AuthPassword, Password: "pp",
+	})
+	if err == nil {
+		t.Fatal("TestConnection to a refused port: want error")
+	}
+	if !strings.Contains(err.Error(), "target") {
+		t.Fatalf("TestConnection error = %q, want target attribution", err)
 	}
 }
 
@@ -246,7 +293,7 @@ func TestSessionServicePlaceholders(t *testing.T) {
 // session editor binds to ValidateExtraArgs for inline validation
 // (Phase 3a, master plan §6).
 func TestSessionServiceValidateExtraArgs(t *testing.T) {
-	ss := NewSessionService(store.New(nil), vault.New(), &recEmitter{})
+	ss := NewSessionService(store.New(nil), vault.New(), newTestEngine(t, &recEmitter{}), &recEmitter{})
 
 	valid := []string{
 		"",

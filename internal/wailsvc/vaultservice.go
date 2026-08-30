@@ -1,10 +1,18 @@
 package wailsvc
 
 import (
+	"context"
+	"time"
+
 	"dummy-ssh-manager/internal/config"
+	"dummy-ssh-manager/internal/sshengine"
 	"dummy-ssh-manager/internal/store"
 	"dummy-ssh-manager/internal/vault"
 )
+
+// lockShutdownTimeout bounds the engine teardown inside Lock
+// (master plan §5: disconnect all before zeroizing the key).
+const lockShutdownTimeout = 3 * time.Second
 
 // VaultStatusDTO reports the vault state machine (master plan §4).
 type VaultStatusDTO struct {
@@ -12,23 +20,25 @@ type VaultStatusDTO struct {
 	Unlocked bool   `json:"unlocked"`
 }
 
-// VaultService exposes the master-password lifecycle to the frontend
-// (master plan §5). It gates no other service: SessionService checks
-// the vault state itself.
+// VaultService exposes the master-password lifecycle and the
+// connection prompt flows to the frontend (master plan §5). It gates
+// no other service: SessionService checks the vault state itself.
 type VaultService struct {
-	vault *vault.Vault
-	store *store.Store
-	path  string
-	emit  Emitter
+	vault  *vault.Vault
+	store  *store.Store
+	engine *sshengine.Manager
+	path   string
+	emit   Emitter
 }
 
 // NewVaultService wires the vault lifecycle service.
-func NewVaultService(v *vault.Vault, st *store.Store, emit Emitter) *VaultService {
+func NewVaultService(v *vault.Vault, st *store.Store, engine *sshengine.Manager, emit Emitter) *VaultService {
 	return &VaultService{
-		vault: v,
-		store: st,
-		path:  config.File(config.VaultFileName),
-		emit:  emit,
+		vault:  v,
+		store:  st,
+		engine: engine,
+		path:   config.File(config.VaultFileName),
+		emit:   emit,
 	}
 }
 
@@ -73,18 +83,52 @@ func (s *VaultService) Unlock(password string) error {
 	return nil
 }
 
-// Lock flushes the tree, zeroizes the key and emits the state change.
-// It is a safe no-op when the vault is already locked.
+// Lock disconnects every live session, flushes the tree, zeroizes the
+// key and emits the state change (master plan §5: disconnect all
+// before zeroizing). It is a safe no-op when the vault is already
+// locked.
 func (s *VaultService) Lock() error {
 	if !s.vault.IsUnlocked() {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), lockShutdownTimeout)
+	s.engine.Shutdown(ctx)
+	cancel()
 	if err := s.store.Flush(); err != nil {
 		return err
 	}
 	s.vault.Lock()
 	s.emitVaultState(false)
 	return nil
+}
+
+// ApproveHostKey accepts the pending host-key prompt for connID (the
+// vault:hostkey-prompt "Accept and connect" button). A locked vault has
+// no live prompts; a stale connID → ErrNoPendingPrompt.
+func (s *VaultService) ApproveHostKey(connID string) error {
+	if !s.vault.IsUnlocked() {
+		return vault.ErrLocked
+	}
+	return s.engine.ApproveHostKey(connID)
+}
+
+// RejectHostKey rejects the pending host-key prompt for connID.
+func (s *VaultService) RejectHostKey(connID string) error {
+	if !s.vault.IsUnlocked() {
+		return vault.ErrLocked
+	}
+	return s.engine.RejectHostKey(connID)
+}
+
+// SubmitKeyPassphrase submits the entered passphrase for the pending
+// key-passphrase prompt on connID. The password is handed to the dial,
+// cached in the engine's process-memory cache and never logged (master
+// plan §8.3).
+func (s *VaultService) SubmitKeyPassphrase(connID, passphrase string) error {
+	if !s.vault.IsUnlocked() {
+		return vault.ErrLocked
+	}
+	return s.engine.SubmitKeyPassphrase(connID, passphrase)
 }
 
 func (s *VaultService) emitVaultState(unlocked bool) {

@@ -44,6 +44,44 @@ export function connectSession(sessionID: string): void {
     void store.connectSession(sessionID);
 }
 
+/** Find a node by id across the whole tree (Phase 4d shortcuts helper). */
+export function findTreeNode(nodes: NodeDTO[], id: string): NodeDTO | null {
+    for (const n of nodes) {
+        if (n.id === id) {
+            return n;
+        }
+        const hit = findTreeNode(n.children, id);
+        if (hit) {
+            return hit;
+        }
+    }
+    return null;
+}
+
+/** F2 (shortcuts router): start inline rename for the selected node. */
+export function renameSelectedNode(): void {
+    const { tree, selectedID } = store.getState();
+    if (!selectedID) {
+        return;
+    }
+    const n = findTreeNode(tree, selectedID);
+    if (n) {
+        startRename(n.id, n.kind, n.name);
+    }
+}
+
+/** Delete (shortcuts router): confirm (A8) then delete the selected node. */
+export function deleteSelectedNode(): void {
+    const { tree, selectedID } = store.getState();
+    if (!selectedID) {
+        return;
+    }
+    const n = findTreeNode(tree, selectedID);
+    if (n) {
+        void deleteNode(n);
+    }
+}
+
 // ------------------------------------------------------------ rendering ---
 
 /** Render the tree/search body into host (re-renders on store changes). */

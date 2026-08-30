@@ -777,3 +777,92 @@
 .editor-status.error {
     color: var(--error);
 }
+
+/* ---------- Gear menu (Phase 4d) ---------- */
+.btn.icon-btn {
+    padding: 3px 8px;
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* ---------- Global hint text (Settings / About) ---------- */
+.hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.4;
+}
+
+/* ---------- Settings dialog (Phase 4d) ---------- */
+.settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settings-group > h3 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.settings-field .settings-label {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.settings-field .input {
+    font-size: 13px;
+}
+
+.settings-check-wrap {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-check-wrap .settings-label {
+    order: 2;
+    flex: 1;
+    color: var(--text);
+}
+
+.settings-check-wrap .hint {
+    order: 3;
+    flex-basis: 100%;
+}
+
+.settings-check {
+    order: 1;
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+}
+
+/* ---------- About dialog (Phase 4d) ---------- */
+.about-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.about-body .about-name {
+    font-size: 15px;
+    font-weight: 600;
+}

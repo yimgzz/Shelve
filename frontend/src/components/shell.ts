@@ -1,16 +1,15 @@
 // components/shell.ts — the app shell (master plan §6 Layout).
 // Left panel (search header + toolbar + tree/search body), splitter
 // (drag, clamp 240–480, persist window.leftWidth), right pane (tab strip
-// + #terminal-pane placeholder) and the status-band row. A temporary dev
-// hook (window.__dsmDev) exposes a Lock button and QA helpers; removed in 4d.
+// + terminal panes) and the status-band row. The toolbar hosts the gear
+// menu (Phase 4d) that opens Settings / Lock vault / About.
 
-import { AppService, VaultService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { AppService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
 import { store, DEFAULT_LEFT_WIDTH, type Settings } from "../store";
-import { openContextMenu, type MenuItem } from "./context-menu";
-import { showHostKeyPrompt, showKeyPrompt } from "./prompts";
 import { toast } from "./toasts";
 import { renderSearch } from "./search";
 import { renderTreeBody, openNewSession, openNewFolderAt } from "./tree";
+import { openGearMenu } from "./gear";
 import { renderTabStrip } from "./tabs";
 import { renderTerminalView } from "./terminal-view";
 import { renderStatusBar } from "./statusbar";
@@ -21,7 +20,10 @@ const SAVE_DEBOUNCE_MS = 300;
 
 declare global {
     interface Window {
-        /** Dev-only flag; when truthy the shell shows the dev hook. */
+        /**
+         * Dev-only flag kept for dev tooling (search timing in tree.ts,
+         * dev notes). The 4a/4b QA hook UI was removed in 4d.
+         */
         __dsmDev?: boolean;
     }
 }
@@ -67,7 +69,23 @@ export function renderShell(root: HTMLElement): void {
     btnNewFolder.className = "btn small";
     btnNewFolder.textContent = "+ Folder";
     btnNewFolder.addEventListener("click", () => openNewFolderAt(""));
-    toolbar.append(btnNewSession, btnNewFolder);
+
+    // Gear menu (Phase 4d): [Settings…] / [Lock vault…] / [About], anchored
+    // to the button at the right edge of the toolbar (master plan §6).
+    const spacer = document.createElement("div");
+    spacer.className = "spacer";
+    const gear = document.createElement("button");
+    gear.type = "button";
+    gear.className = "btn small icon-btn";
+    gear.textContent = "⚙";
+    gear.title = "Menu";
+    gear.setAttribute("aria-label", "Menu");
+    gear.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        openGearMenu(r.right - 8, r.bottom + 4);
+    });
+    toolbar.append(btnNewSession, btnNewFolder, spacer, gear);
     left.appendChild(toolbar);
 
     // Tree / search body (scrollable).
@@ -144,70 +162,4 @@ export function renderShell(root: HTMLElement): void {
     status.className = "status-band";
     root.appendChild(status);
     renderStatusBar(status);
-
-    // ---- Dev hook (remove in 4d) ----
-    if (window.__dsmDev) {
-        const dev = document.createElement("div");
-        dev.className = "dev-banner";
-        dev.textContent = "DEV HOOK";
-        dev.title = "Phase 4a/4b temporary dev tooling — removed in 4d";
-        root.appendChild(dev);
-
-        const devBar = document.createElement("div");
-        devBar.className = "toolbar";
-
-        const lockBtn = document.createElement("button");
-        lockBtn.type = "button";
-        lockBtn.className = "btn small";
-        lockBtn.textContent = "🔒 Lock";
-        lockBtn.addEventListener("click", () => {
-            void VaultService.Lock().catch((err) => toast("error", String(err)));
-        });
-
-        const toastBtn = document.createElement("button");
-        toastBtn.type = "button";
-        toastBtn.className = "btn small";
-        toastBtn.textContent = "Toast info";
-        toastBtn.addEventListener("click", () => toast("info", "Sample info toast"));
-
-        const hostkeyBtn = document.createElement("button");
-        hostkeyBtn.type = "button";
-        hostkeyBtn.className = "btn small";
-        hostkeyBtn.textContent = "Hostkey prompt";
-        hostkeyBtn.addEventListener("click", () =>
-            showHostKeyPrompt({
-                connID: "dev",
-                host: "dev.example.com",
-                port: 22,
-                keyType: "ssh-ed25519",
-                keyB64: "AAAA…",
-                fingerprint: "SHA256:FXL4PxPmC2Re1hE1yGm2iG0+3fZ9bqN4wT0xZy7uRlM",
-            }),
-        );
-
-        const keyBtn = document.createElement("button");
-        keyBtn.type = "button";
-        keyBtn.className = "btn small";
-        keyBtn.textContent = "Key prompt";
-        keyBtn.addEventListener("click", () =>
-            showKeyPrompt({ connID: "dev", keyPath: "/home/user/.ssh/id_ed25519" }),
-        );
-
-        const ctxBtn = document.createElement("button");
-        ctxBtn.type = "button";
-        ctxBtn.className = "btn small";
-        ctxBtn.textContent = "Context menu";
-        ctxBtn.addEventListener("click", (e) => {
-            const items: MenuItem[] = [
-                { label: "New Session", action: () => openNewSession("") },
-                { label: "New Folder", action: () => openNewFolderAt("") },
-                { label: "Danger action", danger: true, action: () => toast("info", "danger action") },
-                { label: "Disabled", disabled: true, action: () => undefined },
-            ];
-            openContextMenu(e.clientX, e.clientY, items);
-        });
-
-        devBar.append(lockBtn, toastBtn, hostkeyBtn, keyBtn, ctxBtn);
-        root.appendChild(devBar);
-    }
 }

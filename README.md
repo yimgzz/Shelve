@@ -56,6 +56,40 @@ If the window fails to open under `make dev`:
    make run     # launch the binary on the host (window on your desktop)
    ```
 
+## Development notes
+
+- **Seed tool** (`cmd/seed`): generates a disposable vault with folders and
+  sessions (e.g. a 300-session fixture for search/performance smoke tests).
+  Build and run it inside the container, pointing it at a scratch config dir;
+  it never touches your real vault unless you tell it to.
+- **In-container window limitation vs `make run`:** `make dev` runs the app
+  *inside* the container. On some desktops (observed: GNOME/XWayland on ALT
+  Linux) the in-container window cannot start due to GTK/DBus session
+  restrictions inside the container plus WebKit sandbox namespace limits. In
+  that case the always-supported workflow is `make build` + `make run` (build
+  in the container, run the binary on the host). The in-container hot-reload
+  loop is then not available — but UI phases are QA'd via the host-run binary.
+- **Settings** (gear menu → Settings): theme, auto-lock minutes, SFTP browser
+  toggle, terminal font/size/scrollback, and the text-editor command are saved
+  to `settings.json`. Theme and terminal options apply live.
+
+## Shortcuts
+
+| Keys | Action |
+|---|---|
+| Ctrl+K / Ctrl+L | Focus search |
+| Ctrl+T | Connect the selected session (or open a new-session draft) |
+| Ctrl+W | Close the active tab |
+| Ctrl+Tab / Ctrl+Shift+Tab | Cycle tabs |
+| Ctrl+1…9 | Activate nth tab |
+| Ctrl+, | Open Settings |
+| F2 / Delete | Rename / delete the selected tree node |
+| Esc | Close the topmost modal / clear search |
+| Ctrl+Shift+E | Toggle SFTP browser (mirrors the Settings checkbox) |
+
+Shortcuts are suppressed while you are typing in a form field (except Esc,
+which the dialogs/search handle themselves).
+
 ## Pinned versions
 
 - Wails v3 CLI: **v3.0.0-beta.15** — `Dockerfile.dev` (`WAILS3_VERSION`)

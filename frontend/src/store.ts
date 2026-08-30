@@ -5,6 +5,14 @@
 // bus and routes every event here via set(). This keeps one source of
 // truth and prevents listener growth across lock/unlock cycles.
 //
+// LISTENER AUDIT (Phase 4d task 6): main.ts subscribes once to every
+// Go→JS event; long-lived modules (ui/shortcuts, ui/autolock, search)
+// install their document/global listeners exactly once at boot; per-mount
+// component listeners (tree, tabs, terminal-view, statusbar, search box)
+// are added on mount and released on unmount via the unsubscribe function
+// `subscribe()` returns. Verify with DevTools that no listener grows after
+// 50 modal cycles / 50 renders.
+//
 // The store also owns the few user actions that mutate backend state
 // and must reconcile async results with the UI (connectSession,
 // closeTab): those bridge the Wails service bindings and the reactive

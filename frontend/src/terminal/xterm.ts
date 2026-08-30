@@ -235,4 +235,21 @@ export const TermPool = {
             this.destroy(id);
         }
     },
+
+    /**
+     * Apply updated terminal settings to every live instance (Settings Save,
+     * Phase 4d). `term.options.*` re-applies live; a fit keeps geometry sane.
+     */
+    applySettings(settings: TerminalSettings): void {
+        for (const e of pool.values()) {
+            e.term.options.fontFamily = settings.fontFamily;
+            e.term.options.fontSize = settings.fontSize;
+            e.term.options.scrollback = settings.scrollback;
+            try {
+                e.fit.fit();
+            } catch {
+                /* zero-sized container; fit again on activation */
+            }
+        }
+    },
 };

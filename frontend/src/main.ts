@@ -21,6 +21,8 @@ import {
 import { toast } from "./components/toasts";
 import { TermPool } from "./terminal/xterm";
 import { b64ToBytes } from "./ui/b64";
+import { initShortcuts } from "./ui/shortcuts";
+import { initAutoLock } from "./ui/autolock";
 
 // Common Wails events (pinned @wailsio/runtime v3 beta). These live under
 // Events.Types.Common in this version (master §5 names them events.Common.*).
@@ -226,11 +228,16 @@ async function whenReady(): Promise<void> {
 async function boot(): Promise<void> {
     await whenReady();
 
-    // Temporary dev hook (removed in 4d): enables the QA Lock button and
-    // prompt/context-menu helpers so Phase 4a can be verified with `make run`.
+    // Dev flag kept for dev tooling (search timing in tree.ts, dev notes);
+    // the 4a/4b QA buttons it toggled were removed in 4d.
     window.__dsmDev = true;
 
     subscribeEvents();
+
+    // Global keyboard shortcuts + opt-in auto-lock (Phase 4d). Both install
+    // their document listeners exactly once at boot (listener-audit rule).
+    initShortcuts();
+    initAutoLock();
 
     try {
         const settings = (await AppService.GetSettings()) as unknown as Record<string, unknown>;

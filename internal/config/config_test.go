@@ -160,6 +160,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	s.Terminal.FontSize = 14
 	s.Window.Width = 1440
 	s.Window.Height = 900
+	s.Window.LeftWidth = 380
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -199,7 +200,7 @@ func TestLoadJSONMatchesMasterSchema(t *testing.T) {
 
 func TestLoadNormalizesUnknownThemeAndZeros(t *testing.T) {
 	isolatedXDG(t)
-	raw := `{"theme":"neon","terminal":{"fontSize":0,"scrollback":0},"window":{"width":0,"height":0}}`
+	raw := `{"theme":"neon","terminal":{"fontSize":0,"scrollback":0},"window":{"width":0,"height":0,"leftWidth":0}}`
 	if err := os.MkdirAll(Path(), DirPerm); err != nil {
 		t.Fatal(err)
 	}
@@ -215,8 +216,29 @@ func TestLoadNormalizesUnknownThemeAndZeros(t *testing.T) {
 	}
 	d := DefaultSettings()
 	if got.Terminal.FontSize != d.Terminal.FontSize || got.Terminal.Scrollback != d.Terminal.Scrollback ||
-		got.Window.Width != d.Window.Width || got.Window.Height != d.Window.Height {
+		got.Window.Width != d.Window.Width || got.Window.Height != d.Window.Height ||
+		got.Window.LeftWidth != d.Window.LeftWidth {
 		t.Fatalf("zeros not normalized: %+v", got)
+	}
+}
+
+// TestLoadDefaultsLeftWidthZeroToDefault covers the Phase 4a rule: a
+// missing/zero window.leftWidth is treated as the 320 px default.
+func TestLoadDefaultsLeftWidthZeroToDefault(t *testing.T) {
+	isolatedXDG(t)
+	raw := `{"window":{"width":1000,"height":700}}` // leftWidth omitted → 0
+	if err := os.MkdirAll(Path(), DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(File(SettingsFileName), []byte(raw), FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Window.LeftWidth != 320 {
+		t.Fatalf("leftWidth = %d, want default 320", got.Window.LeftWidth)
 	}
 }
 

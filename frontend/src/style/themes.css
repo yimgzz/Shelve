@@ -1,0 +1,46 @@
+/* Dummy SSH Manager — theme token sets (master plan §6 Theming).
+   Tokens live under :root[data-theme="light"|"dark"]. The data-theme
+   attribute is set by ui/theme.ts and by the inline FOUC guard in
+   index.html (reads the localStorage["dsm-theme"] cache before first
+   paint). Terminal palettes are two small sets bound to the same theme;
+   no ANSI overrides in v1 (master plan §6). */
+
+:root[data-theme="light"] {
+    --bg: #ffffff;
+    --bg-panel: #f5f6f8;
+    --bg-hover: #eceef1;
+    --bg-active: #e2e6ea;
+    --border: #d8dbe0;
+    --text: #1c1e21;
+    --text-dim: #5f6672;
+    --accent: #1e6fd9;
+    --error: #d33;
+    --ok: #2e7d32;
+    --warn: #b45309;
+
+    /* Terminal palette — light: white-ish background. */
+    --terminal-bg: #f7f8fa;
+    --terminal-fg: #24292f;
+
+    color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+    --bg: #14161a;
+    --bg-panel: #1c1f25;
+    --bg-hover: #23272f;
+    --bg-active: #2a2f39;
+    --border: #2c313a;
+    --text: #e8eaed;
+    --text-dim: #9aa0aa;
+    --accent: #66a3ff;
+    --error: #f27070;
+    --ok: #57ab5a;
+    --warn: #e0a458;
+
+    /* Terminal palette — dark: #1e1e2e-ish (Catppuccin-like base). */
+    --terminal-bg: #1e1e2e;
+    --terminal-fg: #cdd6f4;
+
+    color-scheme: dark;
+}

@@ -20,9 +20,11 @@ type TerminalSettings struct {
 }
 
 // WindowSettings holds the remembered main-window geometry (master plan A7).
+// LeftWidth is the persisted left-panel width; 0 = not set → treated as 320.
 type WindowSettings struct {
-	Width  int `json:"width"`
-	Height int `json:"height"`
+	Width     int `json:"width"`
+	Height    int `json:"height"`
+	LeftWidth int `json:"leftWidth"`
 }
 
 // Settings is the on-disk shape of settings.json (master plan §4).
@@ -49,8 +51,9 @@ func DefaultSettings() Settings {
 		},
 		TextEditorCommand: "xdg-open",
 		Window: WindowSettings{
-			Width:  1280,
-			Height: 800,
+			Width:     1280,
+			Height:    800,
+			LeftWidth: 320,
 		},
 	}
 }
@@ -109,5 +112,8 @@ func (s *Settings) normalize() {
 	}
 	if s.Window.Height <= 0 {
 		s.Window.Height = 800
+	}
+	if s.Window.LeftWidth <= 0 {
+		s.Window.LeftWidth = 320
 	}
 }

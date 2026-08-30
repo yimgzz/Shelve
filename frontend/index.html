@@ -3,23 +3,28 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <link rel="stylesheet" href="/style.css"/>
+    <!-- FOUC guard (master plan §6): set the theme from the cached
+         value before first paint so no theme flash occurs on reload.
+         ui/theme.ts keeps this cache in sync. -->
+    <script>
+        (function () {
+            try {
+                var cached = localStorage.getItem("dsm-theme");
+                if (cached === "light" || cached === "dark") {
+                    document.documentElement.dataset.theme = cached;
+                }
+            } catch (_) {
+                /* localStorage unavailable — fall back to default theme */
+            }
+        })();
+    </script>
+    <link rel="stylesheet" href="/src/style/themes.css"/>
+    <link rel="stylesheet" href="/src/style/base.css"/>
+    <link rel="stylesheet" href="/src/style/components.css"/>
     <title>Dummy SSH Manager</title>
 </head>
 <body>
-<main class="container">
-    <h1 class="title">Dummy SSH Manager</h1>
-    <p class="subtitle">Lightweight local SSH session manager</p>
-    <p class="version">Version <span id="version">…</span></p>
-
-    <!-- Placeholder: becomes the master-password unlock screen in Phase 4. -->
-    <section id="unlock-placeholder" class="unlock-placeholder" aria-label="Unlock screen placeholder">
-        <h2>Unlock screen</h2>
-        <p>The master-password unlock UI will live here (Phase 4).</p>
-    </section>
-
-    <p class="scaffold-ok">scaffold ok</p>
-</main>
-<script type="module" src="/src/main.js"></script>
+<div id="app-root"></div>
+<script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"dummy-ssh-manager/internal/config"
+	"dummy-ssh-manager/internal/sftp"
 	"dummy-ssh-manager/internal/sshengine"
 	"dummy-ssh-manager/internal/sshx/knownhosts"
 	"dummy-ssh-manager/internal/store"
@@ -28,14 +29,16 @@ const exitShutdownTimeout = 3 * time.Second
 
 // App is the composition root shared by all Wails services.
 type App struct {
-	vault  *vault.Vault
-	store  *store.Store
-	engine *sshengine.Manager
+	vault   *vault.Vault
+	store   *store.Store
+	engine  *sshengine.Manager
+	sftpMgr *sftp.Manager
 
 	appService      *wailsvc.AppService
 	vaultService    *wailsvc.VaultService
 	sessionService  *wailsvc.SessionService
 	terminalService *wailsvc.TerminalService
+	sftpService     *wailsvc.SftpService
 	emitter         *wailsvc.LateEmitter
 }
 
@@ -67,15 +70,24 @@ func New() (*App, error) {
 	}
 	engine := sshengine.New(emit, kh)
 
+	// SFTP per-tab clients ride on the engine's active connections (master
+	// plan §5). The manager is attached to the engine structurally and
+	// registers its per-tab closer so clients die with their tab.
+	sftpMgr := sftp.New(config.File(config.TmpDirName), emit)
+	sftpMgr.Attach(engine)
+	engine.OnTabClosed(sftpMgr.HandleTabClosed)
+
 	return &App{
 		vault:           v,
 		store:           st,
 		engine:          engine,
+		sftpMgr:         sftpMgr,
 		emitter:         emit,
 		appService:      wailsvc.NewAppService(Version),
 		vaultService:    wailsvc.NewVaultService(v, st, engine, emit),
 		sessionService:  wailsvc.NewSessionService(st, v, engine, emit),
 		terminalService: wailsvc.NewTerminalService(st, v, engine),
+		sftpService:     wailsvc.NewSftpService(v, sftpMgr, config.File(config.TmpDirName)),
 	}, nil
 }
 
@@ -99,6 +111,11 @@ func (a *App) TerminalService() *wailsvc.TerminalService {
 	return a.terminalService
 }
 
+// SftpService returns the Wails-facing SFTP service.
+func (a *App) SftpService() *wailsvc.SftpService {
+	return a.sftpService
+}
+
 // SetEmitter wires the Wails-backed event emitter. Called from main.go
 // after the runtime is constructed (before Run).
 func (a *App) SetEmitter(e wailsvc.Emitter) {
@@ -112,6 +129,8 @@ func (a *App) Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), exitShutdownTimeout)
 	a.engine.Shutdown(ctx)
 	cancel()
+	// Release any SFTP clients the per-tab teardown hook missed (idempotent).
+	a.sftpMgr.CloseAll()
 	if a.vault.IsUnlocked() {
 		if err := a.store.Flush(); err != nil {
 			log.Printf("app: flush on exit failed: %v", err)

@@ -165,6 +165,12 @@ type Manager struct {
 	// PromptTimeout bounds a pending prompt; zero disables the
 	// host-key prompt timer. Default DefaultPromptTimeout.
 	PromptTimeout time.Duration
+	// onTabClosed is an optional hook invoked after a tab's resources are
+	// torn down (Disconnect / remote exit / Shutdown). The engine stays
+	// SFTP-agnostic (master plan §5): a co-resident SFTP manager registers
+	// here so it can close its per-tab client, which rides on the same
+	// final-hop SSH connection that teardown is about to release.
+	onTabClosed func(tabID string)
 }
 
 // New creates a Manager over the app-managed known_hosts manager.
@@ -381,6 +387,38 @@ func (m *Manager) getTab(tabID string) *liveConn {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.conns[tabID]
+}
+
+// OnTabClosed registers a hook invoked after a tab's resources are torn
+// down (Disconnect / remote exit / Shutdown). The hook receives the
+// tabID; the engine stays SFTP-agnostic (master plan §5) — the caller
+// closes whatever co-resident client (e.g. an SFTP client) rides on the
+// tab's final-hop SSH connection. Passing nil clears the hook. At most
+// one hook is held.
+func (m *Manager) OnTabClosed(f func(tabID string)) {
+	m.mu.Lock()
+	m.onTabClosed = f
+	m.mu.Unlock()
+}
+
+// SSHClient returns the FINAL-hop *ssh.Client of a ready tab, which SFTP
+// needs to open its subsystem channel (master plan §5: the SFTP client
+// reuses the active session's connection). Typed errors: ErrUnknownTab
+// for an unknown/removed tab, ErrTabNotReady while it is connecting, in
+// error state, or closed.
+func (m *Manager) SSHClient(tabID string) (*ssh.Client, error) {
+	l := m.getTab(tabID)
+	if l == nil {
+		return nil, ErrUnknownTab
+	}
+	m.mu.Lock()
+	st := l.state
+	clients := l.clients
+	m.mu.Unlock()
+	if st != stateReady || len(clients) == 0 {
+		return nil, fmt.Errorf("%w: tab is %s", ErrTabNotReady, st)
+	}
+	return clients[len(clients)-1], nil
 }
 
 func (m *Manager) emitStatus(tabID, state, message string) {

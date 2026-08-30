@@ -2,7 +2,9 @@ package wailsvc
 
 import (
 	"dummy-ssh-manager/internal/model"
+	"dummy-ssh-manager/internal/sftp"
 	"dummy-ssh-manager/internal/store"
+	"time"
 )
 
 // DTOs are the JSON contract for the generated frontend bindings
@@ -131,6 +133,31 @@ func toNodeDTOs(nodes []store.TreeNode) []NodeDTO {
 			ID:       n.ID,
 			Name:     n.Name,
 			Children: toNodeDTOs(n.Children),
+		})
+	}
+	return out
+}
+
+// SftpEntryDTO is one SFTP listing row for the frontend (master plan §5).
+// TextLike mirrors the sftp package's classification (edit if text-like,
+// ≤ 2 MiB).
+type SftpEntryDTO struct {
+	Name     string    `json:"name"`
+	IsDir    bool      `json:"isDir"`
+	Size     int64     `json:"size"`
+	ModTime  time.Time `json:"modTime"`
+	TextLike bool      `json:"textLike"`
+}
+
+func toSftpEntryDTOs(entries []sftp.Entry) []SftpEntryDTO {
+	out := make([]SftpEntryDTO, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, SftpEntryDTO{
+			Name:     e.Name,
+			IsDir:    e.IsDir,
+			Size:     e.Size,
+			ModTime:  e.ModTime,
+			TextLike: e.TextLike,
 		})
 	}
 	return out

@@ -17,6 +17,10 @@ const (
 	VaultFileName = "vault.json"
 	// KnownHostsFileName holds the app-managed OpenSSH known_hosts subset (Phase 3).
 	KnownHostsFileName = "known_hosts"
+	// TmpDirName holds SFTP edit temp files under the config dir (master
+	// plan §4: swept on lock/exit; Phase 5a creates it 0700 for the sftp
+	// manager and Phase 5b writes 0600 edit files into it).
+	TmpDirName = "tmp"
 
 	// DirPerm is the permission mode for the config directory.
 	DirPerm = 0o700

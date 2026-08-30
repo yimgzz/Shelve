@@ -38,6 +38,7 @@ func main() {
 			application.NewService(a.VaultService()),
 			application.NewService(a.SessionService()),
 			application.NewService(a.TerminalService()),
+			application.NewService(a.SftpService()),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,

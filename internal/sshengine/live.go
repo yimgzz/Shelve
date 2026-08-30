@@ -519,6 +519,16 @@ func (m *Manager) teardown(l *liveConn) {
 			<-f.done // accept loop exited (listener closed)
 			m.emitForward(l.tabID, f.spec, ForwardClosed, "", "")
 		}
+
+		// Invoke the optional tab-closed hook last: by now the final-hop
+		// SSH client is closed, so a co-resident SFTP client riding on it
+		// can be released too. Never holds m.mu while the hook runs.
+		m.mu.Lock()
+		hook := m.onTabClosed
+		m.mu.Unlock()
+		if hook != nil {
+			hook(l.tabID)
+		}
 	})
 }
 

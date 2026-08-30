@@ -110,6 +110,25 @@ test-integration: ensure-image ## SSH integration tests (testcontainers)
 smoke-vault: ensure-image ## Headless vault smoke (create→unlock→modify→lock) against a temp dir
 	$(DOCKER_RUN) --entrypoint go $(IMAGE) run ./internal/vault/smol
 
+# -------------------------------------------------------------- seed tool ---
+# Seed/unseed build the tiny pure-Go QA tool in the container (consistent
+# with the docker-driven workflow), then RUN the binary on the host so it
+# writes into the HOST config dir — exactly where `make run` reads it.
+
+SEED_BIN := bin/seed
+
+.PHONY: seed
+seed: ensure-image ## Seed a 300-session QA vault into the host config dir
+	$(DOCKER_RUN) --entrypoint go $(IMAGE) build -o $(SEED_BIN) ./cmd/seed
+	$(MAKE) fix-owner
+	./$(SEED_BIN)
+
+.PHONY: unseed
+unseed: ensure-image ## Remove the seeded vault.json + known_hosts (keeps settings)
+	$(DOCKER_RUN) --entrypoint go $(IMAGE) build -o $(SEED_BIN) ./cmd/seed
+	$(MAKE) fix-owner
+	./$(SEED_BIN) -unseed
+
 # ----------------------------------------------------------------- lint ---
 # Note: build/ is excluded from gofmt — it holds wails-generated platform
 # assets that are not gofmt-clean upstream.

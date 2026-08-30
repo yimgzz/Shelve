@@ -73,6 +73,29 @@ body {
     overflow: hidden;
 }
 
+.left-header {
+    padding: 8px;
+    flex: none;
+}
+
+.tree-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.tab-strip-host {
+    flex: none;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-panel);
+}
+
+.terminal-pane-host {
+    flex: 1;
+    min-height: 0;
+}
+
 .status-band {
     grid-area: status;
     display: flex;

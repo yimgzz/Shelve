@@ -1,14 +1,17 @@
 // components/shell.ts — the app shell (master plan §6 Layout).
-// Left panel (search placeholder + toolbar), splitter (drag, clamp
-// 240–480, persist window.leftWidth), right pane (empty state) and the
-// status-band row. A temporary dev hook (window.__dsmDev) exposes a Lock
-// button and QA helpers; it is removed in 4d.
+// Left panel (search header + toolbar + tree/search body), splitter
+// (drag, clamp 240–480, persist window.leftWidth), right pane (tab strip
+// + #terminal-pane placeholder) and the status-band row. A temporary dev
+// hook (window.__dsmDev) exposes a Lock button and QA helpers; removed in 4d.
 
 import { AppService, VaultService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
 import { store, DEFAULT_LEFT_WIDTH, type Settings } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { showHostKeyPrompt, showKeyPrompt } from "./prompts";
 import { toast } from "./toasts";
+import { renderSearch } from "./search";
+import { renderTreeBody, openNewSession, openNewFolderAt } from "./tree";
+import { renderTabStrip, renderTerminalPane } from "./tabs";
 
 const MIN_LEFT = 240;
 const MAX_LEFT = 480;
@@ -19,14 +22,6 @@ declare global {
         /** Dev-only flag; when truthy the shell shows the dev hook. */
         __dsmDev?: boolean;
     }
-}
-
-/** Store intent no-ops until the tree/editor land in 4b. */
-export function requestNewSession(_parentID: string | null): void {
-    console.debug("[shell] requestNewSession intent (implemented in 4b)", _parentID);
-}
-export function requestNewFolder(_parentID: string | null): void {
-    console.debug("[shell] requestNewFolder intent (implemented in 4b)", _parentID);
 }
 
 /** Persist the current left-panel width (debounced, partial update). */
@@ -51,41 +46,33 @@ export function renderShell(root: HTMLElement): void {
     left.className = "left-panel";
     left.setAttribute("aria-label", "Session list");
 
-    // Search placeholder (functional in 4b).
-    const search = document.createElement("input");
-    search.type = "text";
-    search.className = "input";
-    search.placeholder = "Search sessions…  Ctrl K";
-    search.disabled = true;
-    search.style.margin = "8px";
-    left.appendChild(search);
+    // Search header.
+    const searchHost = document.createElement("div");
+    searchHost.className = "left-header";
+    left.appendChild(searchHost);
+    renderSearch(searchHost);
 
-    // Toolbar.
+    // Toolbar (+ Session / + Folder) — now active (Phase 4b).
     const toolbar = document.createElement("div");
     toolbar.className = "toolbar";
     const btnNewSession = document.createElement("button");
     btnNewSession.type = "button";
     btnNewSession.className = "btn small";
     btnNewSession.textContent = "+ Session";
-    btnNewSession.addEventListener("click", () => requestNewSession(null));
+    btnNewSession.addEventListener("click", () => openNewSession(""));
     const btnNewFolder = document.createElement("button");
     btnNewFolder.type = "button";
     btnNewFolder.className = "btn small";
     btnNewFolder.textContent = "+ Folder";
-    btnNewFolder.addEventListener("click", () => requestNewFolder(null));
+    btnNewFolder.addEventListener("click", () => openNewFolderAt(""));
     toolbar.append(btnNewSession, btnNewFolder);
     left.appendChild(toolbar);
 
-    // Empty state.
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    const emptyTitle = document.createElement("div");
-    emptyTitle.textContent = "No sessions yet";
-    const emptyHint = document.createElement("div");
-    emptyHint.className = "hint";
-    emptyHint.textContent = "Create one from the left panel to get started.";
-    empty.append(emptyTitle, emptyHint);
-    left.appendChild(empty);
+    // Tree / search body (scrollable).
+    const treeHost = document.createElement("div");
+    treeHost.className = "tree-body";
+    left.appendChild(treeHost);
+    renderTreeBody(treeHost);
 
     root.appendChild(left);
 
@@ -137,15 +124,17 @@ export function renderShell(root: HTMLElement): void {
     const right = document.createElement("main");
     right.className = "right-pane";
     right.setAttribute("aria-label", "Terminal area");
-    const rightEmpty = document.createElement("div");
-    rightEmpty.className = "empty-state";
-    const rightTitle = document.createElement("div");
-    rightTitle.textContent = "No open sessions";
-    const rightHint = document.createElement("div");
-    rightHint.className = "hint";
-    rightHint.textContent = "Create a session from the left panel to open a terminal here.";
-    rightEmpty.append(rightTitle, rightHint);
-    right.appendChild(rightEmpty);
+
+    const tabHost = document.createElement("div");
+    tabHost.className = "tab-strip-host";
+    right.appendChild(tabHost);
+    renderTabStrip(tabHost);
+
+    const paneHost = document.createElement("div");
+    paneHost.className = "terminal-pane-host";
+    right.appendChild(paneHost);
+    renderTerminalPane(paneHost);
+
     root.appendChild(right);
 
     // ---- Status band (placeholder; filled by 4c) ----
@@ -161,7 +150,7 @@ export function renderShell(root: HTMLElement): void {
         const dev = document.createElement("div");
         dev.className = "dev-banner";
         dev.textContent = "DEV HOOK";
-        dev.title = "Phase 4a temporary dev tooling — removed in 4d";
+        dev.title = "Phase 4a/4b temporary dev tooling — removed in 4d";
         root.appendChild(dev);
 
         const devBar = document.createElement("div");
@@ -210,8 +199,8 @@ export function renderShell(root: HTMLElement): void {
         ctxBtn.textContent = "Context menu";
         ctxBtn.addEventListener("click", (e) => {
             const items: MenuItem[] = [
-                { label: "New Session", action: () => requestNewSession(null) },
-                { label: "New Folder", action: () => requestNewFolder(null) },
+                { label: "New Session", action: () => openNewSession("") },
+                { label: "New Folder", action: () => openNewFolderAt("") },
                 { label: "Danger action", danger: true, action: () => toast("info", "danger action") },
                 { label: "Disabled", disabled: true, action: () => undefined },
             ];

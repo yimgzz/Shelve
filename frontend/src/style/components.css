@@ -401,3 +401,332 @@
     color: var(--warn);
     border-top: 1px dashed var(--border);
 }
+
+/* ---------- Search header ---------- */
+.search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.search-input {
+    padding-right: 30px;
+}
+
+.search-clear {
+    position: absolute;
+    right: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+}
+
+.search-clear:hover {
+    color: var(--text);
+}
+
+/* ---------- Session tree ---------- */
+.tree-folder {
+    display: block;
+}
+
+.tree-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    cursor: default;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+.tree-row:hover {
+    background: var(--bg-hover);
+}
+
+.tree-row.selected {
+    background: var(--bg-active);
+}
+
+.tree-row .chevron {
+    width: 12px;
+    flex: none;
+    font-size: 9px;
+    color: var(--text-dim);
+    cursor: pointer;
+    text-align: center;
+    user-select: none;
+}
+
+.tree-row .tree-icon {
+    flex: none;
+    font-size: 13px;
+    line-height: 1;
+}
+
+.tree-row .tree-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 13px;
+}
+
+.tree-row .badge {
+    flex: none;
+    font-size: 10px;
+    color: var(--text-dim);
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0 5px;
+    line-height: 15px;
+}
+
+.tree-row .result-meta {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+.tree-row mark {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: var(--text);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.tree-row.inline-row {
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
+.inline-input {
+    font-size: 12px;
+    padding: 3px 6px;
+}
+
+.tree-empty {
+    flex: 1;
+}
+
+/* ---------- Tab strip ---------- */
+.tab-strip {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+
+.tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-right: 1px solid var(--border);
+    cursor: pointer;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--text-dim);
+    flex: none;
+    user-select: none;
+}
+
+.tab:hover {
+    background: var(--bg-hover);
+}
+
+.tab.active {
+    background: var(--bg);
+    color: var(--text);
+    box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tab .tab-label {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tab-close {
+    opacity: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+}
+
+.tab:hover .tab-close,
+.tab-close:focus-visible {
+    opacity: 1;
+}
+
+.tab-close:hover {
+    color: var(--error);
+}
+
+/* ---------- Terminal pane (4b placeholder) ---------- */
+#terminal-pane {
+    height: 100%;
+    display: flex;
+    min-height: 0;
+}
+
+.terminal-placeholder {
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 24px;
+    color: var(--text-dim);
+    text-align: center;
+}
+
+.terminal-placeholder .tp-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    color: var(--text);
+}
+
+.terminal-placeholder .tp-state {
+    font-size: 13px;
+}
+
+.terminal-placeholder .tp-state.error {
+    color: var(--error);
+    max-width: 420px;
+}
+
+/* ---------- Session editor ---------- */
+.editor-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.editor-body .field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.editor-body .field > label {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.editor-body .hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.4;
+}
+
+.field-error {
+    font-size: 12px;
+    color: var(--error);
+    line-height: 1.3;
+}
+
+.auth-radios {
+    display: flex;
+    gap: 16px;
+}
+
+.radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.path-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.path-row .input {
+    flex: 1;
+}
+
+.input.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.jump-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.section-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 600;
+}
+
+.jump-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.jump-row {
+    display: grid;
+    grid-template-columns: 1fr 64px 1fr;
+    gap: 6px;
+    align-items: end;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+}
+
+.jump-row .grid-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+.jump-auth {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.jump-auth .input {
+    flex: 1;
+    min-width: 120px;
+}
+
+.editor-status {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-right: auto;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.editor-status.error {
+    color: var(--error);
+}

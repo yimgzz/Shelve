@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -483,6 +484,66 @@ func (s *Store) Session(id string) (model.Session, error) {
 		return model.Session{}, fmt.Errorf("%w: %q", ErrNodeNotFound, id)
 	}
 	return sess, nil
+}
+
+// SearchHit is one flat search result (master plan §2 A9): the session
+// plus the slash-joined path of the folder that contains it ("" for a
+// root-level session).
+type SearchHit struct {
+	ID         string
+	Name       string
+	Host       string
+	User       string
+	FolderPath string
+}
+
+// Search returns every session whose Name, Host or User contains q as a
+// case-insensitive substring (master plan §2 A9), with its folder path
+// for display context. Results are sorted by ID for a stable order. The
+// flat scan over ≤300 nodes is well inside the master-plan §6 budget.
+func (s *Store) Search(q string) []SearchHit {
+	q = strings.ToLower(strings.TrimSpace(q))
+	if q == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var out []SearchHit
+	for id, sess := range s.sessions {
+		if !containsFold(sess.Name, q) && !containsFold(sess.Host, q) && !containsFold(sess.User, q) {
+			continue
+		}
+		out = append(out, SearchHit{
+			ID:         id,
+			Name:       sess.Name,
+			Host:       sess.Host,
+			User:       sess.User,
+			FolderPath: s.folderPathLocked(sess.FolderID),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func containsFold(haystack, needle string) bool {
+	return strings.Contains(strings.ToLower(haystack), needle)
+}
+
+// folderPathLocked returns the slash-joined path of the folder with the
+// given ID ("" for the root). Requires s.mu.
+func (s *Store) folderPathLocked(folderID string) string {
+	var parts []string
+	cur := folderID
+	for cur != "" {
+		f, ok := s.folders[cur]
+		if !ok {
+			break
+		}
+		parts = append([]string{f.Name}, parts...)
+		cur = f.ParentID
+	}
+	return strings.Join(parts, "/")
 }
 
 // ---------------------------------------------- internal helpers (lock) ---

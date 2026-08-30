@@ -4,6 +4,14 @@
 // `Events.On` directly. main.ts is the single owner of the Wails event
 // bus and routes every event here via set(). This keeps one source of
 // truth and prevents listener growth across lock/unlock cycles.
+//
+// The store also owns the few user actions that mutate backend state
+// and must reconcile async results with the UI (connectSession,
+// closeTab): those bridge the Wails service bindings and the reactive
+// state in one place so components stay presentation-only.
+
+import { SessionService, TerminalService } from "../bindings/dummy-ssh-manager/internal/wailsvc";
+import { toast } from "./components/toasts";
 
 export type VaultState = "create" | "locked" | "unlocked";
 export type TabState = "connecting" | "ready" | "error" | "closed";
@@ -62,6 +70,15 @@ export interface SessionDTO {
     extraArgs: string;
 }
 
+/** One flat live-search result (master plan §2 A9). */
+export interface SearchResultDTO {
+    id: string;
+    name: string;
+    host: string;
+    user: string;
+    folderPath: string;
+}
+
 export interface Tab {
     id: string;
     session: SessionDTO;
@@ -78,6 +95,12 @@ export interface StoreState {
     tabs: Tab[];
     activeTabID: string | null;
     leftPanelWidth: number;
+    /**
+     * tabID → session snapshot for tabs whose `terminal:status` event may
+     * arrive before the optimistic tab is reconciled (Phase 4b task 4).
+     * Never persisted.
+     */
+    pendingSessions: Record<string, SessionDTO>;
 }
 
 export const DEFAULT_LEFT_WIDTH = 320;
@@ -98,9 +121,12 @@ export const initialState: StoreState = {
     tabs: [],
     activeTabID: null,
     leftPanelWidth: DEFAULT_LEFT_WIDTH,
+    pendingSessions: {},
 };
 
 type Listener = (state: StoreState) => void;
+
+let tempCounter = 0;
 
 class Store {
     private state: StoreState = initialState;
@@ -113,9 +139,9 @@ class Store {
     /** Merge a partial update and notify subscribers (new object identity). */
     set(partial: Partial<StoreState>): void {
         this.state = { ...this.state, ...partial };
-        for (const fn of this.listeners) {
-            fn(this.state);
-        }
+        // forEach avoids Set iteration, which needs target >= ES2015 or
+        // --downlevelIteration (tsconfig sets neither).
+        this.listeners.forEach((fn) => fn(this.state));
     }
 
     subscribe(fn: Listener): () => void {
@@ -123,6 +149,120 @@ class Store {
         return () => {
             this.listeners.delete(fn);
         };
+    }
+
+    // ------------------------------------------------------------ actions ---
+
+    /** Re-fetch the session tree into the store (called after mutations). */
+    async refreshTree(): Promise<void> {
+        try {
+            const tree = (await SessionService.Tree()) as unknown as NodeDTO[];
+            this.set({ tree });
+        } catch (err) {
+            toast("error", String(err));
+        }
+    }
+
+    /** Set the live search query (empty string restores the tree). */
+    setSearchQ(q: string): void {
+        this.set({ searchQ: q });
+    }
+
+    /** Select a tree node by ID (null clears the selection). */
+    selectNode(id: string | null): void {
+        this.set({ selectedID: id });
+    }
+
+    /**
+     * Open a terminal tab for a stored session (Phase 4b task 4): resolve
+     * the secret-free snapshot, optimistically create a "connecting" tab,
+     * then drive TerminalService.Connect; a returned Connect error marks the
+     * tab "error". `terminal:status` events keep the tab's state current.
+     */
+    async connectSession(sessionID: string): Promise<void> {
+        let dto: SessionDTO;
+        try {
+            dto = (await SessionService.Session(sessionID)) as unknown as SessionDTO;
+        } catch (err) {
+            toast("error", String(err));
+            return;
+        }
+        const tempId = `tab-pending-${(tempCounter++).toString(36)}`;
+        this.set({
+            tabs: [...this.state.tabs, { id: tempId, session: dto, state: "connecting" }],
+            activeTabID: tempId,
+        });
+        try {
+            const tabID = await TerminalService.Connect(sessionID);
+            this.registerPendingSession(tabID, dto);
+            this.replaceTab(tempId, tabID);
+        } catch (err) {
+            this.setTabState(tempId, "error", String(err));
+        }
+    }
+
+    /** Activate (focus) a tab by ID. */
+    activateTab(tabID: string): void {
+        this.set({ activeTabID: tabID });
+    }
+
+    /**
+     * Close a tab: disconnect it first (unless already closed), remove it
+     * and activate a neighbour. No confirmation (master plan A3).
+     */
+    async closeTab(tabID: string): Promise<void> {
+        const { tabs, activeTabID } = this.state;
+        const idx = tabs.findIndex((t) => t.id === tabID);
+        if (idx === -1) {
+            return;
+        }
+        const tab = tabs[idx];
+        if (tab.state !== "closed") {
+            try {
+                await TerminalService.Disconnect(tabID);
+            } catch (err) {
+                toast("error", String(err));
+            }
+        }
+        const remaining = tabs.filter((t) => t.id !== tabID);
+        let nextActive = activeTabID;
+        if (activeTabID === tabID) {
+            const neighbour = remaining[idx] ?? remaining[idx - 1] ?? null;
+            nextActive = neighbour ? neighbour.id : null;
+        }
+        this.set({ tabs: remaining, activeTabID: nextActive });
+    }
+
+    /** Look up the session snapshot for a real tabID (race safety). */
+    getPendingSession(tabID: string): SessionDTO | undefined {
+        return this.state.pendingSessions[tabID];
+    }
+
+    /** Remember a real tabID→session so late status events can create it. */
+    registerPendingSession(tabID: string, dto: SessionDTO): void {
+        this.set({ pendingSessions: { ...this.state.pendingSessions, [tabID]: dto } });
+    }
+
+    /** Swap an optimistic temp tabID for the real tabID Connect returned. */
+    replaceTab(oldID: string, newID: string): void {
+        const { tabs, activeTabID } = this.state;
+        if (!tabs.some((t) => t.id === oldID)) {
+            return;
+        }
+        this.set({
+            tabs: tabs.map((t) => (t.id === oldID ? { ...t, id: newID } : t)),
+            activeTabID: activeTabID === oldID ? newID : activeTabID,
+        });
+    }
+
+    /** Update one tab's status (from a status event or a Connect error). */
+    setTabState(tabID: string, state: TabState, message?: string): void {
+        const { tabs } = this.state;
+        this.set({
+            tabs: tabs.map((t) =>
+                t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t,
+            ),
+        });
     }
 }
 

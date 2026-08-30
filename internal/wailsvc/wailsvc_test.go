@@ -246,6 +246,183 @@ func TestSessionServiceCRUDThroughService(t *testing.T) {
 	}
 }
 
+// TestSessionServiceSearch covers the live flat-search binding (master
+// plan §2 A9): Name/Host/User case-insensitive substring with folder path.
+func TestSessionServiceSearch(t *testing.T) {
+	isolatedXDG(t)
+	v := vault.New()
+	st := store.New(func(p []byte) error { return v.Save(p) })
+	if err := v.Create(config.File(config.VaultFileName), "correct-pw-abc",
+		[]byte(`{"root":[],"folders":[],"sessions":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	ss := NewSessionService(st, v, newTestEngine(t, &recEmitter{}), &recEmitter{})
+
+	fid, err := ss.CreateFolder("", "Production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []SessionInput{
+		{Name: "db-prod-01", Host: "db.example.com", Port: 22, User: "alice",
+			AuthType: model.AuthKey, KeyPath: "/home/a/.ssh/id_ed25519"},
+		{Name: "db-staging", Host: "10.1.2.3", Port: 22, User: "bob",
+			AuthType: model.AuthPassword, Password: "pw"},
+		{Name: "web", Host: "host.example.com", Port: 22, User: "carol",
+			AuthType: model.AuthKey, KeyPath: "/home/c/.ssh/id_ed25519"},
+	} {
+		in := s
+		in.FolderID = fid
+		if _, err := ss.CreateSession(in); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Matches Name ("DB-") and Host ("db.example") — case-insensitive.
+	res, err := ss.Search("Db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("Search(Db) = %d results, want 2: %+v", len(res), res)
+	}
+	for _, r := range res {
+		if r.FolderPath != "Production" {
+			t.Fatalf("folder path = %q, want Production", r.FolderPath)
+		}
+	}
+	if res[0].Name != "db-prod-01" || res[0].Host != "db.example.com" || res[0].User != "alice" {
+		t.Fatalf("unexpected result fields: %+v", res[0])
+	}
+
+	// User match, case-insensitive (A9 scans Name, Host, User).
+	byUser, err := ss.Search("ALICE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byUser) != 1 || byUser[0].Name != "db-prod-01" {
+		t.Fatalf("Search(ALICE) = %+v, want db-prod-01 only", byUser)
+	}
+
+	no, err := ss.Search("zzz-no-match")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(no) != 0 {
+		t.Fatalf("Search(no-match) = %+v, want none", no)
+	}
+	empty, _ := ss.Search("")
+	if len(empty) != 0 {
+		t.Fatalf("Search(empty) = %+v, want none", empty)
+	}
+}
+
+// TestSessionServiceSessionRead proves the Session() read binding returns
+// a secret-free DTO (used to prefill the session editor, Phase 4b task 3).
+func TestSessionServiceSessionRead(t *testing.T) {
+	isolatedXDG(t)
+	v := vault.New()
+	st := store.New(func(p []byte) error { return v.Save(p) })
+	if err := v.Create(config.File(config.VaultFileName), "correct-pw-abc",
+		[]byte(`{"root":[],"folders":[],"sessions":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	ss := NewSessionService(st, v, newTestEngine(t, &recEmitter{}), &recEmitter{})
+
+	sid, err := ss.CreateSession(SessionInput{
+		Name: "db", Host: "db.example.com", Port: 2222, User: "alice",
+		AuthType: model.AuthKey, KeyPath: "/home/alice/.ssh/id_ed25519",
+		ExtraArgs: "-L 8080:localhost:80",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dto, err := ss.Session(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto.ID != sid || dto.Name != "db" || dto.Host != "db.example.com" ||
+		dto.Port != 2222 || dto.User != "alice" || dto.AuthType != model.AuthKey ||
+		dto.KeyPath != "/home/alice/.ssh/id_ed25519" || dto.HasPassword {
+		t.Fatalf("Session() = %+v", dto)
+	}
+}
+
+// TestSessionServiceUpdateSessionPasswordMerge covers the Phase 4b task 5
+// merge rule: an empty incoming password on a password-auth update keeps
+// the stored credential, for the session and each jump host; switching to
+// key auth with a blank password does not resurrect the old one.
+func TestSessionServiceUpdateSessionPasswordMerge(t *testing.T) {
+	isolatedXDG(t)
+	v := vault.New()
+	st := store.New(func(p []byte) error { return v.Save(p) })
+	if err := v.Create(config.File(config.VaultFileName), "correct-pw-abc",
+		[]byte(`{"root":[],"folders":[],"sessions":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	ss := NewSessionService(st, v, newTestEngine(t, &recEmitter{}), &recEmitter{})
+
+	const secret = "keep-me-secret-42"
+	sid, err := ss.CreateSession(SessionInput{
+		Name: "pw-sess", Host: "h.example.com", Port: 22, User: "u",
+		AuthType: model.AuthPassword, Password: secret,
+		JumpHosts: []JumpHostInput{
+			{Host: "j.example.com", Port: 22, User: "t",
+				AuthType: model.AuthPassword, Password: "jump-keep-me"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Blank password on a password-auth update → preserved (session + jump).
+	upd := SessionInput{
+		ID: sid, Name: "pw-sess", Host: "h2.example.com", Port: 22, User: "u",
+		AuthType: model.AuthPassword, // Password omitted → ""
+		JumpHosts: []JumpHostInput{
+			{Host: "j2.example.com", Port: 22, User: "t",
+				AuthType: model.AuthPassword}, // Password omitted → ""
+		},
+	}
+	if err := ss.UpdateSession(upd); err != nil {
+		t.Fatalf("UpdateSession blank pw: %v", err)
+	}
+	dto, err := ss.Session(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dto.HasPassword {
+		t.Fatal("session password was not preserved across blank update")
+	}
+	if len(dto.JumpHosts) != 1 || !dto.JumpHosts[0].HasPassword {
+		t.Fatalf("jump-host password was not preserved: %+v", dto.JumpHosts)
+	}
+
+	// Switching password→key with a blank password must NOT resurrect the
+	// stored credential (would break the auth XOR invariant).
+	keyUpd := SessionInput{
+		ID: sid, Name: "pw-sess", Host: "h3.example.com", Port: 22, User: "u",
+		AuthType: model.AuthKey, KeyPath: "/home/u/.ssh/id_ed25519",
+		JumpHosts: []JumpHostInput{
+			{Host: "j3.example.com", Port: 22, User: "t",
+				AuthType: model.AuthKey, KeyPath: "/home/u/.ssh/jump_key"},
+		},
+	}
+	if err := ss.UpdateSession(keyUpd); err != nil {
+		t.Fatalf("UpdateSession switch to key: %v", err)
+	}
+	dto, err = ss.Session(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dto.HasPassword || dto.AuthType != model.AuthKey {
+		t.Fatalf("password resurrected after switch to key: %+v", dto)
+	}
+	if len(dto.JumpHosts) != 1 || dto.JumpHosts[0].HasPassword ||
+		dto.JumpHosts[0].AuthType != model.AuthKey {
+		t.Fatalf("jump-host password resurrected after switch to key: %+v", dto.JumpHosts)
+	}
+}
+
 // TestConnection is bound to the engine (phase 3d): a locked vault
 // refuses attempts before any network traffic.
 func TestSessionServiceTestConnectionGating(t *testing.T) {

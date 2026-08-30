@@ -96,7 +96,15 @@ function handleEvent(name: string, payload: unknown): void {
                 void mount(next);
             } else {
                 destroyTerminals();
-                store.set({ vaultState: next, tree: [], tabs: [], activeTabID: null, selectedID: null });
+                store.set({
+                    vaultState: next,
+                    tree: [],
+                    tabs: [],
+                    activeTabID: null,
+                    selectedID: null,
+                    searchQ: "",
+                    pendingSessions: {},
+                });
                 void mount(next);
             }
             break;
@@ -130,15 +138,25 @@ function handleEvent(name: string, payload: unknown): void {
     }
 }
 
-/** Update a tab's status in the store (no-op until tabs exist in 4c). */
+/**
+ * Apply a terminal:status event to a tab. If the tab isn't in the store
+ * yet (its `connecting` event can beat the optimistic-tab reconciliation,
+ * Phase 4b task 4), create it on demand from the recorded pending session.
+ */
 function updateTabState(tabID: string, state: TabState, message: string): void {
     const { tabs } = store.getState();
-    const tab = tabs.find((t) => t.id === tabID);
-    if (!tab) {
+    if (tabs.some((t) => t.id === tabID)) {
+        store.set({
+            tabs: tabs.map((t) => (t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t)),
+        });
+        return;
+    }
+    const sess = store.getPendingSession(tabID);
+    if (!sess) {
         return;
     }
     store.set({
-        tabs: tabs.map((t) => (t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t)),
+        tabs: [...tabs, { id: tabID, session: sess, state, errorMessage: message || undefined }],
     });
 }
 

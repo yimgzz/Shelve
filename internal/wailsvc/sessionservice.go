@@ -3,11 +3,22 @@ package wailsvc
 import (
 	"errors"
 
+	"dummy-ssh-manager/internal/model"
 	"dummy-ssh-manager/internal/sshengine"
 	"dummy-ssh-manager/internal/sshx"
 	"dummy-ssh-manager/internal/store"
 	"dummy-ssh-manager/internal/vault"
 )
+
+// SearchResultDTO is one flat session search result (master plan §2 A9):
+// no password material, folder path included for display context.
+type SearchResultDTO struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Host       string `json:"host"`
+	User       string `json:"user"`
+	FolderPath string `json:"folderPath"`
+}
 
 // SessionService is the tree/session CRUD surface for the frontend
 // (master plan §5). Every method requires an unlocked vault.
@@ -36,6 +47,27 @@ func (s *SessionService) Tree() ([]NodeDTO, error) {
 		return nil, err
 	}
 	return toNodeDTOs(s.store.Tree()), nil
+}
+
+// Search returns flat session-search results for a live query
+// (master plan §2 A9): sessions whose Name/Host/User contain q,
+// with their folder path. Empty q yields no results.
+func (s *SessionService) Search(q string) ([]SearchResultDTO, error) {
+	if err := s.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	hits := s.store.Search(q)
+	out := make([]SearchResultDTO, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, SearchResultDTO{
+			ID:         h.ID,
+			Name:       h.Name,
+			Host:       h.Host,
+			User:       h.User,
+			FolderPath: h.FolderPath,
+		})
+	}
+	return out, nil
 }
 
 // CreateFolder adds a folder under parentID ("" = root).
@@ -79,8 +111,32 @@ func (s *SessionService) CreateSession(input SessionInput) (string, error) {
 	return s.store.CreateSession(input.FolderID, input.toModel())
 }
 
-// UpdateSession replaces a session's fields (ID and placement required
-// to be unchanged; use MoveNode to move).
+// Session returns the secret-free read view of one stored session (used
+// to prefill the session editor). Passwords never leave the vault: only
+// HasPassword/AuthType/keyPath are exposed (master plan §5 DTO contract).
+func (s *SessionService) Session(id string) (SessionDTO, error) {
+	if err := s.requireUnlocked(); err != nil {
+		return SessionDTO{}, err
+	}
+	sess, err := s.store.Session(id)
+	if err != nil {
+		return SessionDTO{}, err
+	}
+	return ToSessionDTO(sess), nil
+}
+
+// UpdateSession replaces a session's editable fields (ID and placement
+// required to be unchanged; use MoveNode to move).
+//
+// Password-merge rule (Phase 4b, task 5): the session editor never
+// receives stored passwords, so an empty incoming Password field for a
+// password-auth session means "keep the current password". When the
+// stored auth (or jump-host auth at the same index) is a password and
+// the incoming DTO's password is "", the stored password is preserved.
+// This applies only when the incoming auth still selects password (so a
+// password→key switch with a blank password does not resurrect the old
+// credential and break the auth XOR invariant). The merged result still
+// passes model.Validate before it is written.
 func (s *SessionService) UpdateSession(input SessionInput) error {
 	if err := s.requireUnlocked(); err != nil {
 		return err
@@ -88,7 +144,27 @@ func (s *SessionService) UpdateSession(input SessionInput) error {
 	if input.ID == "" {
 		return errors.New("sessionService: update requires the session ID")
 	}
-	return s.store.UpdateSession(input.toModel())
+	old, err := s.store.Session(input.ID)
+	if err != nil {
+		return err
+	}
+	sess := input.toModel()
+	mergeAuthPassword(&sess.Auth, old.Auth)
+	for i := range sess.JumpHosts {
+		if i < len(old.JumpHosts) {
+			mergeAuthPassword(&sess.JumpHosts[i].Auth, old.JumpHosts[i].Auth)
+		}
+	}
+	return s.store.UpdateSession(sess)
+}
+
+// mergeAuthPassword preserves a stored password when the incoming auth
+// is a password type with a blank password. src is the stored credential;
+// dst is the incoming one. A non-password incoming type is left untouched.
+func mergeAuthPassword(dst *model.Auth, src model.Auth) {
+	if dst.Type == model.AuthPassword && dst.Password == "" && src.Password != "" {
+		dst.Password = src.Password
+	}
 }
 
 // DuplicateSession copies a session into its folder with a " (copy)"

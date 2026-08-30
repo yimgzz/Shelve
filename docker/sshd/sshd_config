@@ -1,0 +1,16 @@
+# Minimal sshd_config for the integration-test image (docker/sshd).
+# This is TEST-ONLY and deliberately allows password auth for the known
+# "test"/"test" credential. See Dockerfile for the fixtures.
+Port 22
+ListenAddress 0.0.0.0
+
+PermitRootLogin no
+PasswordAuthentication yes
+PermitEmptyPasswords no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+PidFile /run/sshd.pid
+
+# Prefer the in-process sftp subsystem (no external /usr/lib/ssh/sftp-server).
+Subsystem sftp internal-sftp

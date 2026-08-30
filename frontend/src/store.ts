@@ -104,6 +104,28 @@ export interface ForwardDTO {
     error?: string;
 }
 
+/** One SFTP listing row (mirrors wailsvc.SftpEntryDTO; master plan §5). */
+export interface SftpEntryDTO {
+    name: string;
+    isDir: boolean;
+    size: number;
+    /** RFC3339 string (Go time.Time over the wire). */
+    modTime: string;
+    textLike: boolean;
+}
+
+/** Cached latest state of one in-flight transfer (Phase 5c, sftp:progress). */
+export interface SftpTransfer {
+    transferID: string;
+    direction: "up" | "down";
+    fileName: string;
+    doneBytes: number;
+    totalBytes: number;
+    error?: string;
+    /** True once the terminal event arrived (done == total, or an error). */
+    finished: boolean;
+}
+
 export interface StoreState {
     settings: Settings;
     vaultState: VaultState;
@@ -113,6 +135,12 @@ export interface StoreState {
     tabs: Tab[];
     activeTabID: string | null;
     leftPanelWidth: number;
+    /**
+     * tabID → ordered list of transfer snapshots (sftp:progress events,
+     * Phase 5c). The SFTP panel footer derives its progress line from this
+     * cache. Never persisted.
+     */
+    sftpTransfers: Record<string, SftpTransfer[]>;
     /**
      * tabID → session snapshot for tabs whose `terminal:status` event may
      * arrive before the optimistic tab is reconciled (Phase 4b task 4).
@@ -147,6 +175,7 @@ export const initialState: StoreState = {
     leftPanelWidth: DEFAULT_LEFT_WIDTH,
     pendingSessions: {},
     forwards: {},
+    sftpTransfers: {},
 };
 
 type Listener = (state: StoreState) => void;
@@ -257,7 +286,9 @@ class Store {
         }
         const forwards = { ...this.state.forwards };
         delete forwards[tabID];
-        this.set({ tabs: remaining, activeTabID: nextActive, forwards });
+        const sftpTransfers = { ...this.state.sftpTransfers };
+        delete sftpTransfers[tabID];
+        this.set({ tabs: remaining, activeTabID: nextActive, forwards, sftpTransfers });
     }
 
     /** Cache an ssh:forward lifecycle event for a tab (latest state per spec). */
@@ -267,6 +298,33 @@ class Store {
         this.set({
             forwards: { ...this.state.forwards, [tabID]: [...withoutSpec, fwd] },
         });
+    }
+
+    /**
+     * Upsert one transfer snapshot for a tab (sftp:progress, Phase 5c).
+     * Order of first appearance is preserved so the footer can show
+     * "file i of n" for the active transfer.
+     */
+    setSftpTransfer(tabID: string, t: SftpTransfer): void {
+        const list = (this.state.sftpTransfers[tabID] || []).slice();
+        const idx = list.findIndex((x) => x.transferID === t.transferID);
+        if (idx >= 0) {
+            list[idx] = t;
+        } else {
+            list.push(t);
+        }
+        this.set({ sftpTransfers: { ...this.state.sftpTransfers, [tabID]: list } });
+    }
+
+    /** Drop a tab's transfer cache (called when the tab closes). */
+    clearSftpTransfers(tabID: string): void {
+        const { sftpTransfers } = this.state;
+        if (!sftpTransfers[tabID]) {
+            return;
+        }
+        const next = { ...sftpTransfers };
+        delete next[tabID];
+        this.set({ sftpTransfers: next });
     }
 
     /** Mark a tab closed with an optional remote exit code (terminal:exit). */
@@ -310,6 +368,20 @@ class Store {
             ),
         });
     }
+}
+
+/**
+ * Single source of truth for whether the SFTP panel replaces the tree
+ * (master plan §6, phase 5c task 1): the setting must be on AND the active
+ * tab must be ready. Otherwise the tree shows (with a hint when the setting
+ * is on but no active ready tab exists).
+ */
+export function sftpPanelVisible(state: StoreState): boolean {
+    if (!state.settings.sftpBrowserEnabled) {
+        return false;
+    }
+    const tab = state.tabs.find((t) => t.id === state.activeTabID);
+    return !!tab && tab.state === "ready";
 }
 
 export const store = new Store();

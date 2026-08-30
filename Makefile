@@ -103,8 +103,11 @@ test-race: ensure-image ## Go unit tests with the race detector
 	$(DOCKER_RUN) --entrypoint go $(IMAGE) test -race ./...
 
 .PHONY: test-integration
-test-integration: ensure-image ## SSH integration tests (testcontainers)
-	@echo "not implemented yet (Phase 3: docker/sshd testcontainers setup)"
+test-integration: ensure-image ## SFTP/SSH integration tests (testcontainers; needs Docker socket)
+	@if [ ! -S /var/run/docker.sock ]; then echo "Docker socket /var/run/docker.sock not found" >&2; exit 1; fi
+	# --network host lets the test (running inside the dsm-dev container) reach
+	# the sshd container's published port on the host loopback (testcontainers).
+	$(DOCKER_RUN) -v /var/run/docker.sock:/var/run/docker.sock --network host --entrypoint go $(IMAGE) test -tags integration ./internal/sftp/
 
 .PHONY: smoke-vault
 smoke-vault: ensure-image ## Headless vault smoke (create→unlock→modify→lock) against a temp dir

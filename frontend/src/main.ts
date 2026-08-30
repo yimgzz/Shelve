@@ -109,6 +109,7 @@ function handleEvent(name: string, payload: unknown): void {
                     searchQ: "",
                     pendingSessions: {},
                     forwards: {},
+                    sftpTransfers: {},
                 });
                 void mount(next);
             }
@@ -154,10 +155,25 @@ function handleEvent(name: string, payload: unknown): void {
             });
             break;
         }
-        case EV.SftpProgress:
-            // Progress routing lands with the SFTP panel (Phase 5c).
-            console.debug(`[main] ${name}`, payload);
+        case EV.SftpProgress: {
+            // Per-tab transfer cache (Phase 5c): feed the SFTP panel's
+            // footer progress line. Finished when an error is set or the
+            // terminal event reports done == total.
+            const tabID = String(p.tabID ?? "");
+            const done = Number(p.doneBytes ?? 0);
+            const total = Number(p.totalBytes ?? 0);
+            const err = p.error != null ? String(p.error) : undefined;
+            store.setSftpTransfer(tabID, {
+                transferID: String(p.transferID ?? ""),
+                direction: p.direction === "down" ? "down" : "up",
+                fileName: String(p.fileName ?? ""),
+                doneBytes: done,
+                totalBytes: total,
+                error: err,
+                finished: !!err || (total > 0 && done >= total),
+            });
             break;
+        }
         default:
             console.warn(`[main] unhandled event ${name}`, payload);
     }

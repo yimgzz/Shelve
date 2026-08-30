@@ -27,6 +27,7 @@ minimal "scaffold ok" window. Roadmap: `.kilo/plans/` (master plan + phases 2-6)
 | `make run` | Run the built binary on the host (X11) |
 | `make test` | Go unit tests in the container |
 | `make test-race` | Go unit tests with the race detector |
+| `make test-integration` | SFTP/SSH integration tests via testcontainers (needs the Docker socket; builds `docker/sshd`) |
 | `make lint` | `gofmt` + `go vet` (container) + frontend `tsc --noEmit` |
 | `make clean` | Remove `bin/`, `frontend/dist/`, `frontend/bindings/` |
 | `make wails-init` | Re-merge the pinned Wails template (recreates frontend/build scaffolding) |
@@ -72,6 +73,33 @@ If the window fails to open under `make dev`:
 - **Settings** (gear menu → Settings): theme, auto-lock minutes, SFTP browser
   toggle, terminal font/size/scrollback, and the text-editor command are saved
   to `settings.json`. Theme and terminal options apply live.
+- **SFTP temp files & edit logs:** the app keeps per-edit temp copies and
+  editor logs under the config-directory `tmp/` (i.e.
+  `$XDG_CONFIG_HOME/dummy-ssh-manager/tmp/`). `tmp/edit-*.log` captures the
+  text editor's stdout/stderr — handy when a configured editor misbehaves.
+  Temp files are 0600 and are swept on vault lock, app exit, and at startup
+  (stale-sweep); a clean exit leaves `tmp/` empty.
+- **Text editor command (SFTP "Edit as text"):** set in Settings → Files →
+  "Text editor command". It is run verbatim (`strings.Fields`: a bare
+  executable plus space-separated arguments) with the temporary file path
+  appended **last** — e.g. `nano` or `xdg-open` work as-is; for an editor with
+  flags use something like `code --wait`. The app re-uploads automatically
+  once the edited copy has been stable for 3 s.
+- **SFTP scope (v1):** the left panel replaces the session tree while the
+  active session is ready — browse, upload, download, mkdir, rename, delete,
+  and "edit text file with system editor". Drag & drop uploads are **out of
+  scope for v1** (D4).
+
+## SFTP browser
+
+Enable it with **Ctrl+Shift+E** or Settings → General → "SFTP browser". With a
+connected (ready) tab active, the left panel becomes an SFTP browser rooted at
+the remote `$HOME`: breadcrumb navigation, [Upload] / [New folder] / [Refresh],
+double-click to open a folder, edit a text-like file in your system editor, or
+download others; right-click rows for Edit / Download / Upload to here / New
+folder / Rename / Delete. The footer shows live transfer progress. When the
+browser is enabled but no session is ready, the session tree shows with a hint
+line.
 
 ## Shortcuts
 

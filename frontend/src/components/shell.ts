@@ -5,10 +5,11 @@
 // menu (Phase 4d) that opens Settings / Lock vault / About.
 
 import { AppService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
-import { store, DEFAULT_LEFT_WIDTH, type Settings } from "../store";
+import { store, sftpPanelVisible, DEFAULT_LEFT_WIDTH, type Settings } from "../store";
 import { toast } from "./toasts";
 import { renderSearch } from "./search";
 import { renderTreeBody, openNewSession, openNewFolderAt } from "./tree";
+import { renderSftpPanel } from "./sftp-panel";
 import { openGearMenu } from "./gear";
 import { renderTabStrip } from "./tabs";
 import { renderTerminalView } from "./terminal-view";
@@ -88,11 +89,35 @@ export function renderShell(root: HTMLElement): void {
     toolbar.append(btnNewSession, btnNewFolder, spacer, gear);
     left.appendChild(toolbar);
 
-    // Tree / search body (scrollable).
+    // Tree / search body (scrollable) + a hint shown when the SFTP browser
+    // is enabled but no active ready tab exists (Phase 5c task 1).
     const treeHost = document.createElement("div");
     treeHost.className = "tree-body";
     left.appendChild(treeHost);
     renderTreeBody(treeHost);
+
+    const sftpHint = document.createElement("div");
+    sftpHint.className = "sftp-hint";
+    sftpHint.textContent = "Connect to a session to open the SFTP browser";
+
+    // SFTP panel host (always mounted; display toggled by the visibility rule).
+    const sftpHost = document.createElement("div");
+    sftpHost.className = "sftp-host";
+    left.append(sftpHint, sftpHost);
+    renderSftpPanel(sftpHost);
+
+    // Single source of truth (store.sftpPanelVisible): the panel replaces
+    // the tree only when the setting is on AND the active tab is ready.
+    const applyLeftMode = () => {
+        const st = store.getState();
+        const panel = sftpPanelVisible(st);
+        treeHost.style.display = panel ? "none" : "";
+        sftpHost.style.display = panel ? "" : "none";
+        sftpHint.style.display = st.settings.sftpBrowserEnabled && !panel ? "" : "none";
+    };
+    const leftModeUnsub = store.subscribe(applyLeftMode);
+    applyLeftMode();
+    void leftModeUnsub; // kept alive for the shell's lifetime
 
     root.appendChild(left);
 

@@ -95,7 +95,7 @@ export function openSettingsDialog(): void {
     sftpCheck.className = "settings-check";
     sftpCheck.checked = current.sftpBrowserEnabled;
     const sftpWrap = settingField("SFTP browser", sftpCheck, {
-        hint: "Replaces the session tree when a session is active (panel ships in a later phase).",
+        hint: "Replaces the session tree with the SFTP browser when a session is active.",
     });
     sftpWrap.classList.add("settings-check-wrap");
     general.appendChild(sftpWrap);

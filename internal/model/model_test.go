@@ -158,6 +158,22 @@ func TestSessionValidationRules(t *testing.T) {
 		}
 	})
 
+	t.Run("sftpInitialPath valid values", func(t *testing.T) {
+		for _, p := range []string{"", "~", "~/data", "/srv/www", "/tmp"} {
+			s := validSession()
+			s.SftpInitialPath = p
+			if err := s.Validate(); err != nil {
+				t.Fatalf("path %q rejected: %v", p, err)
+			}
+		}
+	})
+
+	t.Run("sftpInitialPath rejects relative path", func(t *testing.T) {
+		s := validSession()
+		s.SftpInitialPath = "data/sub"
+		wantFieldErr(t, s, "session.sftpInitialPath: must be empty, absolute, or ~-prefixed")
+	})
+
 	t.Run("multiple violations joined", func(t *testing.T) {
 		s := Session{}
 		err := s.Validate()

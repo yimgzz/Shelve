@@ -43,40 +43,76 @@ const modFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyl
 
 // ----------------------------------------------------------- path helpers ---
 
-/** Join a remote directory with a child name, keeping the "~" home prefix. */
+/** Root marker of a path: "~" for home-relative, "/" for absolute. */
+function pathRoot(p: string): string {
+    if (p === "" || p === "~" || p.startsWith("~/")) {
+        return "~";
+    }
+    return "/";
+}
+
+/** The path with its root prefix stripped ("" for home/root itself). */
+function stripRoot(p: string): string {
+    if (p === "~") {
+        return "";
+    }
+    if (p.startsWith("~/")) {
+        return p.slice(2);
+    }
+    return p.replace(/^\/+/, "");
+}
+
+/** Join a remote directory with a child name, keeping the root prefix. */
 function joinRemote(base: string, name: string): string {
     if (base === "" || base === "~") {
         return `~/${name}`;
     }
-    return `${base}/${name}`;
+    return `${base.replace(/\/+$/, "")}/${name}`;
 }
 
-/** Parent of a "~"-relative path ("~" → "~"). */
+/** Parent of a path ("~" → "~", "/" → "/"). */
 function parentOf(p: string): string {
     if (!p || p === "~") {
         return "~";
     }
-    const s = p.startsWith("~/") ? p.slice(2) : p;
+    const root = pathRoot(p);
+    const s = stripRoot(p);
     const i = s.lastIndexOf("/");
-    if (i <= 0) {
-        return "~";
+    if (i < 0) {
+        return root; // single segment → back to root
     }
-    return `~/${s.slice(0, i)}`;
+    const parent = s.slice(0, i);
+    if (parent === "") {
+        return root;
+    }
+    return root === "~" ? `~/${parent}` : `/${parent}`;
 }
 
-/** Path segments after the home prefix ([] for home itself). */
+/** Path segments after the root prefix ([] for the root itself). */
 function segmentsOf(p: string): string[] {
     if (!p || p === "~") {
         return [];
     }
-    const s = p.startsWith("~/") ? p.slice(2) : p;
-    return s.split("/").filter(Boolean);
+    return stripRoot(p).split("/").filter(Boolean);
 }
 
-/** Rebuild the full "~"-relative path for the segment at `idx`. */
+/** Rebuild the full path for the segment at `idx` (relative to the root). */
 function segmentPath(idx: number): string {
+    const root = pathRoot(curPath);
     const segs = segmentsOf(curPath);
-    return `~/${segs.slice(0, idx + 1).join("/")}`;
+    const prefix = segs.slice(0, idx + 1).join("/");
+    return root === "~" ? `~/${prefix}` : `/${prefix}`;
+}
+
+/**
+ * Resolve the SFTP browser start path for the active tab (plan P002 §4.1):
+ * per-session value (if set) → global settings default → "~".
+ */
+function initialPath(): string {
+    const { activeTabID, tabs, settings } = store.getState();
+    const t = tabs.find((x) => x.id === activeTabID);
+    const per = (t?.session && t.session.sftpInitialPath) || "";
+    return per || settings.sftpInitialPath || "~";
 }
 
 // ------------------------------------------------------------ lifecycle ---
@@ -94,7 +130,7 @@ export function renderSftpPanel(target: HTMLElement): void {
     const { activeTabID, tabs } = store.getState();
     const t = tabs.find((x) => x.id === activeTabID);
     tabID = t && t.state === "ready" ? activeTabID! : "";
-    curPath = "~";
+    curPath = initialPath();
     selected = null;
     inlineCreate = false;
     inlineRename = null;
@@ -120,7 +156,7 @@ function refresh(): void {
     if (ready !== tabID) {
         // Active tab changed → reset navigation and any live edit.
         tabID = ready;
-        curPath = "~";
+        curPath = initialPath();
         selected = null;
         inlineCreate = false;
         inlineRename = null;
@@ -349,11 +385,9 @@ function openEntry(entry: SftpEntryDTO): void {
         void loadList();
         return;
     }
-    if (entry.textLike) {
-        void startEdit(entry);
-        return;
-    }
-    void downloadSave(entry);
+    // Non-directory double-click opens the file with the local default app
+    // (plan P002 §4.2); "Edit as text" stays a context-menu action.
+    void openRemote(entry);
 }
 
 async function startEdit(entry: SftpEntryDTO): Promise<void> {
@@ -374,6 +408,15 @@ async function cancelEdit(): Promise<void> {
         editingPath = null;
         renderList();
         updateStatus();
+    } catch (err) {
+        toast("error", String(err));
+    }
+}
+
+/** Open a remote file with the local default app via OpenRemoteFile. */
+async function openRemote(entry: SftpEntryDTO): Promise<void> {
+    try {
+        await SftpService.OpenRemoteFile(tabID, joinRemote(curPath, entry.name));
     } catch (err) {
         toast("error", String(err));
     }
@@ -597,14 +640,15 @@ function renderBreadcrumb(): void {
         return;
     }
     bc.textContent = "";
+    const root = pathRoot(curPath);
     const home = document.createElement("button");
     home.type = "button";
     home.className = "crumb";
-    home.textContent = "~";
-    home.title = "Remote home ($HOME)";
+    home.textContent = root;
+    home.title = root === "~" ? "Remote home ($HOME)" : "Filesystem root";
     home.addEventListener("click", () => {
-        if (curPath !== "~") {
-            curPath = "~";
+        if (curPath !== root) {
+            curPath = root;
             void loadList();
         }
     });
@@ -632,7 +676,7 @@ function renderBreadcrumb(): void {
     });
 
     if (backBtn) {
-        backBtn.disabled = curPath === "~";
+        backBtn.disabled = parentOf(curPath) === curPath;
     }
 }
 

@@ -47,6 +47,8 @@ export interface SessionInput {
     keyPath?: string;
     jumpHosts: JumpHostInput[];
     extraArgs: string;
+    /** Per-session SFTP browser start path (blank = global default). Plan P002. */
+    sftpInitialPath?: string;
 }
 
 const EXTRA_ARGS_HELP =
@@ -337,7 +339,19 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         );
     });
 
-    body.append(nameF.wrap, hostF.wrap, portF.wrap, userF.wrap, authSection, jumpSection, extraF.wrap);
+    // ---- SFTP start path (plan P002) ----
+    const sftpPath = document.createElement("input");
+    sftpPath.type = "text";
+    sftpPath.className = "input mono";
+    sftpPath.autocomplete = "off";
+    sftpPath.spellcheck = false;
+    sftpPath.placeholder = "~/data (blank = global default)";
+    sftpPath.value = editing && initial!.sftpInitialPath ? initial!.sftpInitialPath : "";
+    const sftpPathF = field("SFTP start path", sftpPath, {
+        hint: "Directory the SFTP browser opens in for this session. Absolute or ~-relative; blank uses the global default.",
+    });
+
+    body.append(nameF.wrap, hostF.wrap, portF.wrap, userF.wrap, authSection, jumpSection, extraF.wrap, sftpPathF.wrap);
 
     // ---- Footer ----
     const footer = document.createElement("div");
@@ -395,6 +409,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
                 keyPath: h.keyRadio.checked ? h.keyPath.value.trim() : undefined,
             })),
             extraArgs: extraArgs.value.trim(),
+            sftpInitialPath: sftpPath.value.trim(),
         };
         const localErr: Array<[HTMLElement, string]> = [];
         if (!input.name) {

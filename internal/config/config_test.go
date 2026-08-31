@@ -158,6 +158,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	s.ThemeVariant = "catppuccin-mocha"
 	s.AutoLockMinutes = 15
 	s.SftpBrowserEnabled = true
+	s.SftpInitialPath = "/srv/data"
+	s.SftpOpenCommand = "xdg-open --raw"
 	s.Terminal.FontSize = 14
 	s.Window.Width = 1440
 	s.Window.Height = 900
@@ -284,10 +286,34 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 	for k := range m {
 		switch k {
 		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "terminal",
-			"textEditorCommand", "window":
+			"textEditorCommand", "sftpInitialPath", "sftpOpenCommand", "window":
 		default:
 			t.Fatalf("unexpected settings key %q", k)
 		}
+	}
+}
+
+// TestSftpDefaultsAndNormalize verifies the SFTP settings get their fallback
+// defaults and empty values normalize correctly (plan P002 §4.1).
+func TestSftpDefaultsAndNormalize(t *testing.T) {
+	d := DefaultSettings()
+	if d.SftpInitialPath != "~" || d.SftpOpenCommand != "xdg-open" {
+		t.Fatalf("defaults = initial %q open %q, want ~ / xdg-open", d.SftpInitialPath, d.SftpOpenCommand)
+	}
+	isolatedXDG(t)
+	raw := `{"sftpInitialPath":"","sftpOpenCommand":""}`
+	if err := os.MkdirAll(Path(), DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(File(SettingsFileName), []byte(raw), FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.SftpInitialPath != "~" || got.SftpOpenCommand != "xdg-open" {
+		t.Fatalf("normalized = initial %q open %q, want ~ / xdg-open", got.SftpInitialPath, got.SftpOpenCommand)
 	}
 }
 

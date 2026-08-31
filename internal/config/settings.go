@@ -37,6 +37,8 @@ type Settings struct {
 	SftpBrowserEnabled bool             `json:"sftpBrowserEnabled"`
 	Terminal           TerminalSettings `json:"terminal"`
 	TextEditorCommand  string           `json:"textEditorCommand"`
+	SftpInitialPath    string           `json:"sftpInitialPath"` // global SFTP browser start path ("~" default)
+	SftpOpenCommand    string           `json:"sftpOpenCommand"` // local handler for Open (xdg-open default)
 	Window             WindowSettings   `json:"window"`
 }
 
@@ -53,6 +55,8 @@ func DefaultSettings() Settings {
 			Scrollback: 10000,
 		},
 		TextEditorCommand: "xdg-open",
+		SftpInitialPath:   "~",
+		SftpOpenCommand:   "xdg-open",
 		Window: WindowSettings{
 			Width:     1280,
 			Height:    800,
@@ -104,6 +108,12 @@ func (s *Settings) normalize() {
 	s.ThemeVariant = strings.TrimSpace(s.ThemeVariant)
 	if s.TextEditorCommand == "" {
 		s.TextEditorCommand = "xdg-open"
+	}
+	if s.SftpInitialPath == "" {
+		s.SftpInitialPath = "~"
+	}
+	if s.SftpOpenCommand == "" {
+		s.SftpOpenCommand = "xdg-open"
 	}
 	if s.Terminal.FontFamily == "" {
 		s.Terminal.FontFamily = "monospace"

@@ -31,33 +31,35 @@ type JumpHostDTO struct {
 
 // SessionDTO is a session read view: no password material.
 type SessionDTO struct {
-	ID          string         `json:"id"`
-	FolderID    string         `json:"folderId"`
-	Name        string         `json:"name"`
-	Host        string         `json:"host"`
-	Port        int            `json:"port"`
-	User        string         `json:"user"`
-	AuthType    model.AuthType `json:"authType"`
-	HasPassword bool           `json:"hasPassword"`
-	KeyPath     string         `json:"keyPath,omitempty"`
-	JumpHosts   []JumpHostDTO  `json:"jumpHosts"`
-	ExtraArgs   string         `json:"extraArgs"`
+	ID              string         `json:"id"`
+	FolderID        string         `json:"folderId"`
+	Name            string         `json:"name"`
+	Host            string         `json:"host"`
+	Port            int            `json:"port"`
+	User            string         `json:"user"`
+	AuthType        model.AuthType `json:"authType"`
+	HasPassword     bool           `json:"hasPassword"`
+	KeyPath         string         `json:"keyPath,omitempty"`
+	JumpHosts       []JumpHostDTO  `json:"jumpHosts"`
+	ExtraArgs       string         `json:"extraArgs"`
+	SftpInitialPath string         `json:"sftpInitialPath,omitempty"`
 }
 
 // SessionInput carries a session draft from the frontend. It may include
 // passwords; they only ever reach the vault inside the encrypted payload.
 type SessionInput struct {
-	ID        string          `json:"id,omitempty"`
-	FolderID  string          `json:"folderId"`
-	Name      string          `json:"name"`
-	Host      string          `json:"host"`
-	Port      int             `json:"port"`
-	User      string          `json:"user"`
-	AuthType  model.AuthType  `json:"authType"`
-	Password  string          `json:"password,omitempty"`
-	KeyPath   string          `json:"keyPath,omitempty"`
-	JumpHosts []JumpHostInput `json:"jumpHosts"`
-	ExtraArgs string          `json:"extraArgs"`
+	ID              string          `json:"id,omitempty"`
+	FolderID        string          `json:"folderId"`
+	Name            string          `json:"name"`
+	Host            string          `json:"host"`
+	Port            int             `json:"port"`
+	User            string          `json:"user"`
+	AuthType        model.AuthType  `json:"authType"`
+	Password        string          `json:"password,omitempty"`
+	KeyPath         string          `json:"keyPath,omitempty"`
+	JumpHosts       []JumpHostInput `json:"jumpHosts"`
+	ExtraArgs       string          `json:"extraArgs"`
+	SftpInitialPath string          `json:"sftpInitialPath,omitempty"`
 }
 
 // JumpHostInput is the write view of a jump host.
@@ -72,14 +74,15 @@ type JumpHostInput struct {
 
 func (in SessionInput) toModel() model.Session {
 	sess := model.Session{
-		ID:        in.ID,
-		FolderID:  in.FolderID,
-		Name:      in.Name,
-		Host:      in.Host,
-		Port:      in.Port,
-		User:      in.User,
-		Auth:      model.Auth{Type: in.AuthType, Password: in.Password, KeyPath: in.KeyPath},
-		ExtraArgs: in.ExtraArgs,
+		ID:              in.ID,
+		FolderID:        in.FolderID,
+		Name:            in.Name,
+		Host:            in.Host,
+		Port:            in.Port,
+		User:            in.User,
+		Auth:            model.Auth{Type: in.AuthType, Password: in.Password, KeyPath: in.KeyPath},
+		ExtraArgs:       in.ExtraArgs,
+		SftpInitialPath: in.SftpInitialPath,
 	}
 	sess.JumpHosts = make([]model.JumpHost, 0, len(in.JumpHosts))
 	for _, j := range in.JumpHosts {
@@ -107,16 +110,17 @@ func toJumpDTO(j model.JumpHost) JumpHostDTO {
 // ToSessionDTO converts a model session to its secret-free read view.
 func ToSessionDTO(sess model.Session) SessionDTO {
 	dto := SessionDTO{
-		ID:          sess.ID,
-		FolderID:    sess.FolderID,
-		Name:        sess.Name,
-		Host:        sess.Host,
-		Port:        sess.Port,
-		User:        sess.User,
-		AuthType:    sess.Auth.Type,
-		HasPassword: sess.Auth.Password != "",
-		KeyPath:     sess.Auth.KeyPath,
-		ExtraArgs:   sess.ExtraArgs,
+		ID:              sess.ID,
+		FolderID:        sess.FolderID,
+		Name:            sess.Name,
+		Host:            sess.Host,
+		Port:            sess.Port,
+		User:            sess.User,
+		AuthType:        sess.Auth.Type,
+		HasPassword:     sess.Auth.Password != "",
+		KeyPath:         sess.Auth.KeyPath,
+		ExtraArgs:       sess.ExtraArgs,
+		SftpInitialPath: sess.SftpInitialPath,
 	}
 	dto.JumpHosts = make([]JumpHostDTO, 0, len(sess.JumpHosts))
 	for _, j := range sess.JumpHosts {

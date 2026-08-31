@@ -160,6 +160,18 @@ export function openSettingsDialog(): void {
     sftpWrap.classList.add("settings-check-wrap");
     general.appendChild(sftpWrap);
 
+    const sftpPath = document.createElement("input");
+    sftpPath.type = "text";
+    sftpPath.className = "input mono";
+    sftpPath.autocomplete = "off";
+    sftpPath.spellcheck = false;
+    sftpPath.value = current.sftpInitialPath;
+    general.appendChild(
+        settingField("SFTP default path", sftpPath, {
+            hint: "Directory the SFTP browser opens in by default (~ = remote home).",
+        }),
+    );
+
     body.appendChild(general);
 
     // ------------------------------------------------------- Terminal ---
@@ -216,6 +228,18 @@ export function openSettingsDialog(): void {
         }),
     );
 
+    const openCmd = document.createElement("input");
+    openCmd.type = "text";
+    openCmd.className = "input mono";
+    openCmd.autocomplete = "off";
+    openCmd.spellcheck = false;
+    openCmd.value = current.sftpOpenCommand;
+    files.appendChild(
+        settingField("Open command", openCmd, {
+            hint: "Used to open remote files with your local apps (SFTP double-click).",
+        }),
+    );
+
     body.appendChild(files);
 
     // ---------------------------------------------------------- Footer ---
@@ -264,6 +288,8 @@ export function openSettingsDialog(): void {
                     scrollback: clamp(Math.round(Number(scrollback.value) || 10000), 500, 100000),
                 },
                 textEditorCommand: editor.value.trim() || "xdg-open",
+                sftpInitialPath: sftpPath.value.trim() || "~",
+                sftpOpenCommand: openCmd.value.trim() || "xdg-open",
                 window: { ...current.window },
             };
             store.set({ settings: full });

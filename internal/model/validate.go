@@ -94,6 +94,20 @@ func validNonEmpty(name string) bool {
 	return strings.TrimSpace(name) != ""
 }
 
+// validSftpPath accepts an empty value (use the global default), "~" or a
+// "~/"-relative path, or an absolute path. Relative/non-absolute paths other
+// than "~" are rejected (plan P002 §4.1).
+func validSftpPath(p string) bool {
+	switch {
+	case p == "":
+		return true
+	case p == "~" || strings.HasPrefix(p, "~/"):
+		return true
+	default:
+		return strings.HasPrefix(p, "/")
+	}
+}
+
 // checkAuth enforces the auth rules for one Auth (session or jump host):
 // exactly one of password/keyPath must be set, and Type must agree with
 // which one is set (master plan §4 XOR rule).
@@ -147,6 +161,9 @@ func (s *Session) validateFields(prefix string) []error {
 	}
 	if !validNonEmpty(s.User) {
 		errs = append(errs, fieldErr(prefix+".user", "must not be empty"))
+	}
+	if !validSftpPath(s.SftpInitialPath) {
+		errs = append(errs, fieldErr(prefix+".sftpInitialPath", "must be empty, absolute, or ~-prefixed"))
 	}
 	errs = append(errs, checkAuth(prefix, s.Auth)...)
 	for i, j := range s.JumpHosts {

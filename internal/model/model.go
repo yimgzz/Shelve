@@ -44,15 +44,16 @@ type Folder struct {
 
 // Session is a connectable SSH endpoint (master plan §4).
 type Session struct {
-	ID        string     `json:"id"`
-	FolderID  string     `json:"folderId"`
-	Name      string     `json:"name"`
-	Host      string     `json:"host"`
-	Port      int        `json:"port"`
-	User      string     `json:"user"`
-	Auth      Auth       `json:"auth"`
-	JumpHosts []JumpHost `json:"jumpHosts"`
-	ExtraArgs string     `json:"extraArgs"`
+	ID              string     `json:"id"`
+	FolderID        string     `json:"folderId"`
+	Name            string     `json:"name"`
+	Host            string     `json:"host"`
+	Port            int        `json:"port"`
+	User            string     `json:"user"`
+	Auth            Auth       `json:"auth"`
+	JumpHosts       []JumpHost `json:"jumpHosts"`
+	ExtraArgs       string     `json:"extraArgs"`
+	SftpInitialPath string     `json:"sftpInitialPath"` // per-session SFTP browser start path ("" = global default, plan P002)
 }
 
 // Payload is the plaintext document encrypted inside vault.json

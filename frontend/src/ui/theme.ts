@@ -109,17 +109,52 @@ export function currentVariantId(): string {
     return currentVariant;
 }
 
-/** Terminal palette (background/foreground) for the active variant, read
- *  from the CSS tokens set by data-variant. Falls back to the CSS-resolved
- *  default on error. */
-export function currentThemeTokens(): { background: string; foreground: string } {
+/** Terminal palette consumed by xterm.js (plan P003 T1). All fields are
+ *  concrete CSS color strings bound to the active variant. */
+export interface TerminalPalette {
+    background: string;
+    foreground: string;
+    cursor: string;
+    cursorAccent: string;
+    selectionBackground: string;
+}
+
+/** Convert a #rrggbb hex color to rgba() with the given alpha; null when the
+ *  input is not a plain 6-digit hex (custom-property values keep their token
+ *  text, so variants' hex accents arrive verbatim; xterm's color parser
+ *  rejects computed color-mix serializations, hence building rgba() here). */
+function hexToRgba(hex: string, alpha: number): string | null {
+    const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) {
+        return null;
+    }
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 0xff}, ${(n >> 8) & 0xff}, ${n & 0xff}, ${alpha})`;
+}
+
+/** Terminal palette (background/foreground/cursor/selection) for the active
+ *  variant, read from the CSS tokens set by data-variant. Falls back to the
+ *  CSS-resolved default on error. The cursor mirrors the text polarity —
+ *  dark-on-light in light variants, light-on-dark in dark variants — so it
+ *  stays visible in any theme (xterm's unset cursor defaults to white, which
+ *  is invisible on light backgrounds). */
+export function currentThemeTokens(): TerminalPalette {
     const cs = getComputedStyle(document.documentElement);
     const bg = cs.getPropertyValue("--terminal-bg").trim();
     const fg = cs.getPropertyValue("--terminal-fg").trim();
+    const accent = cs.getPropertyValue("--accent").trim();
     const dark = currentTheme() === "dark";
+    const background = bg || (dark ? "#1e1e2e" : "#f7f8fa");
+    const foreground = fg || (dark ? "#cdd6f4" : "#24292f");
     return {
-        background: bg || (dark ? "#1e1e2e" : "#f7f8fa"),
-        foreground: fg || (dark ? "#cdd6f4" : "#24292f"),
+        background,
+        foreground,
+        cursor: foreground,
+        cursorAccent: background,
+        // Accent at 30% alpha; xterm's default white-30% selection is
+        // invisible on light backgrounds.
+        selectionBackground:
+            hexToRgba(accent, 0.3) ?? (dark ? "rgba(102, 163, 255, 0.3)" : "rgba(30, 111, 217, 0.3)"),
     };
 }
 

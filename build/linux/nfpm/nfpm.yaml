@@ -3,7 +3,7 @@
 #
 # The lines below are called `modelines`. See `:help modeline`
 
-name: "dummy-ssh-manager"
+name: "shelve"
 arch: ${GOARCH}
 platform: "linux"
 version: "0.1.0"
@@ -11,18 +11,18 @@ section: "default"
 priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
 description: "Lightweight local SSH session manager (encrypted vault, no cloud)"
-vendor: "Dummy SSH Manager"
-homepage: "https://example.local/dummy-ssh-manager"
+vendor: "Shelve"
+homepage: "https://example.local/shelve"
 license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/dummy-ssh-manager"
-    dst: "/usr/local/bin/dummy-ssh-manager"
+  - src: "./bin/shelve"
+    dst: "/usr/local/bin/shelve"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/dummy-ssh-manager.png"
-  - src: "./build/linux/dummy-ssh-manager.desktop"
-    dst: "/usr/share/applications/dummy-ssh-manager.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/shelve.png"
+  - src: "./build/linux/shelve.desktop"
+    dst: "/usr/share/applications/shelve.desktop"
 
 # Default dependencies for the GTK4 + WebKitGTK 6.0 stack (Ubuntu 24.04+ / Debian 13+)
 depends:

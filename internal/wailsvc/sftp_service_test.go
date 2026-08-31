@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"dummy-ssh-manager/internal/sftp"
-	"dummy-ssh-manager/internal/store"
-	"dummy-ssh-manager/internal/vault"
+	"shelve/internal/sftp"
+	"shelve/internal/store"
+	"shelve/internal/vault"
 )
 
 // TestSftpServiceGating verifies every SftpService method enforces the

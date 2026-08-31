@@ -4,7 +4,7 @@
 // password shows an inline error + CSS shake. On success the vault
 // emits vault:state-changed and main.ts swaps to the app shell.
 
-import { VaultService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { VaultService } from "../../bindings/shelve/internal/wailsvc";
 
 export type UnlockMode = "create" | "locked";
 
@@ -45,7 +45,7 @@ export function renderUnlockGate(root: HTMLElement, mode: UnlockMode): void {
     brand.className = "unlock-brand";
     const title = document.createElement("h1");
     title.className = "unlock-title";
-    title.textContent = "Dummy SSH Manager";
+    title.textContent = "Shelve";
     const subtitle = document.createElement("p");
     subtitle.className = "unlock-subtitle";
     subtitle.textContent =

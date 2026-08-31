@@ -6,9 +6,9 @@
         <key>CFBundleName</key>
             <string>My Product</string>
         <key>CFBundleExecutable</key>
-            <string>dummy-ssh-manager</string>
+            <string>shelve</string>
         <key>CFBundleIdentifier</key>
-            <string>com.example.dummysshmanager</string>
+            <string>com.example.shelve</string>
         <key>CFBundleVersion</key>
             <string>0.1.0</string>
         <key>CFBundleGetInfoString</key>

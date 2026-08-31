@@ -9,7 +9,7 @@
 // headlessly (master plan Phase 2 goal).
 package wailsvc
 
-import "dummy-ssh-manager/internal/config"
+import "shelve/internal/config"
 
 // AppService exposes app-level metadata and user settings to the
 // frontend. Bound as "AppService" in the generated JS/TS bindings.

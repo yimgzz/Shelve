@@ -1,9 +1,9 @@
 package wailsvc
 
 import (
-	"dummy-ssh-manager/internal/sshengine"
-	"dummy-ssh-manager/internal/store"
-	"dummy-ssh-manager/internal/vault"
+	"shelve/internal/sshengine"
+	"shelve/internal/store"
+	"shelve/internal/vault"
 )
 
 // TerminalService exposes live terminal tabs to the frontend (master

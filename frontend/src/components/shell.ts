@@ -4,7 +4,7 @@
 // + terminal panes) and the status-band row. The toolbar hosts the gear
 // menu (Phase 4d) that opens Settings / Lock vault / About.
 
-import { AppService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { AppService } from "../../bindings/shelve/internal/wailsvc";
 import { store, sftpPanelVisible, DEFAULT_LEFT_WIDTH, type Settings } from "../store";
 import { toast } from "./toasts";
 import { renderSearch } from "./search";

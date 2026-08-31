@@ -6,7 +6,7 @@
 // or UI primitives. Components never call Events.On directly.
 
 import { Events } from "@wailsio/runtime";
-import { AppService, VaultService, SessionService } from "../bindings/dummy-ssh-manager/internal/wailsvc";
+import { AppService, VaultService, SessionService } from "../bindings/shelve/internal/wailsvc";
 
 import { store, type Settings, type VaultState, type NodeDTO, type TabState } from "./store";
 import { initTheme, refreshFromSystem } from "./ui/theme";

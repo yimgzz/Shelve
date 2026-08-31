@@ -10,13 +10,13 @@ import (
 	"log"
 	"time"
 
-	"dummy-ssh-manager/internal/config"
-	"dummy-ssh-manager/internal/sftp"
-	"dummy-ssh-manager/internal/sshengine"
-	"dummy-ssh-manager/internal/sshx/knownhosts"
-	"dummy-ssh-manager/internal/store"
-	"dummy-ssh-manager/internal/vault"
-	"dummy-ssh-manager/internal/wailsvc"
+	"shelve/internal/config"
+	"shelve/internal/sftp"
+	"shelve/internal/sshengine"
+	"shelve/internal/sshx/knownhosts"
+	"shelve/internal/store"
+	"shelve/internal/vault"
+	"shelve/internal/wailsvc"
 )
 
 // Version is the application version. Keep in sync with build/config.yml

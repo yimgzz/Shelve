@@ -3,11 +3,11 @@ package wailsvc
 import (
 	"errors"
 
-	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/sshengine"
-	"dummy-ssh-manager/internal/sshx"
-	"dummy-ssh-manager/internal/store"
-	"dummy-ssh-manager/internal/vault"
+	"shelve/internal/model"
+	"shelve/internal/sshengine"
+	"shelve/internal/sshx"
+	"shelve/internal/store"
+	"shelve/internal/vault"
 )
 
 // SearchResultDTO is one flat session search result (master plan §2 A9):

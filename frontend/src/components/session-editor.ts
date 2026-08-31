@@ -8,7 +8,7 @@
 // runs against the UNSAVED draft via SessionService.TestConnection
 // (host-key/key-passphrase prompt modals may appear mid-test = correct).
 
-import { SessionService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { SessionService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog, type DialogHandle } from "../ui/dialog";
 import { store, type SessionDTO, type JumpHostDTO } from "../store";
 import { toast } from "./toasts";

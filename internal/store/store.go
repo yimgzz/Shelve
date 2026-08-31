@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"dummy-ssh-manager/internal/model"
+	"shelve/internal/model"
 )
 
 // Sentinel errors.

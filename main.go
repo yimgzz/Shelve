@@ -6,8 +6,8 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"dummy-ssh-manager/internal/app"
-	"dummy-ssh-manager/internal/wailsvc"
+	"shelve/internal/app"
+	"shelve/internal/wailsvc"
 )
 
 // Wails embeds the built frontend (frontend/dist) into the binary and serves
@@ -27,7 +27,7 @@ func main() {
 	}
 
 	wailsApp := application.New(application.Options{
-		Name:        "dummy-ssh-manager",
+		Name:        "shelve",
 		Description: "Lightweight local SSH session manager",
 		Icon:        appIcon,
 		Assets: application.AssetOptions{
@@ -53,7 +53,7 @@ func main() {
 
 	wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:             "main",
-		Title:            "Dummy SSH Manager",
+		Title:            "Shelve",
 		Width:            1280,
 		Height:           800,
 		MinWidth:         960,

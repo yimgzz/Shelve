@@ -28,8 +28,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/sshx/knownhosts"
+	"shelve/internal/model"
+	"shelve/internal/sshx/knownhosts"
 )
 
 // ---------------------------------------------------------------------

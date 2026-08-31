@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"dummy-ssh-manager/internal/sshx/args"
+	"shelve/internal/sshx/args"
 )
 
 const (

@@ -21,9 +21,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/sshx"
-	"dummy-ssh-manager/internal/sshx/knownhosts"
+	"shelve/internal/model"
+	"shelve/internal/sshx"
+	"shelve/internal/sshx/knownhosts"
 )
 
 // Event names (master plan §5, Go→JS). The single source of truth for

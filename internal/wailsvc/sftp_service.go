@@ -1,9 +1,9 @@
 package wailsvc
 
 import (
-	"dummy-ssh-manager/internal/config"
-	"dummy-ssh-manager/internal/sftp"
-	"dummy-ssh-manager/internal/vault"
+	"shelve/internal/config"
+	"shelve/internal/sftp"
+	"shelve/internal/vault"
 )
 
 // SftpService exposes SFTP browse, transfer and remote text-editing

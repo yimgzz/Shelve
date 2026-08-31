@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=dummy-ssh-manager
-Exec=dummy-ssh-manager
-Icon=dummy-ssh-manager
+Name=shelve
+Exec=shelve
+Icon=shelve
 Categories=Development;
 Terminal=false
 Keywords=wails

@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"dummy-ssh-manager/internal/vault"
+	"shelve/internal/vault"
 )
 
 func fail(format string, args ...any) {

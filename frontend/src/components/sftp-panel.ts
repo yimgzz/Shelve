@@ -11,7 +11,7 @@
 // Footer carries the transfer progress line fed by the store's sftp:progress
 // cache and the "Editing <path> …" status line.
 
-import { SftpService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { SftpService } from "../../bindings/shelve/internal/wailsvc";
 import { store, type SftpEntryDTO } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { confirmDialog } from "./confirm";

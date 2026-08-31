@@ -15,7 +15,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/sshx/knownhosts"
+	"shelve/internal/sshx/knownhosts"
 )
 
 func tcpAddr(port int) *net.TCPAddr {

@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/sshx/knownhosts"
+	"shelve/internal/sshx/knownhosts"
 )
 
 // defaultSSHPort is the fallback port when neither the dial address

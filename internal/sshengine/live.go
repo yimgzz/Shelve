@@ -13,9 +13,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/sshx"
-	"dummy-ssh-manager/internal/sshx/args"
+	"shelve/internal/model"
+	"shelve/internal/sshx"
+	"shelve/internal/sshx/args"
 )
 
 // Batching / backpressure parameters (master plan §2 A6, §5).

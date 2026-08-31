@@ -5,13 +5,13 @@ version: '3'
 
 # This information is used to generate the build assets.
 # NOTE: after editing `info` run `wails3 task common:update:build-assets`
-# (in the dsm-dev image) to regenerate the platform assets.
+# (in the shelve-dev image) to regenerate the platform assets.
 info:
-  companyName: "Dummy SSH Manager" # The name of the company
-  productName: "Dummy SSH Manager" # The name of the application
-  productIdentifier: "io.dummy.sshmanager" # The unique product identifier
+  companyName: "Shelve" # The name of the company
+  productName: "Shelve" # The name of the application
+  productIdentifier: "io.shelve.app" # The unique product identifier
   description: "Lightweight local SSH session manager" # The application description
-  copyright: "(c) 2026, Dummy SSH Manager" # Copyright text
+  copyright: "(c) 2026, Shelve" # Copyright text
   comments: "Local-first SSH session manager: Go + Wails v3, encrypted vault" # Comments
   version: "0.1.0" # The application version
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)

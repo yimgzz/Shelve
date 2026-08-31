@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/model"
+	"shelve/internal/model"
 )
 
 // ErrKeyPassphraseRequired is returned when the key file is

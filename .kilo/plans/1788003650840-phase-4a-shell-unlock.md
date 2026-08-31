@@ -43,7 +43,7 @@ The application skeleton: theme engine + CSS tokens + layout (`left panel | spli
 
 ## Verification
 - `make lint` (tsc noEmit + eslint) clean; `make test` green; `make build` succeeds.
-- Manual (`make run`, fresh config dir = remove `~/.config/dummy-ssh-manager`):
+- Manual (`make run`, fresh config dir = remove `~/.config/shelve`):
   1. create-vault flow (weak-password hint, confirm-mismatch error) → unlock → shell renders in both themes.
   2. wrong master password → inline error + shake.
   3. theme: follows OS toggle live; manual light/dark persists across restart; no FOUC flash on reload.

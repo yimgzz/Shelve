@@ -20,7 +20,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
-import { TerminalService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { TerminalService } from "../../bindings/shelve/internal/wailsvc";
 import type { TerminalSettings } from "../store";
 import type { EffectiveTheme } from "../ui/theme";
 import { bytesToB64 } from "../ui/b64";

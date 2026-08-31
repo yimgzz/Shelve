@@ -18,7 +18,7 @@
 // closeTab): those bridge the Wails service bindings and the reactive
 // state in one place so components stay presentation-only.
 
-import { SessionService, TerminalService } from "../bindings/dummy-ssh-manager/internal/wailsvc";
+import { SessionService, TerminalService } from "../bindings/shelve/internal/wailsvc";
 import { toast } from "./components/toasts";
 
 export type VaultState = "create" | "locked" | "unlocked";

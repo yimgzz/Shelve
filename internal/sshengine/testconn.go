@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/model"
+	"shelve/internal/model"
 )
 
 // TestConnection dials the hop chain without opening a terminal or any

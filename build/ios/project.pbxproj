@@ -180,7 +180,7 @@
 					"$(inherited)",
 					"-ObjC",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.example.dummysshmanager";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.shelve";
 				PRODUCT_NAME = "My Product";
 				CODE_SIGNING_ALLOWED = NO;
 				SDKROOT = iphoneos;
@@ -196,7 +196,7 @@
 					"$(inherited)",
 					"-ObjC",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.example.dummysshmanager";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.example.shelve";
 				PRODUCT_NAME = "My Product";
 				CODE_SIGNING_ALLOWED = NO;
 				SDKROOT = iphoneos;

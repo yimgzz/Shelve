@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
 Name=My Product
-Comment=A dummy-ssh-manager application
+Comment=A shelve application
 # The Exec line includes %u to pass the URL to the application
-Exec=/usr/local/bin/dummy-ssh-manager %u
+Exec=/usr/local/bin/shelve %u
 Terminal=false
 Type=Application
-Icon=dummy-ssh-manager
+Icon=shelve
 Categories=Utility;
-StartupWMClass=dummy-ssh-manager
+StartupWMClass=shelve
 
  

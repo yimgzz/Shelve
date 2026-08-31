@@ -1,5 +1,5 @@
 // Package config manages the on-disk configuration layout under
-// $XDG_CONFIG_HOME/dummy-ssh-manager (master plan §4): directories 0700,
+// $XDG_CONFIG_HOME/shelve (master plan §4): directories 0700,
 // files 0600, all writes atomic (temp file + rename).
 package config
 
@@ -10,7 +10,7 @@ import (
 
 const (
 	// DirName is the app's XDG config directory name.
-	DirName = "dummy-ssh-manager"
+	DirName = "shelve"
 	// SettingsFileName holds unencrypted user settings.
 	SettingsFileName = "settings.json"
 	// VaultFileName holds the encrypted credential envelope (Phase 2).
@@ -29,7 +29,7 @@ const (
 )
 
 // Path returns the app's config directory:
-// $XDG_CONFIG_HOME/dummy-ssh-manager, falling back to ~/.config/dummy-ssh-manager.
+// $XDG_CONFIG_HOME/shelve, falling back to ~/.config/shelve.
 func Path() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, DirName)

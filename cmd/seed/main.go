@@ -13,9 +13,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"dummy-ssh-manager/internal/config"
-	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/vault"
+	"shelve/internal/config"
+	"shelve/internal/model"
+	"shelve/internal/vault"
 )
 
 // seedPassword is the documented master password for the QA vault: after

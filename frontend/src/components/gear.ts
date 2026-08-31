@@ -3,7 +3,7 @@
 // [About]. Lock is the real vault lock: confirm only when tabs are `ready`
 // (their connections would be dropped); otherwise it locks immediately.
 
-import { AppService, VaultService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { AppService, VaultService } from "../../bindings/shelve/internal/wailsvc";
 import { store } from "../store";
 import { openContextMenu } from "./context-menu";
 import { openSettingsDialog } from "./settings-dialog";
@@ -59,7 +59,7 @@ async function showAbout(): Promise<void> {
     body.className = "about-body";
     const name = document.createElement("div");
     name.className = "about-name";
-    name.textContent = "Dummy SSH Manager";
+    name.textContent = "Shelve";
     const ver = document.createElement("div");
     ver.className = "hint";
     ver.textContent = version ? `Version ${version}` : "";

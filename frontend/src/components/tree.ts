@@ -7,7 +7,7 @@
 // (Connect/Edit/Duplicate/Move to…/Delete), F2 inline rename, inline new
 // folder. Expand/collapse is component-local (not persisted in v1).
 
-import { SessionService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { SessionService } from "../../bindings/shelve/internal/wailsvc";
 import { store, type NodeDTO, type SearchResultDTO } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { openSessionEditor } from "./session-editor";

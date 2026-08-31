@@ -5,11 +5,11 @@ import (
 	"log"
 	"time"
 
-	"dummy-ssh-manager/internal/config"
-	"dummy-ssh-manager/internal/sftp"
-	"dummy-ssh-manager/internal/sshengine"
-	"dummy-ssh-manager/internal/store"
-	"dummy-ssh-manager/internal/vault"
+	"shelve/internal/config"
+	"shelve/internal/sftp"
+	"shelve/internal/sshengine"
+	"shelve/internal/store"
+	"shelve/internal/vault"
 )
 
 // lockShutdownTimeout bounds the engine teardown inside Lock

@@ -1,11 +1,11 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in **Dummy SSH Manager**.
+Guidance for AI coding agents working in **Shelve**.
 
 A lightweight, fast, fully local SSH session manager. Go backend
 (`golang.org/x/crypto/ssh`) + Wails v3 frontend (vanilla TypeScript + Vite +
 xterm.js), no Electron. Sessions live in an encrypted vault (Argon2id +
-AES-256-GCM) under `$XDG_CONFIG_HOME/dummy-ssh-manager`.
+AES-256-GCM) under `$XDG_CONFIG_HOME/shelve`.
 
 **Status: v1.1 — feature-complete.** Phases 1–5c of the roadmap are done and
 the final gate is closed. The app is a working SSH session manager (encrypted
@@ -68,12 +68,12 @@ build/                       # wails build config (config.yml), appicon, linux p
 docker/sshd/                 # integration-test sshd image (Dockerfile + sshd_config)
 Taskfile.yml                 # wails-generated tasks
 Makefile                     # docker-driven targets (§7)
-Dockerfile.dev               # dsm-dev toolchain image
+Dockerfile.dev               # shelve-dev toolchain image
 ```
 
 ## 3. Build & development environment
 
-**The host needs Docker ONLY.** All compilation happens inside the `dsm-dev`
+**The host needs Docker ONLY.** All compilation happens inside the `shelve-dev`
 container image (golang 1.25-trixie + GTK4/WebKitGTK 6.0 + Node + pinned wails3
 CLI). The `run` target is the only one that executes code on the host; it needs
 the host distro's GTK4 + WebKitGTK 6.0 **runtime** libraries.
@@ -83,9 +83,9 @@ through the Makefile targets.
 
 | Command | Action |
 |---|---|
-| `make dev-image` | Build the `dsm-dev` toolchain image (lazy: `dev`/`build` do it automatically) |
+| `make dev-image` | Build the `shelve-dev` toolchain image (lazy: `dev`/`build` do it automatically) |
 | `make dev` | `wails3 dev` in the container — hot reload; window opens on the desktop |
-| `make build` | Release build in the container → `bin/dummy-ssh-manager` |
+| `make build` | Release build in the container → `bin/shelve` |
 | `make run` | Run the built binary on the host (X11) |
 | `make test` / `make test-race` | Go unit tests in the container (with `-race`) |
 | `make test-integration` | SFTP/SSH integration tests via testcontainers (needs Docker socket) |
@@ -108,7 +108,7 @@ Notes:
 
 | Concern | Choice |
 |---|---|
-| Language | Go ≥ 1.25, module `dummy-ssh-manager` |
+| Language | Go ≥ 1.25, module `shelve` |
 | GUI | Wails v3 (beta, pinned `v3.0.0-beta.15`); all Wails API usage isolated in `main.go` + `internal/wailsvc` |
 | SSH | `golang.org/x/crypto/ssh` |
 | KDF/cipher | Argon2id (m=64 MiB, t=3, p=4, 16 B salt, 32 B key) + AES-256-GCM (random 12 B nonce, AAD `"dsmsv1"`) |

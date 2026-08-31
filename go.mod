@@ -1,4 +1,4 @@
-module dummy-ssh-manager
+module shelve
 
 go 1.25.0
 

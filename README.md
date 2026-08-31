@@ -1,9 +1,9 @@
-# Dummy SSH Manager
+# Shelve
 
 A lightweight, fast, fully local SSH session manager. Go backend
 (`golang.org/x/crypto/ssh`) + Wails v3 frontend (vanilla TypeScript + Vite).
 Sessions live in an encrypted vault (Argon2id + AES-256-GCM) under
-`$XDG_CONFIG_HOME/dummy-ssh-manager`; no cloud, no telemetry, no accounts.
+`$XDG_CONFIG_HOME/shelve`; no cloud, no telemetry, no accounts.
 
 **Status:** v1.1 — feature-complete (Phases 1–5c done, final gate closed). The
 app is a working SSH session manager: encrypted vault, session tree + live
@@ -24,9 +24,9 @@ mkdir / rename / delete / edit-text-with-system-editor). Roadmap: `.kilo/plans/`
 
 | Command | Action |
 |---|---|
-| `make dev-image` | Build the `dsm-dev` toolchain image (lazy: `dev`/`build` do it automatically) |
+| `make dev-image` | Build the `shelve-dev` toolchain image (lazy: `dev`/`build` do it automatically) |
 | `make dev` | `wails3 dev` in the container — hot reload; the window opens on your desktop |
-| `make build` | Release build in the container → `bin/dummy-ssh-manager` |
+| `make build` | Release build in the container → `bin/shelve` |
 | `make run` | Run the built binary on the host (X11) |
 | `make test` | Go unit tests in the container |
 | `make test-race` | Go unit tests with the race detector |
@@ -41,7 +41,7 @@ mkdir / rename / delete / edit-text-with-system-editor). Roadmap: `.kilo/plans/`
   `XAUTHORITY` if `~/.Xauthority` exists). Works on X11 and on Wayland via
   XWayland — no native Wayland socket forwarding in v1.
 - `--network host` so the app can reach real SSH hosts.
-- `~/.config/dummy-ssh-manager` (created 0700) is mounted into the
+- `~/.config/shelve` (created 0700) is mounted into the
   container so the real vault/settings persist across runs.
 - Hot reload: frontend edits → Vite reloads the UI without a rebuild;
   Go edits → the app is rebuilt and restarted.
@@ -56,7 +56,7 @@ If the window fails to open under `make dev`:
    the reliable path:
 
    ```
-   make build   # compile in the container -> bin/dummy-ssh-manager
+   make build   # compile in the container -> bin/shelve
    make run     # launch the binary on the host (window on your desktop)
    ```
 
@@ -78,7 +78,7 @@ If the window fails to open under `make dev`:
   to `settings.json`. Theme and terminal options apply live.
 - **SFTP temp files & edit logs:** the app keeps per-edit temp copies and
   editor logs under the config-directory `tmp/` (i.e.
-  `$XDG_CONFIG_HOME/dummy-ssh-manager/tmp/`). `tmp/edit-*.log` captures the
+  `$XDG_CONFIG_HOME/shelve/tmp/`). `tmp/edit-*.log` captures the
   text editor's stdout/stderr — handy when a configured editor misbehaves.
   Temp files are 0600 and are swept on vault lock, app exit, and at startup
   (stale-sweep); a clean exit leaves `tmp/` empty.
@@ -211,7 +211,7 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
   notes above.
 - **X11 vs Wayland:** X11 forwarding works on X11 and on Wayland via XWayland;
   native Wayland socket forwarding is a v1 non-goal.
-- **SFTP "Edit as text" misbehaves:** check `$XDG_CONFIG_HOME/dummy-ssh-manager/tmp/edit-*.log`
+- **SFTP "Edit as text" misbehaves:** check `$XDG_CONFIG_HOME/shelve/tmp/edit-*.log`
   for the configured editor's stdout/stderr. The command is run verbatim
   (`strings.Fields`) with the temp file path appended last — use something like
   `nano`, `xdg-open`, or `code --wait`.
@@ -223,7 +223,7 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
 ## Pinned versions
 
 - Wails v3 CLI: **v3.0.0-beta.15** — `Dockerfile.dev` (`WAILS3_VERSION`)
-  and `go.mod` (module `dummy-ssh-manager`, `github.com/wailsapp/wails/v3`).
+  and `go.mod` (module `shelve`, `github.com/wailsapp/wails/v3`).
 - Base image: `golang:1.25-trixie` (Debian 13, GTK 4.18, WebKitGTK 6.0/2.52,
   Node 20).
 

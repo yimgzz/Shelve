@@ -33,7 +33,7 @@ The left-panel SFTP browser per master §6, the full container-based integration
    - Edit: text file in the container's `$HOME` with a real editor (`textEditorCommand=nano` or `xdg-open` fallback) → save → auto re-upload verified by remote mtime + content; cancel-edit path (fresh file → cancel → remote unchanged).
    - Lock mid-browse → clean unlock screen; NO `tmp/` leftovers after lock and after app exit (ls check); restart → stale sweep clean.
    - Code-review assertion: NO file bytes cross IPC — `Upload`/`Download` JS payloads are paths only (grep the binding usages).
-   - Global gates from a clean container state (fresh `dsm-dev` rebuild): `make build`, `make test`, `make lint`, `make test-integration` — ALL green.
+   - Global gates from a clean container state (fresh `shelve-dev` rebuild): `make build`, `make test`, `make lint`, `make test-integration` — ALL green.
    - `rg` sweep: no hardcoded test credentials outside `docker/sshd` and testdata fixtures.
 
 ## Verification

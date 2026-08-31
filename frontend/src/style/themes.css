@@ -1,4 +1,4 @@
-/* Dummy SSH Manager — theme token sets (master plan §6 Theming).
+/* Shelve — theme token sets (master plan §6 Theming).
    Tokens live under :root[data-theme="light"|"dark"]. The data-theme
    attribute is set by ui/theme.ts and by the inline FOUC guard in
    index.html (reads the localStorage["dsm-theme"] cache before first

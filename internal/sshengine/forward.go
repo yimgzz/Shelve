@@ -28,7 +28,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/sshx/args"
+	"shelve/internal/sshx/args"
 )
 
 // forwardSpec renders the human-readable spec for a parsed forward used

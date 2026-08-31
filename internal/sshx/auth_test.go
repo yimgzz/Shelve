@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"dummy-ssh-manager/internal/model"
+	"shelve/internal/model"
 )
 
 // writeKeyFile writes a PEM block to a 0600 file under t.TempDir and

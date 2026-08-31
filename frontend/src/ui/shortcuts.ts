@@ -9,7 +9,7 @@
 //
 // The router only acts while the vault is unlocked (no tree/tabs when locked).
 
-import { AppService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { AppService } from "../../bindings/shelve/internal/wailsvc";
 import { store } from "../store";
 import { focusSearch } from "../components/search";
 import {

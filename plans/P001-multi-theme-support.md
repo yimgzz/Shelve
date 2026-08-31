@@ -6,7 +6,7 @@
 
 ## 1. Goal
 
-Add **4–6 dark** and **4–6 light** theme variants to Dummy SSH Manager, selectable by
+Add **4–6 dark** and **4–6 light** theme variants to Shelve, selectable by
 the user, layered on top of the existing `system | light | dark` mode switch. The
 user picks a *mode* (how the app chooses a family) and a *variant* (which concrete
 palette within that family is applied). Terminal palettes must follow the selected

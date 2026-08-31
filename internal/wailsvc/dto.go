@@ -1,9 +1,9 @@
 package wailsvc
 
 import (
-	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/sftp"
-	"dummy-ssh-manager/internal/store"
+	"shelve/internal/model"
+	"shelve/internal/sftp"
+	"shelve/internal/store"
 	"time"
 )
 

@@ -22,7 +22,7 @@ import (
 	"strings"
 	"sync"
 
-	"dummy-ssh-manager/internal/config"
+	"shelve/internal/config"
 )
 
 const defaultPort = 22

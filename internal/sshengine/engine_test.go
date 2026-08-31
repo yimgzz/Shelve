@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/sshx/knownhosts"
+	"shelve/internal/model"
+	"shelve/internal/sshx/knownhosts"
 )
 
 // refusedAddr is a guaranteed-closed local port: dialing it fails fast

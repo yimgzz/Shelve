@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"dummy-ssh-manager/internal/config"
+	"shelve/internal/config"
 )
 
 const (

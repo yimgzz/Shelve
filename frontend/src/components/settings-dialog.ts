@@ -6,7 +6,7 @@
 // instances on Save (TermPool.applySettings). Save writes the FULL
 // settings object (including window geometry) through AppService.
 
-import { AppService } from "../../bindings/dummy-ssh-manager/internal/wailsvc";
+import { AppService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog } from "../ui/dialog";
 import { applyTheme, type ThemeMode } from "../ui/theme";
 import { store, type Settings } from "../store";

@@ -9,13 +9,13 @@ import (
 	"sync"
 	"testing"
 
-	"dummy-ssh-manager/internal/config"
-	"dummy-ssh-manager/internal/model"
-	"dummy-ssh-manager/internal/sftp"
-	"dummy-ssh-manager/internal/sshengine"
-	"dummy-ssh-manager/internal/sshx/knownhosts"
-	"dummy-ssh-manager/internal/store"
-	"dummy-ssh-manager/internal/vault"
+	"shelve/internal/config"
+	"shelve/internal/model"
+	"shelve/internal/sftp"
+	"shelve/internal/sshengine"
+	"shelve/internal/sshx/knownhosts"
+	"shelve/internal/store"
+	"shelve/internal/vault"
 )
 
 // guardPassword is a distinguishable secret that must never appear in

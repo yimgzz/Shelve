@@ -1,4 +1,4 @@
-# dsm-dev — the complete build toolchain for dummy-ssh-manager.
+# shelve-dev — the complete build toolchain for shelve.
 # The developer host needs Docker only (master plan §7).
 FROM golang:1.25-trixie
 
@@ -35,6 +35,6 @@ RUN git config --system --add safe.directory /app
 
 WORKDIR /app
 
-# Wails subcommands are the default entrypoint (`docker run dsm-dev build`, ...);
+# Wails subcommands are the default entrypoint (`docker run shelve-dev build`, ...);
 # the Makefile passes --entrypoint explicitly for non-wails commands.
 ENTRYPOINT ["wails3"]

@@ -1,12 +1,12 @@
-# dummy-ssh-manager — Docker-driven build system (master plan §7).
+# shelve — Docker-driven build system (master plan §7).
 #
-# The host needs Docker ONLY. All compilation happens inside the dsm-dev
+# The host needs Docker ONLY. All compilation happens inside the shelve-dev
 # image (golang:1.25-trixie + GTK4/WebKitGTK 6.0 + Node + pinned wails3 CLI).
 # The `run` target is the only one that executes code on the host: it needs
 # the GTK4 + WebKitGTK 6.0 runtime libraries from the host distro.
 
-APP     := dummy-ssh-manager
-IMAGE   := dsm-dev
+APP     := shelve
+IMAGE   := shelve-dev
 VITE_PORT := 9245
 ROOT    := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CONFIG  := $(HOME)/.config/$(APP)
@@ -15,7 +15,7 @@ GID     := $(shell id -g)
 
 # Persistent caches so repeated container runs don't re-download
 # Go modules / npm packages.
-CACHE_FLAGS := -v dsm-dev-gomod:/go/pkg/mod -v dsm-dev-npm:/root/.npm-cache
+CACHE_FLAGS := -v shelve-dev-gomod:/go/pkg/mod -v shelve-dev-npm:/root/.npm-cache
 
 # All in-container work mounts the repo at /app (the image's workdir).
 DOCKER_RUN := docker run --rm --init $(CACHE_FLAGS) -v $(ROOT):/app -w /app
@@ -52,7 +52,7 @@ help: ## Show this help
 # ---------------------------------------------------------------- image ---
 
 .PHONY: dev-image
-dev-image: ## Build the dsm-dev toolchain image
+dev-image: ## Build the shelve-dev toolchain image
 	docker build -t $(IMAGE) -f Dockerfile.dev .
 
 .PHONY: ensure-image
@@ -105,7 +105,7 @@ test-race: ensure-image ## Go unit tests with the race detector
 .PHONY: test-integration
 test-integration: ensure-image ## SFTP/SSH integration tests (testcontainers; needs Docker socket)
 	@if [ ! -S /var/run/docker.sock ]; then echo "Docker socket /var/run/docker.sock not found" >&2; exit 1; fi
-	# --network host lets the test (running inside the dsm-dev container) reach
+	# --network host lets the test (running inside the shelve-dev container) reach
 	# the sshd container's published port on the host loopback (testcontainers).
 	$(DOCKER_RUN) -v /var/run/docker.sock:/var/run/docker.sock --network host --entrypoint go $(IMAGE) test -tags integration ./internal/sftp/
 

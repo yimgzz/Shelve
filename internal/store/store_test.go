@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"dummy-ssh-manager/internal/model"
+	"shelve/internal/model"
 )
 
 func testSession(name string) model.Session {

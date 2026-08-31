@@ -13,6 +13,16 @@ CONFIG  := $(HOME)/.config/$(APP)
 UID     := $(shell id -u)
 GID     := $(shell id -g)
 
+# AppImage filename version — installers require <name>-<version>.AppImage
+# (appimagetool: "FATAL: Can't get version from ..."). Single source of
+# truth is build/config.yml `info.version`.
+APP_VERSION := $(shell awk -F'"' '/^[[:space:]]*version:[[:space:]]*"/{print $$2; exit}' build/config.yml)
+ifeq ($(strip $(APP_VERSION)),)
+APP_VERSION := 0.0.0
+endif
+# Host arch in wails/linuxdeploy naming (x86_64 / aarch64).
+PACKAGE_ARCH := $(shell uname -m)
+
 # Persistent caches so repeated container runs don't re-download
 # Go modules / npm packages.
 CACHE_FLAGS := -v shelve-dev-gomod:/go/pkg/mod -v shelve-dev-npm:/root/.npm-cache
@@ -160,13 +170,39 @@ lint: ensure-image ## gofmt + go vet (container) + frontend tsc --noEmit
 package: appimage ## Package the AppImage (single format; DEB/RPM remain stubs per cancelled Phase 6)
 
 .PHONY: appimage
-appimage: ensure-image ## Build a self-contained AppImage -> bin/shelve-<arch>.AppImage
+appimage: ensure-image ## Build a self-contained AppImage -> bin/shelve-<version>-<arch>.AppImage
 	$(DOCKER_RUN) $(IMAGE) task linux:create:appimage
 	$(MAKE) fix-owner
+	cp bin/$(APP)-$(PACKAGE_ARCH).AppImage bin/$(APP)-$(APP_VERSION)-$(PACKAGE_ARCH).AppImage
 
 .PHONY: appimage-check
 appimage-check: ## Verify bin/shelve-<arch>.AppImage contents + zero-dep ldd check (plan P004 T3)
 	./scripts/verify-appimage.sh
+
+# AppImage built on ALT Linux p11 — the project's primary distro family.
+# The trixie-built AppImage above requires host glibc >= 2.39 and libstdc++
+# with CXXABI_1.3.15 (GCC 14). alt:p11 (glibc 2.38 + GCC 13.2.1 + WebKitGTK
+# 6.0) lowers the portability floor to glibc >= 2.38 / GCC 13 libstdc++ —
+# ALT p10/p11, Ubuntu 24.04+, Fedora 39+, Debian 13, Arch (master §11).
+APPIMAGE_ALT_IMAGE := shelve-dev-appimage-alt
+
+.PHONY: appimage-alt-image
+appimage-alt-image: ## Build the ALT p11 AppImage toolchain image (Dockerfile.appimage-alt)
+	docker build -t $(APPIMAGE_ALT_IMAGE) -f Dockerfile.appimage-alt .
+
+.PHONY: ensure-appimage-alt-image
+ensure-appimage-alt-image:
+	@docker image inspect $(APPIMAGE_ALT_IMAGE) >/dev/null 2>&1 || $(MAKE) --no-print-directory appimage-alt-image
+
+.PHONY: appimage-alt
+appimage-alt: ensure-appimage-alt-image ## Build a portable AppImage on ALT p11 (glibc 2.38 floor) -> bin/shelve-<version>-<arch>.AppImage
+	docker run --rm --init \
+		-v shelve-dev-gomod:/go/pkg/mod \
+		-v shelve-dev-npm:/root/.npm \
+		-v $(ROOT):/app -w /app \
+		$(APPIMAGE_ALT_IMAGE) task linux:create:appimage
+	$(MAKE) fix-owner
+	cp bin/$(APP)-$(PACKAGE_ARCH).AppImage bin/$(APP)-$(APP_VERSION)-$(PACKAGE_ARCH).AppImage
 
 .PHONY: deb
 deb: ensure-image ## Build a single DEB

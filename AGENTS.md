@@ -94,6 +94,8 @@ through the Makefile targets.
 | `make smoke-vault` | Headless vault smoke test against a temp dir |
 | `make wails-init` | Re-merge the pinned Wails template (recreates frontend/build scaffolding) |
 | `make clean` | Remove `bin/`, `frontend/dist/`, `frontend/bindings/` |
+| `make appimage` | Self-contained AppImage in the container → `bin/shelve-<version>-x86_64.AppImage` + unversioned alias (host needs glibc ≥ 2.39 / GCC 14 libstdc++) |
+| `make appimage-alt` | AppImage built on ALT p11 (`Dockerfile.appimage-alt`) → same versioned output; portable floor glibc ≥ 2.38 / GCC 13 libstdc++ (ALT p10/p11, Ubuntu 24.04+, Fedora 39+, Debian 13) |
 
 Notes:
 - `make dev` runs the app *inside* the container with X11 forwarding. On some

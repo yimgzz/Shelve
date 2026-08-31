@@ -18,6 +18,8 @@ build/ios/xcode/overlay.json
 build/ios/xcode/gen/
 build/android/overlay.json
 build/android/gen/
+build/linux/appimage/shelve
+build/linux/appimage/shelve.png
 
 # OS noise
 .DS_Store

@@ -1,6 +1,8 @@
 /* Shelve — reset + layout grid (master plan §6 Layout).
    body is a full-viewport grid: left panel | 4px splitter | right pane,
-   with a 22px status-band row on the bottom right. */
+   with a 22px status-band row at the bottom. The left panel and splitter
+   span both rows so the bottom strip under the tree shares the same
+   --bg-panel color as the status band (no bare --bg gap in the corner). */
 
 * {
     box-sizing: border-box;
@@ -18,7 +20,7 @@ body {
     grid-template-rows: 1fr 22px;
     grid-template-areas:
         "left split right"
-        ".    .     status";
+        "left split status";
     height: 100vh;
     overflow: hidden;
     background: var(--bg);

@@ -155,6 +155,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	isolatedXDG(t)
 	s := DefaultSettings()
 	s.Theme = ThemeDark
+	s.ThemeVariant = "catppuccin-mocha"
 	s.AutoLockMinutes = 15
 	s.SftpBrowserEnabled = true
 	s.Terminal.FontSize = 14
@@ -282,10 +283,49 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 	}
 	for k := range m {
 		switch k {
-		case "theme", "autoLockMinutes", "sftpBrowserEnabled", "terminal",
+		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "terminal",
 			"textEditorCommand", "window":
 		default:
 			t.Fatalf("unexpected settings key %q", k)
 		}
+	}
+}
+
+// TestThemeVariantRoundTrip verifies a persisted variant survives a
+// save/load round trip (master plan §4.1).
+func TestThemeVariantRoundTrip(t *testing.T) {
+	isolatedXDG(t)
+	s := DefaultSettings()
+	s.Theme = ThemeDark
+	s.ThemeVariant = "catppuccin-mocha"
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.ThemeVariant != "catppuccin-mocha" {
+		t.Fatalf("themeVariant = %q, want %q", got.ThemeVariant, "catppuccin-mocha")
+	}
+}
+
+// TestThemeVariantNormalizesWhitespace checks normalize() trims stray
+// whitespace around a variant id.
+func TestThemeVariantNormalizesWhitespace(t *testing.T) {
+	isolatedXDG(t)
+	raw := `{"theme":"dark","themeVariant":"  dracula  "}`
+	if err := os.MkdirAll(Path(), DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(File(SettingsFileName), []byte(raw), FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.ThemeVariant != "dracula" {
+		t.Fatalf("themeVariant = %q, want %q", got.ThemeVariant, "dracula")
 	}
 }

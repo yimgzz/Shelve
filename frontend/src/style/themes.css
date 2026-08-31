@@ -1,10 +1,15 @@
-/* Shelve — theme token sets (master plan §6 Theming).
-   Tokens live under :root[data-theme="light"|"dark"]. The data-theme
-   attribute is set by ui/theme.ts and by the inline FOUC guard in
-   index.html (reads the localStorage["dsm-theme"] cache before first
-   paint). Terminal palettes are two small sets bound to the same theme;
-   no ANSI overrides in v1 (master plan §6). */
+/* Shelve — theme token sets (master plan §6 Theming; plan P001).
+   Tokens live under :root[data-theme="light"|"dark"] for the family base,
+   and :root[data-theme=...][data-variant=...] for the concrete palette.
+   ui/theme.ts sets both attributes; the inline FOUC guard in index.html
+   restores them from localStorage before first paint.
 
+   Each variant defines ALL §6 tokens (including --terminal-bg/--terminal-fg)
+   so components and the xterm palette just consume the resolved variables.
+   The two base blocks below are the fallback when no variant is present yet
+   (e.g. during the tiny FOUC window). */
+
+/* ------------------------------------------------------------------ base */
 :root[data-theme="light"] {
     --bg: #ffffff;
     --bg-panel: #f5f6f8;
@@ -18,7 +23,6 @@
     --ok: #2e7d32;
     --warn: #b45309;
 
-    /* Terminal palette — light: white-ish background. */
     --terminal-bg: #f7f8fa;
     --terminal-fg: #24292f;
 
@@ -38,9 +42,238 @@
     --ok: #57ab5a;
     --warn: #e0a458;
 
-    /* Terminal palette — dark: #1e1e2e-ish (Catppuccin-like base). */
     --terminal-bg: #1e1e2e;
     --terminal-fg: #cdd6f4;
 
     color-scheme: dark;
+}
+
+/* ------------------------------------------------------------ dark family */
+:root[data-theme="dark"][data-variant="default-dark"] {
+    --bg: #14161a;
+    --bg-panel: #1c1f25;
+    --bg-hover: #23272f;
+    --bg-active: #2a2f39;
+    --border: #2c313a;
+    --text: #e8eaed;
+    --text-dim: #9aa0aa;
+    --accent: #66a3ff;
+    --error: #f27070;
+    --ok: #57ab5a;
+    --warn: #e0a458;
+
+    --terminal-bg: #1e1e2e;
+    --terminal-fg: #cdd6f4;
+
+    color-scheme: dark;
+}
+
+:root[data-theme="dark"][data-variant="catppuccin-mocha"] {
+    --bg: #1e1e2e;
+    --bg-panel: #313244;
+    --bg-hover: #45475a;
+    --bg-active: #585b70;
+    --border: #45475a;
+    --text: #cdd6f4;
+    --text-dim: #a6adc8;
+    --accent: #89b4fa;
+    --error: #f38ba8;
+    --ok: #a6e3a1;
+    --warn: #f9e2af;
+
+    --terminal-bg: #1e1e2e;
+    --terminal-fg: #cdd6f4;
+
+    color-scheme: dark;
+}
+
+:root[data-theme="dark"][data-variant="dracula"] {
+    --bg: #282a36;
+    --bg-panel: #343746;
+    --bg-hover: #44475a;
+    --bg-active: #4d5061;
+    --border: #44475a;
+    --text: #f8f8f2;
+    --text-dim: #9da3ae;
+    --accent: #bd93f9;
+    --error: #ff5555;
+    --ok: #50fa7b;
+    --warn: #ffb86c;
+
+    --terminal-bg: #282a36;
+    --terminal-fg: #f8f8f2;
+
+    color-scheme: dark;
+}
+
+:root[data-theme="dark"][data-variant="nord"] {
+    --bg: #2e3440;
+    --bg-panel: #3b4252;
+    --bg-hover: #434c5e;
+    --bg-active: #4c566a;
+    --border: #4c566a;
+    --text: #eceff4;
+    --text-dim: #d8dee9;
+    --accent: #88c0d0;
+    --error: #bf616a;
+    --ok: #a3be8c;
+    --warn: #ebcb8b;
+
+    --terminal-bg: #2e3440;
+    --terminal-fg: #d8dee9;
+
+    color-scheme: dark;
+}
+
+:root[data-theme="dark"][data-variant="gruvbox-dark"] {
+    --bg: #282828;
+    --bg-panel: #32302f;
+    --bg-hover: #3c3836;
+    --bg-active: #504945;
+    --border: #504945;
+    --text: #ebdbb2;
+    --text-dim: #a89984;
+    --accent: #83a598;
+    --error: #fb4934;
+    --ok: #b8bb26;
+    --warn: #fe8019;
+
+    --terminal-bg: #282828;
+    --terminal-fg: #ebdbb2;
+
+    color-scheme: dark;
+}
+
+:root[data-theme="dark"][data-variant="one-dark"] {
+    --bg: #282c34;
+    --bg-panel: #2f343d;
+    --bg-hover: #353b45;
+    --bg-active: #3e4451;
+    --border: #3e4451;
+    --text: #abb2bf;
+    --text-dim: #828997;
+    --accent: #61afef;
+    --error: #e06c75;
+    --ok: #98c379;
+    --warn: #e5c07b;
+
+    --terminal-bg: #282c34;
+    --terminal-fg: #abb2bf;
+
+    color-scheme: dark;
+}
+
+/* ----------------------------------------------------------- light family */
+:root[data-theme="light"][data-variant="default-light"] {
+    --bg: #ffffff;
+    --bg-panel: #f5f6f8;
+    --bg-hover: #eceef1;
+    --bg-active: #e2e6ea;
+    --border: #d8dbe0;
+    --text: #1c1e21;
+    --text-dim: #5f6672;
+    --accent: #1e6fd9;
+    --error: #d33;
+    --ok: #2e7d32;
+    --warn: #b45309;
+
+    --terminal-bg: #f7f8fa;
+    --terminal-fg: #24292f;
+
+    color-scheme: light;
+}
+
+:root[data-theme="light"][data-variant="catppuccin-latte"] {
+    --bg: #eff1f5;
+    --bg-panel: #e6e9ef;
+    --bg-hover: #ccd0da;
+    --bg-active: #bcc0cc;
+    --border: #ccd0da;
+    --text: #4c4f69;
+    --text-dim: #6c6f85;
+    --accent: #1e66f5;
+    --error: #d20f39;
+    --ok: #40a02b;
+    --warn: #df8e1d;
+
+    --terminal-bg: #eff1f5;
+    --terminal-fg: #4c4f69;
+
+    color-scheme: light;
+}
+
+:root[data-theme="light"][data-variant="solarized-light"] {
+    --bg: #fdf6e3;
+    --bg-panel: #eee8d5;
+    --bg-hover: #e6e0cc;
+    --bg-active: #ddd6bd;
+    --border: #d3ccb0;
+    --text: #657b83;
+    --text-dim: #839496;
+    --accent: #268bd2;
+    --error: #dc322f;
+    --ok: #859900;
+    --warn: #b58900;
+
+    --terminal-bg: #fdf6e3;
+    --terminal-fg: #657b83;
+
+    color-scheme: light;
+}
+
+:root[data-theme="light"][data-variant="nord-light"] {
+    --bg: #e5e9f0;
+    --bg-panel: #eceff4;
+    --bg-hover: #d8dee9;
+    --bg-active: #d0d7e2;
+    --border: #d8dee9;
+    --text: #2e3440;
+    --text-dim: #4c566a;
+    --accent: #5e81ac;
+    --error: #bf616a;
+    --ok: #a3be8c;
+    --warn: #d08770;
+
+    --terminal-bg: #eceff4;
+    --terminal-fg: #2e3440;
+
+    color-scheme: light;
+}
+
+:root[data-theme="light"][data-variant="gruvbox-light"] {
+    --bg: #fbf1c7;
+    --bg-panel: #f2e5bc;
+    --bg-hover: #ebdbb2;
+    --bg-active: #d5c4a1;
+    --border: #d5c4a1;
+    --text: #3c3836;
+    --text-dim: #7c6f64;
+    --accent: #076678;
+    --error: #cc241d;
+    --ok: #79740e;
+    --warn: #af3a03;
+
+    --terminal-bg: #fbf1c7;
+    --terminal-fg: #3c3836;
+
+    color-scheme: light;
+}
+
+:root[data-theme="light"][data-variant="github-light"] {
+    --bg: #ffffff;
+    --bg-panel: #f6f8fa;
+    --bg-hover: #eaeef2;
+    --bg-active: #d0d7de;
+    --border: #d0d7de;
+    --text: #1f2328;
+    --text-dim: #59636e;
+    --accent: #0969da;
+    --error: #cf222e;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+
+    --terminal-bg: #ffffff;
+    --terminal-fg: #1f2328;
+
+    color-scheme: light;
 }

@@ -22,7 +22,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import { TerminalService } from "../../bindings/shelve/internal/wailsvc";
 import type { TerminalSettings } from "../store";
-import type { EffectiveTheme } from "../ui/theme";
+import { currentThemeTokens } from "../ui/theme";
 import { bytesToB64 } from "../ui/b64";
 
 /** Options for creating a new pooled terminal (read from settings/theme). */
@@ -30,22 +30,9 @@ export interface TermCreateOptions {
     settings: TerminalSettings;
 }
 
-/** Theme bindings when the CSS variables cannot be resolved. */
-const FALLBACK_PALETTE: Record<EffectiveTheme, { background: string; foreground: string }> = {
-    light: { background: "#f7f8fa", foreground: "#24292f" },
-    dark: { background: "#1e1e2e", foreground: "#cdd6f4" },
-};
-
-/** Read the current terminal palette from the active theme's CSS tokens. */
+/** Read the current terminal palette from the active variant's CSS tokens. */
 function palette(): { background: string; foreground: string } {
-    const cs = getComputedStyle(document.documentElement);
-    const bg = cs.getPropertyValue("--terminal-bg").trim();
-    const fg = cs.getPropertyValue("--terminal-fg").trim();
-    if (bg && fg) {
-        return { background: bg, foreground: fg };
-    }
-    const effective = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
-    return FALLBACK_PALETTE[effective];
+    return currentThemeTokens();
 }
 
 interface Entry {
@@ -250,6 +237,16 @@ export const TermPool = {
             } catch {
                 /* zero-sized container; fit again on activation */
             }
+        }
+    },
+
+    /** Re-apply the active variant's palette to every live instance
+     *  (plan P001 §5). Called on theme/variant/OS-theme change via the
+     *  onThemeApplied hook in main.ts. */
+    applyTheme(): void {
+        const pal = palette();
+        for (const e of pool.values()) {
+            e.term.options.theme = { background: pal.background, foreground: pal.foreground };
         }
     },
 };

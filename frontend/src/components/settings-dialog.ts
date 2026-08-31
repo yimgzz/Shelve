@@ -9,6 +9,7 @@
 import { AppService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog } from "../ui/dialog";
 import { applyTheme, type ThemeMode } from "../ui/theme";
+import { familyDefaultVariant, variantsForFamily } from "../ui/themes";
 import { store, type Settings } from "../store";
 import { TermPool } from "../terminal/xterm";
 import { toast } from "./toasts";
@@ -33,6 +34,13 @@ function settingField(labelText: string, control: HTMLElement, opts?: { hint?: s
     return wrap;
 }
 
+/** Effective family for a mode (system resolves via OS preference). */
+function effectiveFamily(mode: string): "light" | "dark" {
+   if (mode === "light") return "light";
+   if (mode === "dark") return "dark";
+   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 /** Open the Settings dialog. No-op if one is already open. */
 export function openSettingsDialog(): void {
     if (settingsOpen) {
@@ -43,6 +51,11 @@ export function openSettingsDialog(): void {
     const current = store.getState().settings;
     // Theme snapshot for the live-apply revert on Cancel.
     const openTheme = current.theme;
+    // Variant snapshot; "" means family default (resolved at apply time).
+    const openVariant = current.themeVariant || "";
+    // Live-selected variant; defaults to the persisted value or the family
+    // default for the initial mode.
+    let selVariant = current.themeVariant || familyDefaultVariant(effectiveFamily(current.theme));
 
     const body = document.createElement("div");
     body.className = "settings-body";
@@ -72,13 +85,60 @@ export function openSettingsDialog(): void {
         label.append(rb, span);
         rb.addEventListener("change", () => {
             if (rb.checked) {
-                applyTheme(mode);
+                // Keep the selected variant if it belongs to this mode's
+                // family; otherwise fall back to the family default.
+                const fam = effectiveFamily(mode);
+                if (!variantsForFamily(fam).some((v) => v.id === selVariant)) {
+                    selVariant = familyDefaultVariant(fam);
+                }
+                applyTheme(mode, selVariant);
+                populateVariantSelect(mode);
             }
         });
         themeRadios.appendChild(label);
         themeRadioEls.push({ rb, el: label });
     }
     general.appendChild(settingField("Theme", themeRadios));
+
+    // Variant selector — live-applied with the mode radios (plan P001 §4.4).
+    const variantSelect = document.createElement("select");
+    variantSelect.className = "input";
+    const populateVariantSelect = (mode: ThemeMode): void => {
+        variantSelect.replaceChildren();
+        if (mode === "system") {
+            for (const fam of ["dark", "light"] as const) {
+                const group = document.createElement("optgroup");
+                group.label = fam === "dark" ? "Dark" : "Light";
+                for (const v of variantsForFamily(fam)) {
+                    const opt = document.createElement("option");
+                    opt.value = v.id;
+                    opt.textContent = v.label;
+                    opt.selected = v.id === selVariant;
+                    group.appendChild(opt);
+                }
+                variantSelect.appendChild(group);
+            }
+        } else {
+            for (const v of variantsForFamily(effectiveFamily(mode))) {
+                const opt = document.createElement("option");
+                opt.value = v.id;
+                opt.textContent = v.label;
+                opt.selected = v.id === selVariant;
+                variantSelect.appendChild(opt);
+            }
+        }
+    };
+    variantSelect.addEventListener("change", () => {
+        selVariant = variantSelect.value;
+        const selectedMode = (themeRadioEls.find((t) => t.rb.checked)?.rb.value ?? current.theme) as ThemeMode;
+        applyTheme(selectedMode, selVariant);
+    });
+    populateVariantSelect(current.theme as ThemeMode);
+    general.appendChild(
+        settingField("Variant", variantSelect, {
+            hint: "Concrete palette within the chosen theme family.",
+        }),
+    );
 
     const autoLock = document.createElement("input");
     autoLock.type = "number";
@@ -182,7 +242,7 @@ export function openSettingsDialog(): void {
     void dialog.done.then((saved) => {
         settingsOpen = false;
         if (!saved) {
-            applyTheme(openTheme as ThemeMode);
+            applyTheme(openTheme as ThemeMode, openVariant);
         }
     });
 
@@ -195,6 +255,7 @@ export function openSettingsDialog(): void {
             const full: Settings = {
                 ...current,
                 theme: themeRadioEls.find((t) => t.rb.checked)?.rb.value ?? current.theme,
+                themeVariant: selVariant,
                 autoLockMinutes: clamp(Math.floor(Number(autoLock.value) || 0), 0, 60 * 24),
                 sftpBrowserEnabled: sftpCheck.checked,
                 terminal: {

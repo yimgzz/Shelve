@@ -37,8 +37,10 @@ export interface TerminalSettings {
 }
 
 export interface Settings {
-    theme: string; // "system" | "light" | "dark"
-    autoLockMinutes: number;
+   theme: string; // "system" | "light" | "dark" — the mode
+   /** Concrete palette id ("" = family default). Plan P001. */
+   themeVariant: string;
+   autoLockMinutes: number;
     sftpBrowserEnabled: boolean;
     terminal: TerminalSettings;
     textEditorCommand: string;
@@ -160,6 +162,7 @@ export const DEFAULT_LEFT_WIDTH = 320;
 export const initialState: StoreState = {
     settings: {
         theme: "system",
+        themeVariant: "",
         autoLockMinutes: 0,
         sftpBrowserEnabled: false,
         terminal: { fontFamily: "monospace", fontSize: 13, scrollback: 10000 },

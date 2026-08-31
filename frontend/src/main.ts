@@ -9,7 +9,7 @@ import { Events } from "@wailsio/runtime";
 import { AppService, VaultService, SessionService } from "../bindings/shelve/internal/wailsvc";
 
 import { store, type Settings, type VaultState, type NodeDTO, type TabState } from "./store";
-import { initTheme, refreshFromSystem } from "./ui/theme";
+import { initTheme, onThemeApplied, refreshFromSystem } from "./ui/theme";
 import { renderUnlockGate, type UnlockMode } from "./components/unlock";
 import { renderShell } from "./components/shell";
 import {
@@ -46,11 +46,12 @@ const root = document.getElementById("app-root")!;
 
 /** Map an arbitrary backend settings object onto our Settings shape. */
 function toSettings(raw: Record<string, unknown>): Settings {
-    const win = (raw.window ?? {}) as Record<string, unknown>;
-    const term = (raw.terminal ?? {}) as Record<string, unknown>;
-    return {
-        theme: typeof raw.theme === "string" ? raw.theme : "system",
-        autoLockMinutes: Number(raw.autoLockMinutes ?? 0),
+   const win = (raw.window ?? {}) as Record<string, unknown>;
+   const term = (raw.terminal ?? {}) as Record<string, unknown>;
+   return {
+       theme: typeof raw.theme === "string" ? raw.theme : "system",
+       themeVariant: typeof raw.themeVariant === "string" ? raw.themeVariant : "",
+       autoLockMinutes: Number(raw.autoLockMinutes ?? 0),
         sftpBrowserEnabled: Boolean(raw.sftpBrowserEnabled),
         terminal: {
             fontFamily: String(term.fontFamily ?? "monospace"),
@@ -255,11 +256,15 @@ async function boot(): Promise<void> {
     initShortcuts();
     initAutoLock();
 
+    // Re-paint live terminals whenever the applied theme changes (mode,
+    // variant, or OS theme switch in system mode). Plan P001 §5.
+    onThemeApplied(() => TermPool.applyTheme());
+
     try {
         const settings = (await AppService.GetSettings()) as unknown as Record<string, unknown>;
         const normalized = toSettings(settings);
         store.set({ settings: normalized });
-        initTheme(normalized.theme);
+        initTheme(normalized.theme, normalized.themeVariant);
     } catch (err) {
         console.error("Failed to load settings:", err);
         initTheme("system");

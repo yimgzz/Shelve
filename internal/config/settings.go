@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 )
 
 // Theme selection values for Settings.Theme.
@@ -30,7 +31,8 @@ type WindowSettings struct {
 // Settings is the on-disk shape of settings.json (master plan §4).
 // It must never contain secrets.
 type Settings struct {
-	Theme              string           `json:"theme"` // "system" | "light" | "dark"
+	Theme              string           `json:"theme"`        // "system" | "light" | "dark" — the mode
+	ThemeVariant       string           `json:"themeVariant"` // "" = family default; concrete palette id
 	AutoLockMinutes    int              `json:"autoLockMinutes"`
 	SftpBrowserEnabled bool             `json:"sftpBrowserEnabled"`
 	Terminal           TerminalSettings `json:"terminal"`
@@ -42,6 +44,7 @@ type Settings struct {
 func DefaultSettings() Settings {
 	return Settings{
 		Theme:              ThemeSystem,
+		ThemeVariant:       "",
 		AutoLockMinutes:    0,
 		SftpBrowserEnabled: false,
 		Terminal: TerminalSettings{
@@ -95,6 +98,10 @@ func (s *Settings) normalize() {
 	default:
 		s.Theme = ThemeSystem
 	}
+	// ThemeVariant: "" = the family default. The concrete palette ids live
+	// only in the frontend catalog (frontend/src/ui/themes.ts); cross-family
+	// mismatches are resolved there (master plan §4.1). Here we only trim.
+	s.ThemeVariant = strings.TrimSpace(s.ThemeVariant)
 	if s.TextEditorCommand == "" {
 		s.TextEditorCommand = "xdg-open"
 	}

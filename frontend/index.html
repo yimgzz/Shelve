@@ -3,15 +3,19 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <!-- FOUC guard (master plan §6): set the theme from the cached
-         value before first paint so no theme flash occurs on reload.
-         ui/theme.ts keeps this cache in sync. -->
+    <!-- FOUC guard (master plan §6; plan P001): set the theme family AND
+         variant from the cached values before first paint so no theme flash
+         occurs on reload. ui/theme.ts keeps both caches in sync. -->
     <script>
         (function () {
             try {
                 var cached = localStorage.getItem("dsm-theme");
                 if (cached === "light" || cached === "dark") {
                     document.documentElement.dataset.theme = cached;
+                }
+                var cachedVariant = localStorage.getItem("dsm-variant");
+                if (cachedVariant) {
+                    document.documentElement.dataset.variant = cachedVariant;
                 }
             } catch (_) {
                 /* localStorage unavailable — fall back to default theme */

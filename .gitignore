@@ -22,3 +22,6 @@ build/android/gen/
 # OS noise
 .DS_Store
 *.swp
+
+**/**/**/.gradle
+**/**/**/problems-report.html

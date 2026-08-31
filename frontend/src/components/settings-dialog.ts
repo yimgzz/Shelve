@@ -9,7 +9,7 @@
 import { AppService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog } from "../ui/dialog";
 import { applyTheme, type ThemeMode } from "../ui/theme";
-import { familyDefaultVariant, variantsForFamily } from "../ui/themes";
+import { familyDefaultVariant, variantById, variantsForFamily } from "../ui/themes";
 import { store, type Settings } from "../store";
 import { TermPool } from "../terminal/xterm";
 import { toast } from "./toasts";
@@ -130,7 +130,21 @@ export function openSettingsDialog(): void {
     };
     variantSelect.addEventListener("change", () => {
         selVariant = variantSelect.value;
-        const selectedMode = (themeRadioEls.find((t) => t.rb.checked)?.rb.value ?? current.theme) as ThemeMode;
+        let selectedMode = (themeRadioEls.find((t) => t.rb.checked)?.rb.value ?? current.theme) as ThemeMode;
+        // A variant names a concrete family. When it disagrees with the current
+        // mode's effective family (e.g. picking a dark palette while mode is
+        // "system" on a light OS), switch the mode radio to the variant's family
+        // so the selection applies live AND persists as a legal mode+variant pair
+        // (plan P001 §4.1: the variant must belong to the active family).
+        const vfam = variantById(selVariant)?.family;
+        if (vfam && effectiveFamily(selectedMode) !== vfam) {
+            const target = themeRadioEls.find((t) => t.rb.value === vfam);
+            if (target) {
+                target.rb.checked = true;
+                selectedMode = vfam;
+                populateVariantSelect(vfam);
+            }
+        }
         applyTheme(selectedMode, selVariant);
     });
     populateVariantSelect(current.theme as ThemeMode);

@@ -40,6 +40,14 @@ export function familyDefaultVariant(family: ThemeFamily): string {
     return family === "dark" ? "default-dark" : "default-light";
 }
 
+/** True when `id` is one of the two family-default placeholders, i.e. it does
+ *  not represent an explicit palette choice. System-mode resolution uses this
+ *  to let real variant ids override the OS family while keeping the defaults
+ *  OS-following. */
+export function isFamilyDefaultVariant(id: string): boolean {
+    return id === "default-dark" || id === "default-light";
+}
+
 /** True when `id` is a known variant belonging to `family`. */
 export function variantInFamily(family: ThemeFamily, id: string): boolean {
     return THEME_CATALOG.some((v) => v.id === id && v.family === family);

@@ -10,7 +10,7 @@
 // The terminal palette (4c/5) reads currentThemeTokens() to bind xterm
 // colors to the *variant*, not just the family.
 
-import { familyDefaultVariant, variantInFamily } from "./themes";
+import { familyDefaultVariant, isFamilyDefaultVariant, variantById, variantInFamily } from "./themes";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type EffectiveTheme = "light" | "dark";
@@ -66,7 +66,17 @@ function resolveVariant(family: EffectiveTheme, variant: string): string {
 /** Apply a mode (and optional variant) to the DOM + FOUC cache. */
 export function applyTheme(mode: ThemeMode, variant = ""): EffectiveTheme {
     currentMode = mode;
-    const effective = resolveTheme(mode);
+    let effective = resolveTheme(mode);
+    // In system mode an explicitly-named variant (i.e. not a family-default
+    // placeholder) names its own family — honor it over the OS preference so
+    // e.g. a persisted "system" + dark-variant combination actually applies
+    // instead of being silently replaced by the family default (bugfix 2026-08-31).
+    if (mode === "system" && variant) {
+        const v = variantById(variant);
+        if (v && !isFamilyDefaultVariant(v.id)) {
+            effective = v.family;
+        }
+    }
     const resolved = resolveVariant(effective, variant);
     currentVariant = resolved;
     document.documentElement.dataset.theme = effective;

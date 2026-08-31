@@ -14,9 +14,13 @@
 #      font stack) and graphics-driver libs (GL/EGL/drm/gbm) that must come from
 #      the host GPU stack (master plan §11: AppImage bundles the app runtime so
 #      end users need no distro packages beyond a stock desktop).
-#   4. Desktop entry sanity (Exec=/Icon= present). Note: wails3 v3.0.0-beta.15
-#      places the .desktop file at the AppDir ROOT (upstream linuxdeploy
-#      layout); usr/share/applications is intentionally left empty.
+#   4. Desktop entry sanity (Exec=/Icon=/StartupWMClass present). StartupWMClass
+#      must equal Wails' runtime GtkApplication id ("org.wails." + lowercased
+#      app name, hardcoded in linux_cgo.go) so panels associate the running
+#      window with this entry and display Name=shelve instead of the WM_CLASS
+#      fallback. Note: wails3 v3.0.0-beta.15 places the .desktop file at the
+#      AppDir ROOT (upstream linuxdeploy layout); usr/share/applications is
+#      intentionally left empty.
 #
 # Usage: ./scripts/verify-appimage.sh [path-to-AppImage]
 # Default artifact: bin/shelve-<arch>.AppImage derived from the host arch.
@@ -117,11 +121,17 @@ else
 fi
 
 # Desktop entry sanity (AppDir root per wails3/linuxdeploy layout).
+# StartupWMClass must match Wails' hardcoded GtkApplication id
+# ("org.wails." + lowercased app name) or panels show the WM_CLASS fallback
+# name instead of Name=shelve.
 DESKTOP="$APPDIR/shelve.desktop"
-if [ -f "$DESKTOP" ] && grep -qE '^Exec=' "$DESKTOP" && grep -qE '^Icon=' "$DESKTOP"; then
-    echo "  ok   desktop entry (Exec/Icon, AppDir root)"
+if [ -f "$DESKTOP" ] \
+    && grep -qE '^Exec=' "$DESKTOP" \
+    && grep -qE '^Icon=' "$DESKTOP" \
+    && grep -qE '^StartupWMClass=org\.wails\.shelve$' "$DESKTOP"; then
+    echo "  ok   desktop entry (Exec/Icon/StartupWMClass, AppDir root)"
 else
-    echo "  MISS valid desktop entry at $DESKTOP" >&2
+    echo "  MISS valid desktop entry at $DESKTOP (need Exec, Icon and StartupWMClass=org.wails.shelve)" >&2
     FAIL=1
 fi
 

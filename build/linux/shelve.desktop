@@ -8,3 +8,4 @@ Terminal=false
 Keywords=wails
 Version=1.0
 StartupNotify=false
+StartupWMClass=org.wails.shelve

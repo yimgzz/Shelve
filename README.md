@@ -1,5 +1,7 @@
 # Shelve
 
+Stash your shells in style!
+
 A lightweight, fast, fully local SSH session manager. Go backend
 (`golang.org/x/crypto/ssh`) + Wails v3 frontend (vanilla TypeScript + Vite).
 Sessions live in an encrypted vault (Argon2id + AES-256-GCM) under

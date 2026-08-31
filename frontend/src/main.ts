@@ -74,9 +74,19 @@ function destroyTerminals(): void {
     TermPool.destroyAll();
 }
 
+// Tracks whether the app shell is currently rendered. The unlock success
+// path is driven from BOTH the resolved Unlock promise and the
+// vault:state-changed event (H2); this guard makes the double signal
+// idempotent.
+let shellMounted = false;
+
 /** Render the gate or shell depending on the vault state. */
 async function mount(vaultState: VaultState): Promise<void> {
     if (vaultState === "unlocked") {
+        if (shellMounted) {
+            return; // already swapped (promise + event both fired)
+        }
+        shellMounted = true;
         try {
             const tree = (await SessionService.Tree()) as unknown as NodeDTO[];
             store.set({ tree });
@@ -88,9 +98,19 @@ async function mount(vaultState: VaultState): Promise<void> {
         void store.refreshCredentials();
         renderShell(root);
     } else {
+        shellMounted = false;
         const mode: UnlockMode = vaultState === "create" ? "create" : "locked";
-        renderUnlockGate(root, mode);
+        renderUnlockGate(root, mode, enterUnlocked);
     }
+}
+
+/** Swap to the app shell once the create/unlock call succeeded. */
+function enterUnlocked(): void {
+    if (shellMounted) {
+        return;
+    }
+    store.set({ vaultState: "unlocked" });
+    void mount("unlocked");
 }
 
 /** Route one Go→JS event; every branch updates the store or UI. */
@@ -284,7 +304,7 @@ async function boot(): Promise<void> {
         void mount(vaultState);
     } catch (err) {
         console.error("Failed to read vault status:", err);
-        renderUnlockGate(root, "locked");
+        renderUnlockGate(root, "locked", enterUnlocked);
     }
 }
 

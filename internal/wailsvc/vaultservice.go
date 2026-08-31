@@ -3,6 +3,7 @@ package wailsvc
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"shelve/internal/config"
@@ -32,6 +33,12 @@ type VaultService struct {
 	sftp   *sftp.Manager
 	path   string
 	emit   Emitter
+
+	// unlockMu serializes the master-password transitions (create/unlock)
+	// so racing submits never run parallel Argon2id derivations — each
+	// run saturates the CPU for seconds on slower machines, and a second
+	// concurrent run would only multiply the stall.
+	unlockMu sync.Mutex
 }
 
 // NewVaultService wires the vault lifecycle service. sftp is the shared SFTP
@@ -59,6 +66,8 @@ func (s *VaultService) Status() (VaultStatusDTO, error) {
 
 // CreateVault writes the first-run vault (empty tree) and unlocks it.
 func (s *VaultService) CreateVault(password string) error {
+	s.unlockMu.Lock()
+	defer s.unlockMu.Unlock()
 	if s.vault.IsUnlocked() {
 		return nil // nothing to do; already first-run unlocked
 	}
@@ -77,6 +86,11 @@ func (s *VaultService) CreateVault(password string) error {
 // Wrong password / corrupt file return the vault's typed errors; the
 // frontend shows them inline.
 func (s *VaultService) Unlock(password string) error {
+	s.unlockMu.Lock()
+	defer s.unlockMu.Unlock()
+	if s.vault.IsUnlocked() {
+		return nil // a concurrent call already unlocked the vault
+	}
 	payload, err := s.vault.Open(s.path, password)
 	if err != nil {
 		return err

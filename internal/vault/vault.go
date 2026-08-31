@@ -322,11 +322,11 @@ func (v *Vault) sealInto(env *Envelope, key, payload []byte) error {
 	return nil
 }
 
-func (v *Vault) derive(password string, salt []byte, time, memory, threads int) []byte {
+func (v *Vault) derive(password string, salt []byte, iterations, memory, threads int) []byte {
 	pw := make([]byte, len(password))
 	copy(pw, password)
 	defer zero(pw)
-	return argon2.IDKey(pw, salt, uint32(time), uint32(memory), uint8(threads), keySize)
+	return argon2.IDKey(pw, salt, uint32(iterations), uint32(memory), uint8(threads), keySize)
 }
 
 // validated decodes and sanity-checks the envelope fields, returning

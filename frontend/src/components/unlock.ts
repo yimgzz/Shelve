@@ -34,8 +34,13 @@ function strength(text: string): { label: string; cls: string } {
     return { label: "Strong", cls: "strong" };
 }
 
-/** Render the unlock/create gate into the given root element. */
-export function renderUnlockGate(root: HTMLElement, mode: UnlockMode): void {
+/**
+ * Render the unlock/create gate into the given root element.
+ * onUnlocked is invoked when the create/unlock call succeeds so the shell
+ * swap does not depend solely on the vault:state-changed event (which can
+ * race on startup and leave the gate stuck on a disabled button).
+ */
+export function renderUnlockGate(root: HTMLElement, mode: UnlockMode, onUnlocked?: () => void): void {
     root.textContent = "";
 
     const screen = document.createElement("div");
@@ -152,17 +157,39 @@ export function renderUnlockGate(root: HTMLElement, mode: UnlockMode): void {
             return;
         }
 
+        // Argon2id derivation takes seconds on slower machines: give
+        // visible feedback instead of a silently disabled button, and block
+        // re-entry while the call is in flight.
         submit.disabled = true;
+        pwInput.disabled = true;
+        if (confirmInput) {
+            confirmInput.disabled = true;
+        }
+        submit.textContent = mode === "create" ? "Creating vault…" : "Verifying…";
+
         const call =
             mode === "create" ? VaultService.CreateVault(password) : VaultService.Unlock(password);
         void call
+            .then(() => {
+                // Drive the swap from the resolved promise too; the
+                // vault:state-changed event stays as a redundant signal
+                // (mount is idempotent), so a delayed/lost event can no
+                // longer leave the gate stuck.
+                onUnlocked?.();
+            })
             .catch((err: unknown) => {
                 submit.disabled = false;
+                pwInput.disabled = false;
+                if (confirmInput) {
+                    confirmInput.disabled = false;
+                }
+                submit.textContent = mode === "create" ? "Create vault" : "Unlock";
                 fail(String(err));
             })
             .finally(() => {
-                // On success the vault:state-changed event drives the swap;
-                // keep the button enabled until then.
+                // On success the shell swap replaces this DOM subtree; keep
+                // the button disabled until then. On error the catch branch
+                // already restored it.
                 if (!submit.disabled) {
                     submit.disabled = false;
                 }

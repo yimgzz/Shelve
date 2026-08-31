@@ -76,6 +76,7 @@ func seedRun(dir string, force bool) error {
 	}
 
 	fmt.Printf("seeded %d-session test vault at %s\n", seedSessions, vaultPath)
+	fmt.Println("vault includes a few named credentials (plan P003) referenced by some sessions")
 	fmt.Printf("unlock the app with master password: %s\n", seedPassword)
 	return nil
 }

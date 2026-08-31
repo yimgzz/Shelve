@@ -29,7 +29,9 @@ type JumpHostDTO struct {
 	KeyPath     string         `json:"keyPath,omitempty"`
 }
 
-// SessionDTO is a session read view: no password material.
+// SessionDTO is a session read view: no password material. CredentialID
+// exposes only the reference to a named credential (plan P003 §4.3);
+// never the underlying secret.
 type SessionDTO struct {
 	ID              string         `json:"id"`
 	FolderID        string         `json:"folderId"`
@@ -43,10 +45,13 @@ type SessionDTO struct {
 	JumpHosts       []JumpHostDTO  `json:"jumpHosts"`
 	ExtraArgs       string         `json:"extraArgs"`
 	SftpInitialPath string         `json:"sftpInitialPath,omitempty"`
+	CredentialID    string         `json:"credentialId,omitempty"`
 }
 
 // SessionInput carries a session draft from the frontend. It may include
 // passwords; they only ever reach the vault inside the encrypted payload.
+// CredentialID references a named credential whose User+Auth are resolved
+// at connect/test time (plan P003).
 type SessionInput struct {
 	ID              string          `json:"id,omitempty"`
 	FolderID        string          `json:"folderId"`
@@ -60,6 +65,7 @@ type SessionInput struct {
 	JumpHosts       []JumpHostInput `json:"jumpHosts"`
 	ExtraArgs       string          `json:"extraArgs"`
 	SftpInitialPath string          `json:"sftpInitialPath,omitempty"`
+	CredentialID    string          `json:"credentialId,omitempty"`
 }
 
 // JumpHostInput is the write view of a jump host.
@@ -70,6 +76,51 @@ type JumpHostInput struct {
 	AuthType model.AuthType `json:"authType"`
 	Password string         `json:"password,omitempty"`
 	KeyPath  string         `json:"keyPath,omitempty"`
+}
+
+// CredentialDTO is a credential read view (plan P003 §4.3): secret-free —
+// passwords collapse to HasPassword, exactly like sessions/jump hosts.
+type CredentialDTO struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	User        string         `json:"user"`
+	AuthType    model.AuthType `json:"authType"`
+	HasPassword bool           `json:"hasPassword"`
+	KeyPath     string         `json:"keyPath,omitempty"`
+}
+
+// CredentialInput carries a credential draft from the frontend. The
+// password, when present, goes straight into the encrypted vault and is
+// never echoed back (§8).
+type CredentialInput struct {
+	ID       string         `json:"id,omitempty"`
+	Name     string         `json:"name"`
+	User     string         `json:"user"`
+	AuthType model.AuthType `json:"authType"`
+	Password string         `json:"password,omitempty"`
+	KeyPath  string         `json:"keyPath,omitempty"`
+}
+
+func (in CredentialInput) toModel() model.Credential {
+	return model.Credential{
+		ID:   in.ID,
+		Name: in.Name,
+		User: in.User,
+		Auth: model.Auth{Type: in.AuthType, Password: in.Password, KeyPath: in.KeyPath},
+	}
+}
+
+// ToCredentialDTO converts a model credential to its secret-free read
+// view (plan P003 §4.3).
+func ToCredentialDTO(c model.Credential) CredentialDTO {
+	return CredentialDTO{
+		ID:          c.ID,
+		Name:        c.Name,
+		User:        c.User,
+		AuthType:    c.Auth.Type,
+		HasPassword: c.Auth.Password != "",
+		KeyPath:     c.Auth.KeyPath,
+	}
 }
 
 func (in SessionInput) toModel() model.Session {
@@ -83,6 +134,7 @@ func (in SessionInput) toModel() model.Session {
 		Auth:            model.Auth{Type: in.AuthType, Password: in.Password, KeyPath: in.KeyPath},
 		ExtraArgs:       in.ExtraArgs,
 		SftpInitialPath: in.SftpInitialPath,
+		CredentialID:    in.CredentialID,
 	}
 	sess.JumpHosts = make([]model.JumpHost, 0, len(in.JumpHosts))
 	for _, j := range in.JumpHosts {
@@ -121,6 +173,7 @@ func ToSessionDTO(sess model.Session) SessionDTO {
 		KeyPath:         sess.Auth.KeyPath,
 		ExtraArgs:       sess.ExtraArgs,
 		SftpInitialPath: sess.SftpInitialPath,
+		CredentialID:    sess.CredentialID,
 	}
 	dto.JumpHosts = make([]JumpHostDTO, 0, len(sess.JumpHosts))
 	for _, j := range sess.JumpHosts {

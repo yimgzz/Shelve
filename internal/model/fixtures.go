@@ -33,6 +33,23 @@ func GenerateFixture(sessionCount int) Payload {
 		}
 	}
 
+	// A handful of named credentials (plan P003 §9): two password bundles
+	// and one key bundle. Sessions in the loop below reference them and
+	// keep matching inline snapshots so the seeded vault exercises the
+	// credential-manager UI out of the box.
+	var credentials []Credential
+	newCred := func(name, user string, auth Auth) string {
+		c := Credential{ID: NewID(), Name: name, User: user, Auth: auth}
+		credentials = append(credentials, c)
+		return c.ID
+	}
+	credPasswordID := newCred("prod-admin", "admin",
+		Auth{Type: AuthPassword, Password: "fixture-cred-pw-prod-admin"})
+	credKeyID := newCred("dev-key", "dev",
+		Auth{Type: AuthKey, KeyPath: "/home/user/.ssh/fixture_dev_ed25519"})
+	newCred("backup-svc", "backup",
+		Auth{Type: AuthPassword, Password: "fixture-cred-pw-backup"})
+
 	sessions := make([]Session, 0, sessionCount)
 	for j := 0; j < sessionCount; j++ {
 		s := Session{
@@ -40,6 +57,19 @@ func GenerateFixture(sessionCount int) Payload {
 			Name: fmt.Sprintf("Session-%04d", j+1),
 			User: "user",
 			Port: 22,
+		}
+		// Every 25th session references a saved credential (plan P003):
+		// keep the inline snapshot equal to the credential so the session
+		// also works after the credential is deleted.
+		switch j % 25 {
+		case 0:
+			s.CredentialID = credPasswordID
+			s.User = "admin"
+			s.Auth = Auth{Type: AuthPassword, Password: "fixture-cred-pw-prod-admin"}
+		case 5:
+			s.CredentialID = credKeyID
+			s.User = "dev"
+			s.Auth = Auth{Type: AuthKey, KeyPath: "/home/user/.ssh/fixture_dev_ed25519"}
 		}
 		switch j % 2 {
 		case 0: // hostname + password auth
@@ -100,8 +130,9 @@ func GenerateFixture(sessionCount int) Payload {
 		folders[i].Children = append([]string(nil), order[folders[i].ID]...)
 	}
 	return Payload{
-		Root:     root,
-		Folders:  folders,
-		Sessions: sessions,
+		Root:        root,
+		Folders:     folders,
+		Sessions:    sessions,
+		Credentials: credentials,
 	}
 }

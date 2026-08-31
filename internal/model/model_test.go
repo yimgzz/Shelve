@@ -288,3 +288,67 @@ func TestFolderValidate(t *testing.T) {
 		}
 	}
 }
+
+// TestCredentialValidationRules covers the plan P003 §4.1 invariants:
+// name required, user required for password bundles, and the same
+// password-XOR-key rule as sessions.
+func TestCredentialValidationRules(t *testing.T) {
+	valid := func() Credential {
+		return Credential{
+			Name: "prod-admin",
+			User: "admin",
+			Auth: Auth{Type: AuthPassword, Password: "s3cr3t"},
+		}
+	}
+
+	t.Run("valid password credential", func(t *testing.T) {
+		c := valid()
+		if err := c.Validate(); err != nil {
+			t.Fatalf("unexpected: %v", err)
+		}
+	})
+
+	t.Run("valid key credential", func(t *testing.T) {
+		c := valid()
+		c.Auth = Auth{Type: AuthKey, KeyPath: "/home/a/.ssh/id_ed25519"}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("unexpected: %v", err)
+		}
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		c := valid()
+		c.Name = "  "
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "credential.name: must not be empty") {
+			t.Fatalf("want name error, got %v", err)
+		}
+	})
+
+	t.Run("empty user", func(t *testing.T) {
+		c := valid()
+		c.User = ""
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "credential.user: must not be empty") {
+			t.Fatalf("want user error, got %v", err)
+		}
+	})
+
+	t.Run("auth xor: neither set", func(t *testing.T) {
+		c := valid()
+		c.Auth = Auth{Type: AuthPassword}
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "credential.auth: exactly one of password or keyPath must be set") {
+			t.Fatalf("want XOR error, got %v", err)
+		}
+	})
+
+	t.Run("auth xor: both set", func(t *testing.T) {
+		c := valid()
+		c.Auth = Auth{Type: AuthPassword, Password: "pw", KeyPath: "/k"}
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "credential.auth: exactly one of password or keyPath may be set") {
+			t.Fatalf("want XOR error, got %v", err)
+		}
+	})
+}

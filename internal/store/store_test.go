@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -474,6 +475,28 @@ func TestStore300SessionsFullPayloadRoundTrip(t *testing.T) {
 	if len(got.Sessions) != 300 || len(got.Folders) != 30 {
 		t.Fatalf("payload after round trip: %d sessions / %d folders", len(got.Sessions), len(got.Folders))
 	}
+	// Plan P003: the named credentials slice survives encode/load, and
+	// every fixture session referencing one has its credential present.
+	if len(got.Credentials) != 3 {
+		t.Fatalf("credentials after round trip = %d, want 3", len(got.Credentials))
+	}
+	byID := map[string]model.Credential{}
+	for _, c := range got.Credentials {
+		byID[c.ID] = c
+	}
+	refs := 0
+	for _, sess := range got.Sessions {
+		if sess.CredentialID == "" {
+			continue
+		}
+		refs++
+		if _, ok := byID[sess.CredentialID]; !ok {
+			t.Fatalf("session %s references missing credential %q", sess.ID, sess.CredentialID)
+		}
+	}
+	if refs == 0 {
+		t.Fatal("fixture references no credentials")
+	}
 }
 
 type recSaver struct {
@@ -586,5 +609,209 @@ func TestConcurrentMutationsRaceFree(t *testing.T) {
 	}
 	if n := countNodes(s.Tree()); n != 1+8*20*2 {
 		t.Fatalf("node count = %d, want %d", n, 1+8*20*2)
+	}
+}
+
+func testCredential(name, user string) model.Credential {
+	return model.Credential{
+		Name: name,
+		User: user,
+		Auth: model.Auth{Type: model.AuthPassword, Password: "cred-secret-" + name},
+	}
+}
+
+// TestCredentialCRUD covers plan P003 §4.2: create/list/update/delete of
+// named credentials, each mutation triggering the same persistence path.
+func TestCredentialCRUD(t *testing.T) {
+	s := New(nil)
+
+	cid, err := s.CreateCredential(testCredential("prod-admin", "admin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cid2, err := s.CreateCredential(testCredential("backup-key", "backup"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cid == cid2 {
+		t.Fatal("duplicate credential IDs")
+	}
+
+	// Validation gates.
+	if _, err := s.CreateCredential(model.Credential{}); err == nil {
+		t.Fatal("empty credential accepted")
+	}
+	if _, err := s.CreateCredential(model.Credential{
+		Name: "x", User: "u",
+		Auth: model.Auth{Type: model.AuthKey, KeyPath: "/k"},
+	}); err != nil {
+		t.Fatalf("valid key credential rejected: %v", err)
+	}
+
+	list := s.ListCredentials()
+	if len(list) != 3 {
+		t.Fatalf("list len = %d, want 3", len(list))
+	}
+	if list[0].Name > list[1].Name {
+		t.Fatalf("list not sorted by name: %+v", list)
+	}
+
+	got, err := s.Credential(cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "prod-admin" || got.Auth.Password != "cred-secret-prod-admin" {
+		t.Fatalf("credential = %+v", got)
+	}
+
+	updated := got
+	updated.Name = "prod-admin-v2"
+	if err := s.UpdateCredential(updated); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.Credential(cid)
+	if got.Name != "prod-admin-v2" {
+		t.Fatalf("update not applied: %+v", got)
+	}
+	if err := s.UpdateCredential(model.Credential{ID: "nope", Name: "x", User: "u",
+		Auth: model.Auth{Type: model.AuthPassword, Password: "p"}}); !errors.Is(err, ErrCredentialNotFound) {
+		t.Fatalf("update unknown credential: %v", err)
+	}
+	if err := s.UpdateCredential(model.Credential{Name: "no-id", User: "u",
+		Auth: model.Auth{Type: model.AuthPassword, Password: "p"}}); !errors.Is(err, ErrCredentialNotFound) {
+		t.Fatalf("update without ID: %v", err)
+	}
+
+	if _, err := s.DeleteCredential(cid2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Credential(cid2); !errors.Is(err, ErrCredentialNotFound) {
+		t.Fatalf("deleted credential still found: %v", err)
+	}
+}
+
+// TestCredentialReferenceSemantics covers plan P003 §4.1/§4.2:
+//   - CreateSession/UpdateSession reject a dangling CredentialID;
+//   - DeleteCredential soft-nulls CredentialID on referencing sessions
+//     (inline snapshot remains, so they keep connecting);
+//   - Load clears references to credentials that vanished externally;
+//   - Encode/Load round-trips the credentials slice.
+func TestCredentialReferenceSemantics(t *testing.T) {
+	s := New(nil)
+	cid, err := s.CreateCredential(testCredential("dev-creds", "dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFolder("", "F")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A session referencing the credential keeps a valid inline snapshot.
+	sess := testSession("dev-box")
+	sess.User = "dev"
+	sess.CredentialID = cid
+	sid, err := s.CreateSession(f, sess)
+	if err != nil {
+		t.Fatalf("session with valid credential ref rejected: %v", err)
+	}
+
+	// Dangling reference rejected.
+	bad := testSession("bad-ref")
+	bad.CredentialID = "does-not-exist"
+	if _, err := s.CreateSession(f, bad); err == nil {
+		t.Fatal("session with unknown credential ref accepted")
+	}
+
+	// UpdateSession enforces the same rule.
+	sess2 := sess
+	sess2.Name = "dev-box-2"
+	sess2.CredentialID = "does-not-exist"
+	if err := s.UpdateSession(sess2); err == nil {
+		t.Fatal("update with unknown credential ref accepted")
+	}
+
+	// Duplicate keeps the reference.
+	dupID, err := s.DuplicateSession(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dup, _ := s.Session(dupID)
+	if dup.CredentialID != cid {
+		t.Fatalf("duplicate credentialId = %q, want %q", dup.CredentialID, cid)
+	}
+
+	// Deleting the credential nulls the reference on both sessions and
+	// reports the affected count; the inline snapshots survive.
+	affected, err := s.DeleteCredential(cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 2 {
+		t.Fatalf("affected sessions = %d, want 2", affected)
+	}
+	for _, id := range []string{sid, dupID} {
+		got, _ := s.Session(id)
+		if got.CredentialID != "" {
+			t.Fatalf("session %s credentialId = %q after delete, want cleared", id, got.CredentialID)
+		}
+		if got.User != "dev" || got.Auth.Password != "pw" {
+			t.Fatalf("session %s inline snapshot lost: %+v", id, got)
+		}
+	}
+
+	// Round trip through Encode/Load preserves credentials; Load clears a
+	// reference that points at a credential removed outside the store.
+	cid3, err := s.CreateCredential(testCredential("third", "t"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess3 := testSession("ref-third")
+	sess3.CredentialID = cid3
+	s3id, err := s.CreateSession(f, sess3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := s.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p model.Payload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Credentials) != 1 { // only "third" survives (dev-creds was deleted)
+		t.Fatalf("payload credentials = %d, want 1", len(p.Credentials))
+	}
+	found := false
+	for _, cred := range p.Credentials {
+		if cred.ID == cid3 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("credential %q missing from encoded payload", cid3)
+	}
+
+	// Simulate an external removal: strip the credential then Load.
+	var stripped model.Payload
+	if err := json.Unmarshal(raw, &stripped); err != nil {
+		t.Fatal(err)
+	}
+	stripped.Credentials = nil
+	strippedRaw, _ := json.Marshal(stripped)
+	s2 := New(nil)
+	if err := s2.Load(strippedRaw); err != nil {
+		t.Fatal(err)
+	}
+	sessAfter, err := s2.Session(s3id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessAfter.CredentialID != "" {
+		t.Fatalf("dangling credentialId = %q after Load, want cleared", sessAfter.CredentialID)
+	}
+	if sessAfter.Auth.Password != "pw" {
+		t.Fatalf("inline snapshot lost after Load: %+v", sessAfter)
 	}
 }

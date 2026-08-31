@@ -37,6 +37,7 @@ func main() {
 			application.NewService(a.AppService()),
 			application.NewService(a.VaultService()),
 			application.NewService(a.SessionService()),
+			application.NewService(a.CredentialService()),
 			application.NewService(a.TerminalService()),
 			application.NewService(a.SftpService()),
 		},

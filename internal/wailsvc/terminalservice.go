@@ -34,6 +34,9 @@ func (s *TerminalService) Connect(sessionID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Plan P003 §4.1: a referenced credential is the single source of
+	// truth for User+Auth at connect time.
+	sess = resolveSessionCredential(s.store, sess)
 	return s.mgr.Connect(&sess)
 }
 

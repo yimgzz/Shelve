@@ -1022,3 +1022,61 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* ---------- Credentials (plan P003) ---------- */
+
+/* Saved-credential picker row inside the session editor. */
+.cred-pick-row {
+    display: flex;
+    gap: 8px;
+}
+
+.cred-pick-row .input {
+    flex: 1;
+}
+
+/* Credential manager list (plan P003 §4.5). */
+.cred-manager-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 180px;
+    max-height: 400px;
+}
+
+.cred-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+}
+
+.cred-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-panel);
+}
+
+.cred-row:hover {
+    background: var(--bg-hover);
+}
+
+.cred-info {
+    min-width: 0;
+    overflow: hidden;
+}
+
+.cred-name {
+    font-weight: 600;
+}
+
+.cred-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}

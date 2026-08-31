@@ -18,7 +18,7 @@
 // closeTab): those bridge the Wails service bindings and the reactive
 // state in one place so components stay presentation-only.
 
-import { SessionService, TerminalService } from "../bindings/shelve/internal/wailsvc";
+import { CredentialService, SessionService, TerminalService } from "../bindings/shelve/internal/wailsvc";
 import { toast } from "./components/toasts";
 
 export type VaultState = "create" | "locked" | "unlocked";
@@ -84,6 +84,32 @@ export interface SessionDTO {
     extraArgs: string;
     /** Per-session SFTP browser start path ("" = global default). Plan P002. */
     sftpInitialPath?: string;
+    /**
+     * Optional reference to a named credential (plan P003). While set,
+     * the backend resolves User+Auth from the credential at connect/test
+     * time; the inline fields remain the fallback snapshot.
+     */
+    credentialId?: string;
+}
+
+/** Saved-credential read view (secret-free, plan P003 §4.3). */
+export interface CredentialDTO {
+    id: string;
+    name: string;
+    user: string;
+    authType: number;
+    hasPassword: boolean;
+    keyPath?: string;
+}
+
+/** Saved-credential write draft (password only flows INTO the vault). */
+export interface CredentialInput {
+    id?: string;
+    name: string;
+    user: string;
+    authType: number;
+    password?: string;
+    keyPath?: string;
 }
 
 /** One flat live-search result (master plan §2 A9). */
@@ -144,6 +170,12 @@ export interface StoreState {
     activeTabID: string | null;
     leftPanelWidth: number;
     /**
+     * Saved named credentials (plan P003): secret-free DTOs used by the
+     * session editor's dropdown and the credential manager. Refreshed on
+     * unlock and after every credential mutation.
+     */
+    credentials: CredentialDTO[];
+    /**
      * tabID → ordered list of transfer snapshots (sftp:progress events,
      * Phase 5c). The SFTP panel footer derives its progress line from this
      * cache. Never persisted.
@@ -184,6 +216,7 @@ export const initialState: StoreState = {
     tabs: [],
     activeTabID: null,
     leftPanelWidth: DEFAULT_LEFT_WIDTH,
+    credentials: [],
     pendingSessions: {},
     forwards: {},
     sftpTransfers: {},
@@ -223,6 +256,19 @@ class Store {
         try {
             const tree = (await SessionService.Tree()) as unknown as NodeDTO[];
             this.set({ tree });
+        } catch (err) {
+            toast("error", String(err));
+        }
+    }
+
+    /**
+     * Re-fetch the saved credentials (plan P003). Called on unlock, when
+     * the session editor opens, and after credential create/update/delete.
+     */
+    async refreshCredentials(): Promise<void> {
+        try {
+            const credentials = (await CredentialService.List()) as unknown as CredentialDTO[];
+            this.set({ credentials });
         } catch (err) {
             toast("error", String(err));
         }

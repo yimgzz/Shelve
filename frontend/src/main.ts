@@ -83,6 +83,9 @@ async function mount(vaultState: VaultState): Promise<void> {
         } catch (err) {
             console.error("Failed to load session tree:", err);
         }
+        // Saved named credentials for the session editor dropdown and the
+        // credential manager (plan P003).
+        void store.refreshCredentials();
         renderShell(root);
     } else {
         const mode: UnlockMode = vaultState === "create" ? "create" : "locked";
@@ -110,6 +113,7 @@ function handleEvent(name: string, payload: unknown): void {
                     activeTabID: null,
                     selectedID: null,
                     searchQ: "",
+                    credentials: [],
                     pendingSessions: {},
                     forwards: {},
                     sftpTransfers: {},

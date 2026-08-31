@@ -141,9 +141,26 @@ func (f *Folder) Validate() error {
 	return nil
 }
 
+// Validate checks Credential invariants (plan P003 §4.1): a display name,
+// a non-empty login, and exactly one auth method (password XOR key path —
+// the same rule as sessions/jump hosts).
+func (c *Credential) Validate() error {
+	var errs []error
+	if !validNonEmpty(c.Name) {
+		errs = append(errs, fieldErr("credential.name", "must not be empty"))
+	}
+	if !validNonEmpty(c.User) {
+		errs = append(errs, fieldErr("credential.user", "must not be empty"))
+	}
+	errs = append(errs, checkAuth("credential", c.Auth)...)
+	return joinErrs(errs...)
+}
+
 // Validate checks Session invariants (master plan §4): name, host, port,
 // user, auth XOR, each jump host, and ExtraArgs (strict parser, §2 D5).
-// All violations are joined into one error.
+// All violations are joined into one error. The optional CredentialID
+// reference is resolved by the store/service layer (an ID alone cannot
+// be checked without vault state); see plan P003 §4.1.
 func (s *Session) Validate() error {
 	return joinErrs(s.validateFields("session")...)
 }

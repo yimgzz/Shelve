@@ -103,12 +103,19 @@ func (s *SessionService) DeleteNode(id string) (int, error) {
 	return s.store.DeleteNode(id)
 }
 
-// CreateSession creates a session under input.FolderID ("" = root).
+// CreateSession creates a session under input.FolderID ("" = root). A
+// referenced credential is merged into the session first (plan P003): the
+// credential's User/Auth fill any blanks so the saved snapshot is valid
+// and self-contained, and the reference must exist.
 func (s *SessionService) CreateSession(input SessionInput) (string, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return "", err
 	}
-	return s.store.CreateSession(input.FolderID, input.toModel())
+	sess := input.toModel()
+	if err := s.applyCredentialSnapshot(&sess); err != nil {
+		return "", err
+	}
+	return s.store.CreateSession(input.FolderID, sess)
 }
 
 // Session returns the secret-free read view of one stored session (used
@@ -155,6 +162,12 @@ func (s *SessionService) UpdateSession(input SessionInput) error {
 			mergeAuthPassword(&sess.JumpHosts[i].Auth, old.JumpHosts[i].Auth)
 		}
 	}
+	// A referenced credential is authoritative while set (plan P003 §4.1):
+	// its User/Auth become the inline snapshot, replacing any stale inline
+	// password preserved by the merge above.
+	if err := s.applyCredentialSnapshot(&sess); err != nil {
+		return err
+	}
 	return s.store.UpdateSession(sess)
 }
 
@@ -193,6 +206,12 @@ func (s *SessionService) TestConnection(in SessionInput) error {
 		return err
 	}
 	sess := in.toModel()
+	// Fill any blanks from a referenced credential, then resolve — the
+	// test dials with the same auth a connect would use (plan P003 §5).
+	if err := s.applyCredentialSnapshot(&sess); err != nil {
+		return err
+	}
+	sess = resolveSessionCredential(s.store, sess)
 	if err := sess.Validate(); err != nil {
 		return err
 	}

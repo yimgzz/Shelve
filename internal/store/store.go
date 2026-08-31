@@ -22,6 +22,8 @@ var (
 	// ErrMoveCycle: a folder is being moved into itself or a
 	// descendant folder (would orphan its own subtree).
 	ErrMoveCycle = errors.New("store: cannot move a folder into its own descendant")
+	// ErrCredentialNotFound: the credential ID does not exist (plan P003).
+	ErrCredentialNotFound = errors.New("store: credential not found")
 )
 
 // SaveFunc persists an encoded model.Payload (wired to vault.Save by the
@@ -31,15 +33,17 @@ type SaveFunc func(payload []byte) error
 // saveDebounce is the master plan §4 persistence debounce.
 const saveDebounce = 300 * time.Millisecond
 
-// Store is the in-memory session tree (master plan §4/§5):
-// folders + sessions maps plus one ordered-ID list per parent
-// ("" = root). A single RWMutex guards all state; every mutation
-// schedules a debounced (300 ms) save through the SaveFunc callback.
+// Store is the in-memory session tree (master plan §4/§5): folders +
+// sessions maps plus one ordered-ID list per parent ("" = root), and the
+// named credentials slice (plan P003 §4.2). A single RWMutex guards all
+// state; every mutation schedules a debounced (300 ms) save through the
+// SaveFunc callback.
 type Store struct {
-	mu       sync.RWMutex
-	folders  map[string]model.Folder
-	sessions map[string]model.Session
-	order    map[string][]string // parentID ("" = root) → ordered child node IDs
+	mu          sync.RWMutex
+	folders     map[string]model.Folder
+	sessions    map[string]model.Session
+	credentials map[string]model.Credential
+	order       map[string][]string // parentID ("" = root) → ordered child node IDs
 
 	timerMu sync.Mutex
 	timer   *time.Timer
@@ -51,10 +55,11 @@ type Store struct {
 // useful in tests).
 func New(save SaveFunc) *Store {
 	return &Store{
-		folders:  map[string]model.Folder{},
-		sessions: map[string]model.Session{},
-		order:    map[string][]string{},
-		save:     save,
+		folders:     map[string]model.Folder{},
+		sessions:    map[string]model.Session{},
+		credentials: map[string]model.Credential{},
+		order:       map[string][]string{},
+		save:        save,
 	}
 }
 
@@ -81,10 +86,17 @@ func (s *Store) encodeLocked() ([]byte, error) {
 	}
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].ID < sessions[j].ID })
 
+	credentials := make([]model.Credential, 0, len(s.credentials))
+	for _, cred := range s.credentials {
+		credentials = append(credentials, cred)
+	}
+	sort.Slice(credentials, func(i, j int) bool { return credentials[i].ID < credentials[j].ID })
+
 	return json.Marshal(model.Payload{
-		Root:     append([]string(nil), s.order[""]...),
-		Folders:  nodes,
-		Sessions: sessions,
+		Root:        append([]string(nil), s.order[""]...),
+		Folders:     nodes,
+		Sessions:    sessions,
+		Credentials: credentials,
 	})
 }
 
@@ -139,6 +151,7 @@ func (s *Store) Load(payload []byte) error {
 
 	s.folders = map[string]model.Folder{}
 	s.sessions = map[string]model.Session{}
+	s.credentials = map[string]model.Credential{}
 	order := map[string][]string{}
 
 	for _, f := range p.Folders {
@@ -146,6 +159,21 @@ func (s *Store) Load(payload []byte) error {
 	}
 	for _, sess := range p.Sessions {
 		s.sessions[sess.ID] = sess
+	}
+	for _, cred := range p.Credentials {
+		s.credentials[cred.ID] = cred
+	}
+	// Defensive (plan P003 §4.1): a session whose CredentialID dangles —
+	// e.g. the credential was removed outside the store — is downgraded to
+	// its inline snapshot instead of failing at connect time.
+	for id, sess := range s.sessions {
+		if sess.CredentialID == "" {
+			continue
+		}
+		if _, ok := s.credentials[sess.CredentialID]; !ok {
+			sess.CredentialID = ""
+			s.sessions[id] = sess
+		}
 	}
 
 	known := func(id string) bool {
@@ -284,6 +312,9 @@ func (s *Store) CreateSession(folderID string, session model.Session) (string, e
 			return "", fmt.Errorf("%w: %q", ErrInvalidParent, folderID)
 		}
 	}
+	if err := s.checkCredentialRefLocked(sess.CredentialID); err != nil {
+		return "", err
+	}
 	s.sessions[sess.ID] = sess
 	s.order[folderID] = append(s.order[folderID], sess.ID)
 	s.scheduleSave()
@@ -306,6 +337,9 @@ func (s *Store) UpdateSession(session model.Session) error {
 	sess := session
 	sess.FolderID = old.FolderID
 	if err := sess.Validate(); err != nil {
+		return err
+	}
+	if err := s.checkCredentialRefLocked(sess.CredentialID); err != nil {
 		return err
 	}
 	s.sessions[sess.ID] = sess
@@ -345,6 +379,122 @@ func (s *Store) DuplicateSession(id string) (string, error) {
 	s.order[parent] = newList
 	s.scheduleSave()
 	return dst.ID, nil
+}
+
+// --------------------------------------------------------- credentials ---
+
+// CreateCredential adds a named credential (plan P003 §4.2) and returns
+// its ID. Fully validated (name, user, auth XOR) like sessions.
+func (s *Store) CreateCredential(cred model.Credential) (string, error) {
+	cred.ID = model.NewID()
+	if err := cred.Validate(); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.credentials[cred.ID] = cred
+	s.scheduleSave()
+	return cred.ID, nil
+}
+
+// UpdateCredential replaces a credential's editable fields. A non-empty
+// ID is required. Referencing sessions keep their inline snapshot; the
+// credential itself remains authoritative at connect time (plan P003).
+func (s *Store) UpdateCredential(cred model.Credential) error {
+	if cred.ID == "" {
+		return fmt.Errorf("%w: empty ID", ErrCredentialNotFound)
+	}
+	if err := cred.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.credentials[cred.ID]; !ok {
+		return fmt.Errorf("%w: %q", ErrCredentialNotFound, cred.ID)
+	}
+	s.credentials[cred.ID] = cred
+	s.scheduleSave()
+	return nil
+}
+
+// DeleteCredential removes a credential and soft-nulls CredentialID on
+// every session referencing it (plan P003 §4.2): those sessions keep
+// connecting with their inline snapshot. Returns the number of sessions
+// whose reference was cleared (for the A8-style confirm dialog).
+func (s *Store) DeleteCredential(id string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.credentials[id]; !ok {
+		return 0, fmt.Errorf("%w: %q", ErrCredentialNotFound, id)
+	}
+	delete(s.credentials, id)
+	affected := 0
+	for sessID, sess := range s.sessions {
+		if sess.CredentialID != id {
+			continue
+		}
+		sess.CredentialID = ""
+		s.sessions[sessID] = sess
+		affected++
+	}
+	s.scheduleSave()
+	return affected, nil
+}
+
+// ListCredentials returns a copy of every credential, sorted by display
+// name for a stable dropdown/manager order.
+func (s *Store) ListCredentials() []model.Credential {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]model.Credential, 0, len(s.credentials))
+	for _, cred := range s.credentials {
+		out = append(out, cred)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// Credential returns a copy of the credential with the given ID.
+func (s *Store) Credential(id string) (model.Credential, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cred, ok := s.credentials[id]
+	if !ok {
+		return model.Credential{}, fmt.Errorf("%w: %q", ErrCredentialNotFound, id)
+	}
+	return cred, nil
+}
+
+// CredentialUsage returns how many sessions currently reference the
+// credential (for the A8-style delete-confirm dialog, plan P003 §4.5).
+func (s *Store) CredentialUsage(id string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for _, sess := range s.sessions {
+		if sess.CredentialID == id {
+			n++
+		}
+	}
+	return n
+}
+
+// checkCredentialRefLocked enforces the plan P003 §4.1 invariant that a
+// session's CredentialID, when set, references an existing credential.
+// Requires s.mu.
+func (s *Store) checkCredentialRefLocked(id string) error {
+	if id == "" {
+		return nil
+	}
+	if _, ok := s.credentials[id]; !ok {
+		return fmt.Errorf("session.credentialId: references unknown credential %q", id)
+	}
+	return nil
 }
 
 // DeleteNode removes a session, or a folder together with its whole

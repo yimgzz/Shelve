@@ -10,8 +10,9 @@
 
 import { SessionService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog, type DialogHandle } from "../ui/dialog";
-import { store, type SessionDTO, type JumpHostDTO } from "../store";
+import { store, type SessionDTO, type JumpHostDTO, type CredentialDTO } from "../store";
 import { toast } from "./toasts";
+import { openCredentialManager } from "./credential-dialog";
 
 // model.AuthType (internal/model/model.go): AuthPassword=0, AuthKey=1.
 const AUTH_PASSWORD = 0;
@@ -49,6 +50,8 @@ export interface SessionInput {
     extraArgs: string;
     /** Per-session SFTP browser start path (blank = global default). Plan P002. */
     sftpInitialPath?: string;
+    /** Optional reference to a saved credential (plan P003). */
+    credentialId?: string;
 }
 
 const EXTRA_ARGS_HELP =
@@ -213,6 +216,86 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
     keyRb.rb.addEventListener("change", applyAuthMode);
     applyAuthMode();
 
+    // ---- Saved credential (plan P003 §4.4) ----
+    // A dropdown of named credentials. Picking one prefills User+Auth and
+    // sets credentialId on the saved input; the backend keeps the
+    // credential authoritative at connect time while the reference is set.
+    const credSelect = document.createElement("select");
+    credSelect.className = "input";
+    const manageCredsBtn = document.createElement("button");
+    manageCredsBtn.type = "button";
+    manageCredsBtn.className = "btn small";
+    manageCredsBtn.textContent = "Manage…";
+
+    let credentialId = editing ? initial!.credentialId || "" : "";
+
+    function fillCredentialOptions(selectedID: string): void {
+        credSelect.replaceChildren();
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = "None (inline credentials)";
+        credSelect.appendChild(none);
+        for (const c of store.getState().credentials) {
+            const opt = document.createElement("option");
+            opt.value = c.id;
+            opt.textContent = `${c.name} — ${c.user} (${c.authType === AUTH_KEY ? "key" : "password"})`;
+            credSelect.appendChild(opt);
+        }
+        credSelect.value = selectedID;
+    }
+
+    /** Apply a picked credential: prefill User+Auth, set credentialId. */
+    function applyCredential(cred: CredentialDTO | null): void {
+        if (!cred) {
+            credentialId = "";
+            pwInput.placeholder = "Password";
+            return;
+        }
+        credentialId = cred.id;
+        user.value = cred.user;
+        if (cred.authType === AUTH_KEY) {
+            pwRb.rb.checked = false;
+            keyRb.rb.checked = true;
+            keyPathInput.value = cred.keyPath || "";
+            keyPathInput.placeholder = "/path/to/id_ed25519";
+        } else {
+            keyRb.rb.checked = false;
+            pwRb.rb.checked = true;
+            pwInput.value = "";
+            pwInput.placeholder = "from saved credential (masked)";
+        }
+        applyAuthMode();
+    }
+
+    credSelect.addEventListener("change", () => {
+        const id = credSelect.value;
+        const cred = id ? store.getState().credentials.find((c) => c.id === id) || null : null;
+        applyCredential(cred);
+    });
+
+    manageCredsBtn.addEventListener("click", async () => {
+        const picked = await openCredentialManager({ pick: true });
+        await store.refreshCredentials();
+        if (picked) {
+            fillCredentialOptions(picked.id);
+            applyCredential(picked);
+        } else {
+            fillCredentialOptions(credentialId);
+        }
+    });
+
+    fillCredentialOptions(credentialId);
+    if (credentialId) {
+        const cred = store.getState().credentials.find((c) => c.id === credentialId);
+        if (cred && cred.authType === AUTH_PASSWORD) {
+            pwInput.placeholder = "from saved credential (masked)";
+        }
+    }
+
+    const credRow = document.createElement("div");
+    credRow.className = "cred-pick-row";
+    credRow.append(credSelect, manageCredsBtn);
+
     // ---- Jump hosts ----
     const jumpSection = document.createElement("div");
     jumpSection.className = "jump-section";
@@ -351,7 +434,8 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         hint: "Directory the SFTP browser opens in for this session. Absolute or ~-relative; blank uses the global default.",
     });
 
-    body.append(nameF.wrap, hostF.wrap, portF.wrap, userF.wrap, authSection, jumpSection, extraF.wrap, sftpPathF.wrap);
+    const credF = field("Saved credential", credRow);
+    body.append(nameF.wrap, hostF.wrap, portF.wrap, userF.wrap, credF.wrap, authSection, jumpSection, extraF.wrap, sftpPathF.wrap);
 
     // ---- Footer ----
     const footer = document.createElement("div");
@@ -410,6 +494,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
             })),
             extraArgs: extraArgs.value.trim(),
             sftpInitialPath: sftpPath.value.trim(),
+            credentialId: credentialId || undefined,
         };
         const localErr: Array<[HTMLElement, string]> = [];
         if (!input.name) {

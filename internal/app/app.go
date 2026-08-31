@@ -34,12 +34,13 @@ type App struct {
 	engine  *sshengine.Manager
 	sftpMgr *sftp.Manager
 
-	appService      *wailsvc.AppService
-	vaultService    *wailsvc.VaultService
-	sessionService  *wailsvc.SessionService
-	terminalService *wailsvc.TerminalService
-	sftpService     *wailsvc.SftpService
-	emitter         *wailsvc.LateEmitter
+	appService        *wailsvc.AppService
+	vaultService      *wailsvc.VaultService
+	sessionService    *wailsvc.SessionService
+	credentialService *wailsvc.CredentialService
+	terminalService   *wailsvc.TerminalService
+	sftpService       *wailsvc.SftpService
+	emitter           *wailsvc.LateEmitter
 }
 
 // New constructs the app:
@@ -84,16 +85,17 @@ func New() (*App, error) {
 	}
 
 	return &App{
-		vault:           v,
-		store:           st,
-		engine:          engine,
-		sftpMgr:         sftpMgr,
-		emitter:         emit,
-		appService:      wailsvc.NewAppService(Version),
-		vaultService:    wailsvc.NewVaultService(v, st, engine, sftpMgr, emit),
-		sessionService:  wailsvc.NewSessionService(st, v, engine, emit),
-		terminalService: wailsvc.NewTerminalService(st, v, engine),
-		sftpService:     wailsvc.NewSftpService(v, sftpMgr),
+		vault:             v,
+		store:             st,
+		engine:            engine,
+		sftpMgr:           sftpMgr,
+		emitter:           emit,
+		appService:        wailsvc.NewAppService(Version),
+		vaultService:      wailsvc.NewVaultService(v, st, engine, sftpMgr, emit),
+		sessionService:    wailsvc.NewSessionService(st, v, engine, emit),
+		credentialService: wailsvc.NewCredentialService(st, v),
+		terminalService:   wailsvc.NewTerminalService(st, v, engine),
+		sftpService:       wailsvc.NewSftpService(v, sftpMgr),
 	}, nil
 }
 
@@ -110,6 +112,11 @@ func (a *App) VaultService() *wailsvc.VaultService {
 // SessionService returns the Wails-facing session-tree service.
 func (a *App) SessionService() *wailsvc.SessionService {
 	return a.sessionService
+}
+
+// CredentialService returns the Wails-facing credential service.
+func (a *App) CredentialService() *wailsvc.CredentialService {
+	return a.credentialService
 }
 
 // TerminalService returns the Wails-facing terminal-tab service.

@@ -54,6 +54,23 @@ type Session struct {
 	JumpHosts       []JumpHost `json:"jumpHosts"`
 	ExtraArgs       string     `json:"extraArgs"`
 	SftpInitialPath string     `json:"sftpInitialPath"` // per-session SFTP browser start path ("" = global default, plan P002)
+	// CredentialID optionally references a named Credential (plan P003).
+	// While set, User+Auth are resolved from the credential at connect /
+	// test time (single source of truth); the inline fields are kept as a
+	// validated snapshot that takes over when the reference is cleared
+	// (e.g. the credential is deleted — store soft-nulls the reference).
+	CredentialID string `json:"credentialId,omitempty"`
+}
+
+// Credential is a named, reusable auth bundle (plan P003 §4.1): either a
+// login + password pair or a login + SSH key path pair, stored inside the
+// encrypted vault and referenced by sessions. The same password-XOR-key
+// rule as sessions applies (validated by Validate).
+type Credential struct {
+	ID   string `json:"id"`             // ULID (model.NewID)
+	Name string `json:"name"`           // display name; required
+	User string `json:"user,omitempty"` // login; required
+	Auth Auth   `json:"auth"`           // password XOR key path
 }
 
 // Payload is the plaintext document encrypted inside vault.json
@@ -61,9 +78,10 @@ type Session struct {
 // folder's Children holds its ordered child IDs (folders and sessions),
 // which is the single source of truth for sibling order (master plan A10).
 type Payload struct {
-	Root     []string  `json:"root"`
-	Folders  []Folder  `json:"folders"`
-	Sessions []Session `json:"sessions"`
+	Root        []string     `json:"root"`
+	Folders     []Folder     `json:"folders"`
+	Sessions    []Session    `json:"sessions"`
+	Credentials []Credential `json:"credentials"`
 }
 
 // NewID returns a new ULID string (master plan A10 session IDs).

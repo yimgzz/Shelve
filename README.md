@@ -34,6 +34,8 @@ edit-text-with-system-editor). Roadmap: `plans/` (master plan + phase plans).
 | `make test-race` | Go unit tests with the race detector |
 | `make test-integration` | SFTP/SSH integration tests via testcontainers (needs the Docker socket; builds `docker/sshd`) |
 | `make lint` | `gofmt` + `go vet` (container) + frontend `tsc --noEmit` |
+| `make appimage` | Build a self-contained AppImage in the container → `bin/shelve-<arch>.AppImage` |
+| `make appimage-check` | Verify the AppImage payload + dependency self-containment (`scripts/verify-appimage.sh`) |
 | `make clean` | Remove `bin/`, `frontend/dist/`, `frontend/bindings/` |
 | `make wails-init` | Re-merge the pinned Wails template (recreates frontend/build scaffolding) |
 
@@ -96,6 +98,45 @@ If the window fails to open under `make dev`:
   scope for v1** (D4). The browser is on by default; use **[Sessions]** /
   **[SFTP]** in the left panel to switch views, and the path bar to jump to
   any directory.
+
+## Packaging (AppImage)
+
+`make appimage` produces a self-contained AppImage at
+`bin/shelve-<arch>.AppImage` (e.g. `bin/shelve-x86_64.AppImage`). Everything
+runs inside the `shelve-dev` container — the host needs Docker only.
+linuxdeploy / AppRun are downloaded at build time (network required during
+packaging) and cached in the gitignored `build/linux/appimage/build/` scratch
+dir.
+
+What is bundled (via `wails3 generate appimage`, pinned Wails v3.0.0-beta.15):
+
+- the release binary (`-tags production`);
+- the GTK4 + WebKitGTK 6.0 runtime libraries, the WebKit helper processes
+  (`WebKitWebProcess`, `WebKitNetworkProcess`, injected bundle), GLib schemas,
+  GDK pixbuf loaders, Pango/Cairo/etc. — end users need **no** GTK/WebKit
+  packages;
+- the desktop entry (at the AppDir root — the upstream linuxdeploy layout) and
+  the app icon.
+
+Deliberately *not* bundled (provided by any stock desktop): glibc, libstdc++,
+the X11/Wayland client libs, the font stack (freetype/harfbuzz/fontconfig), and
+the GPU drivers (GL/EGL/drm/gbm — these must stay host-provided).
+
+```sh
+make appimage             # -> bin/shelve-x86_64.AppImage
+make appimage-check       # headless payload + dependency verification
+./bin/shelve-x86_64.AppImage
+```
+
+- Requires FUSE 2/3 on the target system; without FUSE use
+  `./bin/shelve-x86_64.AppImage --appimage-extract-and-run`.
+- **Target platform:** the bundle is built on Debian 13 (trixie), so the floor
+  is glibc ≥ 2.39 with `CXXABI_1.3.15` in libstdc++ (Debian 13 / Ubuntu 24.04 /
+  Fedora 40 class). Older distros should keep using `make build` + `make run`;
+  the dev host itself (ALT Linux, glibc 2.38) is below this floor and cannot
+  execute the AppImage.
+- DEB/RPM/Flatpak remain out of scope (packaging phase cancelled; ad-hoc only —
+  see master plan §10).
 
 ## SFTP browser
 

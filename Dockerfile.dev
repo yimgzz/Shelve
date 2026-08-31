@@ -7,6 +7,7 @@ ARG WAILS3_VERSION=v3.0.0-beta.15
 
 # --no-install-recommends keeps the image lean.
 # Note: libglib2.0-0t64 is the Debian 13 (trixie) name for libglib2.0-0 (t64 transition).
+# Note: appimagetool (AppImage packaging, plan P004) hard-requires `file`.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         build-essential \
@@ -22,6 +23,7 @@ RUN apt-get update \
         ca-certificates \
         x11-apps \
         x11-utils \
+        file \
  && rm -rf /var/lib/apt/lists/*
 
 # Pin the Wails v3 CLI next to the rest of the toolchain.

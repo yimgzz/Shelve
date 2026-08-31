@@ -40,8 +40,9 @@ X11_FLAGS   := -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY=$(DISPLAY) -e GDK_BAC
 
 # Container runs as root, so return repo-owned artifacts to the invoking
 # user (chown metadata only; mirrors the wails build:docker pattern).
+# build/linux/appimage/build is the AppImage scratch dir (gitignored; P004).
 fix-owner:
-	docker run --rm --init -v $(ROOT):/app --entrypoint chown $(IMAGE) -R $(UID):$(GID) /app/bin /app/frontend/dist /app/frontend/bindings /app/frontend/node_modules 2>/dev/null || true
+	docker run --rm --init -v $(ROOT):/app --entrypoint chown $(IMAGE) -R $(UID):$(GID) /app/bin /app/frontend/dist /app/frontend/bindings /app/frontend/node_modules /app/build/linux/appimage/build 2>/dev/null || true
 
 .DEFAULT_GOAL := help
 
@@ -149,22 +150,31 @@ lint: ensure-image ## gofmt + go vet (container) + frontend tsc --noEmit
 		npx tsc --noEmit'
 
 # ------------------------------------------------------------ packaging ---
+# AppImage packaging (plan P004). AppImage is the only wired format; DEB/RPM
+# stay stubs per the cancelled Phase 6 (master §10). Everything runs in the
+# shelve-dev container: `wails3 task linux:create:appimage` = release build +
+# .desktop generation + `wails3 generate appimage` (linuxdeploy + GTK4 /
+# WebKitGTK bundling, master §7/§11).
 
 .PHONY: package
-package: ensure-image ## Package AppImage + DEB + RPM
-	@echo "not implemented yet (Phase 6: wails3 package GOOS=linux -> AppImage/DEB/RPM)"
+package: appimage ## Package the AppImage (single format; DEB/RPM remain stubs per cancelled Phase 6)
 
 .PHONY: appimage
-appimage: ensure-image ## Build a single AppImage
-	@echo "not implemented yet (Phase 6)"
+appimage: ensure-image ## Build a self-contained AppImage -> bin/shelve-<arch>.AppImage
+	$(DOCKER_RUN) $(IMAGE) task linux:create:appimage
+	$(MAKE) fix-owner
+
+.PHONY: appimage-check
+appimage-check: ## Verify bin/shelve-<arch>.AppImage contents + zero-dep ldd check (plan P004 T3)
+	./scripts/verify-appimage.sh
 
 .PHONY: deb
 deb: ensure-image ## Build a single DEB
-	@echo "not implemented yet (Phase 6)"
+	@echo "not implemented (cancelled Phase 6; nfpm config present but unwired)"
 
 .PHONY: rpm
 rpm: ensure-image ## Build a single RPM
-	@echo "not implemented yet (Phase 6)"
+	@echo "not implemented (cancelled Phase 6; nfpm config present but unwired)"
 
 .PHONY: build-win
 build-win: ensure-image ## Cross-build the Windows binary (zig image, unsigned)

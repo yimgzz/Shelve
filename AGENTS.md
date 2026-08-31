@@ -16,12 +16,12 @@ vault, session tree + live search, terminal tabs, optional SFTP browser).
 ## 1. Read these first
 
 The project is driven by a detailed, single-source-of-truth planning system in
-`.kilo/plans/`. Before touching any code, read the relevant plan:
+`.kilo/plans/` and `plans`. Before touching any code, read the relevant plan:
 
 | Reference | File | Contents |
 |---|---|---|
 | Master plan | [`.kilo/plans/1787912690309-master-plan.md`](.kilo/plans/1787912690309-master-plan.md) | Architecture, data model, interfaces, build strategy, security model, roadmap index (§1–§12). |
-| Phase plans | `.kilo/plans/*.md` | Per-phase task lists, exit criteria, QA checklists. |
+| Phase plans | `.kilo/plans/*.md` `plans/*.md`| Per-phase task lists, exit criteria, QA checklists. |
 
 Every plan references the master plan sections (`§`) that must be read before
 implementing. **Follow the "read the §s before starting" instructions at the top

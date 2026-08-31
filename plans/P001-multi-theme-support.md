@@ -20,14 +20,14 @@ variant, not just light/dark.
 
 Read these sections first:
 
-- [`.kilo/plans/1787912690309-master-plan.md`](.kilo/plans/1787912690309-master-plan.md)
+- [`plans/1787912690309-master-plan.md`](plans/1787912690309-master-plan.md)
   - **§4 Data Model & Storage** — `settings.json` schema; adding a theme-variant field without leaking secrets; normalize() safe-fallback rules.
   - **§5 Architecture** — `AppService.GetSettings/SaveSettings` surface; DTO contract; `config.Settings` is the settings JSON shape verbatim.
   - **§6 UI/UX Specification → Theming** — the token set (`--bg, --bg-panel, --bg-hover, --bg-active, --border, --text, --text-dim, --accent, --error, --ok, --warn, --terminal-bg, --terminal-fg`), `matchMedia`/`ThemeChanged` default, and the terminal palette binding rule.
   - **§11 Risks & Mitigations** — Wails beta isolation; keep theme changes limited to frontend + `config`, no new wails surface beyond existing AppService.
 - Phase plans to re-check for the current wiring:
-  - [`.kilo/plans/1788003650840-phase-4a-shell-unlock.md`](.kilo/plans/1788003650840-phase-4a-shell-unlock.md) (theme engine: [`ui/theme.ts`](frontend/src/ui/theme.ts), FOUC guard in [`index.html`](frontend/index.html), token block in [`themes.css`](frontend/src/style/themes.css)).
-  - [`.kilo/plans/1788003650840-phase-4d-settings-lock-shortcuts.md`](.kilo/plans/1788003650840-phase-4d-settings-lock-shortcuts.md) (settings dialog live-apply/revert pattern in [`settings-dialog.ts`](frontend/src/components/settings-dialog.ts)).
+  - [`plans/1788003650840-phase-4a-shell-unlock.md`](plans/1788003650840-phase-4a-shell-unlock.md) (theme engine: [`ui/theme.ts`](frontend/src/ui/theme.ts), FOUC guard in [`index.html`](frontend/index.html), token block in [`themes.css`](frontend/src/style/themes.css)).
+  - [`plans/1788003650840-phase-4d-settings-lock-shortcuts.md`](plans/1788003650840-phase-4d-settings-lock-shortcuts.md) (settings dialog live-apply/revert pattern in [`settings-dialog.ts`](frontend/src/components/settings-dialog.ts)).
 
 ## 3. Current state (as-is)
 

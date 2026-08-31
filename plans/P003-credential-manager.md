@@ -13,7 +13,7 @@ single source of truth).
 
 ## 2. Master-plan references (read before implementation)
 
-- [`.kilo/plans/1787912690309-master-plan.md`](.kilo/plans/1787912690309-master-plan.md)
+- [`plans/1787912690309-master-plan.md`](plans/1787912690309-master-plan.md)
   - **§4 Data Model & Storage** — `vault.json` envelope; the encrypted `Payload`
     (`{"folders":[...],"sessions":[...]}`) must gain a `credentials` slice; the `Auth`
     password-XOR-key rule and per-field validation; atomic debounced writes; schema versioning note (`"v":1`).
@@ -26,10 +26,10 @@ single source of truth).
   - **§2 → A2** — key-file passphrases are never stored; prompted once per connection. Credentials
     follow the same rule for key-based bundles.
 - Phase plans to re-check:
-  - [`.kilo/plans/1787912690309-phase-2-vault-session-store.md`](.kilo/plans/1787912690309-phase-2-vault-session-store.md) — store CRUD/persistence trigger, payload encode/load, model validation.
-  - [`.kilo/plans/1788003650840-phase-4b-tree-search-editor.md`](.kilo/plans/1788003650840-phase-4b-tree-search-editor.md) — session editor modal + `UpdateSession` password-merge rule (relevant for how a picked credential populates/references auth).
-  - [`.kilo/plans/1788003650840-phase-4d-settings-lock-shortcuts.md`](.kilo/plans/1788003650840-phase-4d-settings-lock-shortcuts.md) — dialog/context-menu/confirm primitives reused by the credential manager UI.
-  - [`.kilo/plans/1787912690309-master-plan.md#58`](.kilo/plans/1787912690309-master-plan.md) §8 again at implementation time.
+  - [`plans/1787912690309-phase-2-vault-session-store.md`](plans/1787912690309-phase-2-vault-session-store.md) — store CRUD/persistence trigger, payload encode/load, model validation.
+  - [`plans/1788003650840-phase-4b-tree-search-editor.md`](plans/1788003650840-phase-4b-tree-search-editor.md) — session editor modal + `UpdateSession` password-merge rule (relevant for how a picked credential populates/references auth).
+  - [`plans/1788003650840-phase-4d-settings-lock-shortcuts.md`](plans/1788003650840-phase-4d-settings-lock-shortcuts.md) — dialog/context-menu/confirm primitives reused by the credential manager UI.
+  - [`plans/1787912690309-master-plan.md#58`](plans/1787912690309-master-plan.md) §8 again at implementation time.
 
 ## 3. Current state (as-is)
 

@@ -18,7 +18,7 @@ with two behaviors:
 
 ## 2. Master-plan references (read before implementation)
 
-- [`.kilo/plans/1787912690309-master-plan.md`](.kilo/plans/1787912690309-master-plan.md)
+- [`plans/1787912690309-master-plan.md`](plans/1787912690309-master-plan.md)
   - **§2 Resolved Decisions → D4** — SFTP scope: browse/upload/download/mkdir/rename/delete +
     "edit text file with system editor" (download to temp → external editor → save → re-upload). Open-on-double-click is a natural extension of the temp-file flow.
   - **§2 → A5** — large file bytes never cross IPC: transfers pass *paths*; Go streams bytes.
@@ -30,9 +30,9 @@ with two behaviors:
     (dir → navigate; file → Edit if text-like else Download), context-menu rows (Open / Edit / Download / …), status line with transfer progress.
   - **§8 Security** — temp files 0600 under `tmp/`, swept on lock/exit/crash; no plaintext creds; no network except user hosts.
 - Phase plans to re-check:
-  - [`.kilo/plans/1788003650840-phase-5b-sftp-transfers-editing.md`](.kilo/plans/1788003650840-phase-5b-sftp-transfers-editing.md) — transfer + `EditRemoteText` state machine, temp cleanup, `DownloadThenSave` fallback.
-  - [`.kilo/plans/1788003650840-phase-5c-sftp-panel.md`](.kilo/plans/1788003650840-phase-5c-sftp-panel.md) — panel UI, double-click dispatch, context menu.
-  - [`.kilo/plans/1788003650840-phase-4d-settings-lock-shortcuts.md`](.kilo/plans/1788003650840-phase-4d-settings-lock-shortcuts.md) — settings dialog live-apply/revert pattern.
+  - [`plans/1788003650840-phase-5b-sftp-transfers-editing.md`](plans/1788003650840-phase-5b-sftp-transfers-editing.md) — transfer + `EditRemoteText` state machine, temp cleanup, `DownloadThenSave` fallback.
+  - [`plans/1788003650840-phase-5c-sftp-panel.md`](plans/1788003650840-phase-5c-sftp-panel.md) — panel UI, double-click dispatch, context menu.
+  - [`plans/1788003650840-phase-4d-settings-lock-shortcuts.md`](plans/1788003650840-phase-4d-settings-lock-shortcuts.md) — settings dialog live-apply/revert pattern.
 
 ## 3. Current state (as-is)
 

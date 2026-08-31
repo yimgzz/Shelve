@@ -2,7 +2,7 @@
 
 **Type:** Backend. **Prereq:** 3a. **Sub-plan 2/5 of old Phase 3. Next: 3c.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (D5, A1, A2), §4, §5 (event contract row `vault:hostkey-prompt`), §8 (items 5–6), §9 (unit tests)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (D5, A1, A2), §4, §5 (event contract row `vault:hostkey-prompt`), §8 (items 5–6), §9 (unit tests)** before starting.
 
 **Scope guard (important):** add two small files + tests under `internal/sshx/`. NO `internal/sshengine`, NO wailsvc changes, NO containers.
 

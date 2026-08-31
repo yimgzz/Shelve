@@ -2,7 +2,7 @@
 
 **Type:** Frontend + small backend merge rule. **Prereq:** 4a. **Sub-plan 2/4 of old Phase 4. Next: 4c.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (A8, A9, A10), §5 (SessionService, events), §6 (Tree, Search, Tabs, Session editor, Empty state)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (A8, A9, A10), §5 (SessionService, events), §6 (Tree, Search, Tabs, Session editor, Empty state)** before starting.
 
 **Scope guard (important):** left panel + tabs + editor. The terminal pane is a placeholder card (4c provides xterm). Settings dialog, gear menu, auto-lock, shortcut table = 4d.
 

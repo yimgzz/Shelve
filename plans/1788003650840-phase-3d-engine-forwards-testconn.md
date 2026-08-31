@@ -2,7 +2,7 @@
 
 **Type:** Backend. **Prereq:** 3c. **Sub-plan 4/5 of old Phase 3. Next: 3e.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (D5, A6), §5 (`ssh:forward` event, failure modes), §9 (unit tests)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (D5, A6), §5 (`ssh:forward` event, failure modes), §9 (unit tests)** before starting.
 
 **Scope guard (important):** engine features + in-process tests. No containers (3e owns those), no frontend. Wails changes: only wiring `SessionService.TestConnection` to the real engine.
 

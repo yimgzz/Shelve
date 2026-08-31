@@ -10,7 +10,7 @@ Sessions live in an encrypted vault (Argon2id + AES-256-GCM) under
 **Status:** v1.1 — feature-complete (Phases 1–5c done, final gate closed). The
 app is a working SSH session manager: encrypted vault, session tree + live
 search, terminal tabs, and an optional SFTP browser (browse / upload / download /
-mkdir / rename / delete / edit-text-with-system-editor). Roadmap: `.kilo/plans/`
+mkdir / rename / delete / edit-text-with-system-editor). Roadmap: `plans/`
 (master plan + phase plans).
 
 ## Prerequisites

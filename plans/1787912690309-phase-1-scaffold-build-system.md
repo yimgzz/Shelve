@@ -2,7 +2,7 @@
 
 **Type:** Backend + build. **Runs first; no prerequisites.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§1, §3, §5 (package layout), §6 (unlock screen placeholder only), §7** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§1, §3, §5 (package layout), §6 (unlock screen placeholder only), §7** before starting.
 
 ## Goal
 A Wails v3 project that boots a minimal window, built 100% inside Docker via a Makefile, with the final repo structure (packages may be empty stubs) in place.

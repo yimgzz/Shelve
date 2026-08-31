@@ -2,7 +2,7 @@
 
 **Type:** Backend. **Prereq: Phase 1.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§1, §2 (D3, A1, A8, A10), §4 (all), §5 (services/DTOs), §8 (all), §9 (unit)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§1, §2 (D3, A1, A8, A10), §4 (all), §5 (services/DTOs), §8 (all), §9 (unit)** before starting.
 
 ## Goal
 The complete data layer: model + validation, settings persistence, Argon2id/AES-256-GCM vault with first-run/unlock/lock lifecycle, in-memory tree store with CRUD/move/order, OpenSSH `known_hosts` manager, all Wails service bindings for tree/settings (frontend comes later — services must be callable/testable headlessly).

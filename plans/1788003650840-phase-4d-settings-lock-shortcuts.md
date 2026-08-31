@@ -2,7 +2,7 @@
 
 **Type:** Frontend. **Prereq:** 4c. **Sub-plan 4/4 of old Phase 4 — FINAL GATE of the core UI.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (D3), §4 (settings.json schema), §6 (Settings, Shortcuts, gear placement), §8 (item 3)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (D3), §4 (settings.json schema), §6 (Settings, Shortcuts, gear placement), §8 (item 3)** before starting.
 
 **Scope guard (important):** settings, lock, auto-lock, shortcuts, cleanup, and the full Phase 4 regression checklist. NO SFTP (5c), NO packaging.
 

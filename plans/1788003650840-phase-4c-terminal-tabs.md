@@ -2,7 +2,7 @@
 
 **Type:** Frontend. **Prereq:** 4b. **Sub-plan 3/4 of old Phase 4. Next: 4d.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (A3, A4, A6), §5 (terminal events, backpressure note), §6 (Terminal, Tabs, status bar)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (A3, A4, A6), §5 (terminal events, backpressure note), §6 (Terminal, Tabs, status bar)** before starting.
 
 **Scope guard (important):** terminal inside tabs only. NO new backend methods (3c bindings suffice), NO settings-dialog changes (4d).
 

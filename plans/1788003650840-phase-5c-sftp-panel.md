@@ -2,7 +2,7 @@
 
 **Type:** Frontend + test infra. **Prereq:** 5b. **Sub-plan 3/3 of old Phase 5 — FINAL GATE of the roadmap (master §12 end-to-end item).**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (D4, A5), §5 (SftpService, `sftp:progress`), §6 (SFTP panel, shortcut Ctrl+Shift+E), §8 (item 8), §9 (integration), §12 (global acceptance)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (D4, A5), §5 (SftpService, `sftp:progress`), §6 (SFTP panel, shortcut Ctrl+Shift+E), §8 (item 8), §9 (integration), §12 (global acceptance)** before starting.
 
 **Scope guard (important):** the panel + integration tests + final QA. No new Go PRODUCT code (test-only additions allowed).
 

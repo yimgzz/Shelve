@@ -2,7 +2,7 @@
 
 **Type:** Frontend (main) + backend (3-line change). **Prereq:** Phase 3 done (3e). **Sub-plan 1/4 of old Phase 4. Next: 4b.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (D3, A3–A9), §5 (full event contract + services), §6 (Layout, Theming, Unlock screen), §11 (Wails beta isolation)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (D3, A3–A9), §5 (full event contract + services), §6 (Layout, Theming, Unlock screen), §11 (Wails beta isolation)** before starting.
 
 **Scope guard (important):** shell + unlock only. NO tree, NO tabs, NO terminal, NO session/settings dialogs (4b–4d fill those in). The ONLY backend change is the `window.leftWidth` setting.
 

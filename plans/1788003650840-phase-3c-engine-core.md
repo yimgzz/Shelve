@@ -2,7 +2,7 @@
 
 **Type:** Backend (main work). **Prereq:** 3b. **Sub-plan 3/5 of old Phase 3. Next: 3d.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (A1, A2, A4, A6), §5 (package layout, services, full event contract, threading/failure modes), §9, §11 (Wails isolation)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (A1, A2, A4, A6), §5 (package layout, services, full event contract, threading/failure modes), §9, §11 (Wails isolation)** before starting.
 
 **Scope guard (important):** engine core + prompt flow + service registration. Local port forwards and `TestConnection` belong to 3d — ignore `Parsed.Forwards` for now (but DO honor a parsed `ProxyJump` in the chain, task 1); leave `SessionService.TestConnection` on its `ErrEngineNotWired` placeholder. No container tests (3e owns those).
 

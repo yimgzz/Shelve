@@ -2,7 +2,7 @@
 
 **Type:** Backend. **Prereq:** Phase 4 done (4d). **Sub-plan 1/3 of old Phase 5. Next: 5b.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (D4, A5), §4 (`tmp/` file), §5 (SftpService, failure modes), §8 (items 7–8), §9 (unit tests)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (D4, A5), §4 (`tmp/` file), §5 (SftpService, failure modes), §8 (items 7–8), §9 (unit tests)** before starting.
 
 **Scope guard (important):** browse operations + infrastructure only. Upload/Download/edit = 5b. Frontend = none (5c).
 

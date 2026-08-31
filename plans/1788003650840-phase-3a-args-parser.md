@@ -2,7 +2,7 @@
 
 **Type:** Backend. **Prereq:** Phase 2 (done). **Sub-plan 1/5 of old Phase 3. Next: 3b.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (D5), §4 (validation rules), §5 (services), §9 (unit tests)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (D5), §4 (validation rules), §5 (services), §9 (unit tests)** before starting.
 
 **Scope guard (important):** implement only the parser and its tests. NO engine code, NO `internal/sshengine` changes, NO wails changes, NO container/network code.
 

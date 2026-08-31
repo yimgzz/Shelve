@@ -2,7 +2,7 @@
 
 **Type:** Backend. **Prereq:** 5a. **Sub-plan 2/3 of old Phase 5. Next: 5c.**
 
-**Master plan:** `.kilo/plans/1787912690309-master-plan.md` — read **§2 (D4, A5), §4 (`tmp/`), §5 (SftpService, `sftp:progress`), §6 (SFTP panel — backend implications), §8 (items 7–9), §9 (unit tests)** before starting.
+**Master plan:** `plans/1787912690309-master-plan.md` — read **§2 (D4, A5), §4 (`tmp/`), §5 (SftpService, `sftp:progress`), §6 (SFTP panel — backend implications), §8 (items 7–9), §9 (unit tests)** before starting.
 
 **Scope guard (important):** transfers + edit flow + finishing the service. Frontend = none (5c). Container-based tests = 5c.
 

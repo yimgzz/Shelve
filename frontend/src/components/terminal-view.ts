@@ -133,14 +133,18 @@ function reconcile(): void {
         return;
     }
     const { tabs, activeTabID, settings } = store.getState();
-    paneEl.textContent = "";
 
-    // Remove panes for tabs that no longer exist (also covers the case
-    // where the last tab closed and tabs is now empty).
+    // Drop any "No open sessions" placeholder; re-added below when needed.
+    paneEl.querySelector(".empty-state")?.remove();
+
+    // Remove panes (and tear down their pooled terminals) only for tabs that
+    // no longer exist. Existing panes stay attached in the DOM — they must
+    // NOT be wiped here, or the persisted xterm viewport vanishes.
     const ids = new Set(tabs.map((t) => t.id));
     for (const id of Array.from(panes.keys())) {
         if (!ids.has(id)) {
             TermPool.destroy(id);
+            panes.get(id)?.el.remove();
             panes.delete(id);
         }
     }
@@ -151,7 +155,8 @@ function reconcile(): void {
         return;
     }
 
-    // Create panes + pooled terminals for new tabs.
+    // Create panes + pooled terminals for NEW tabs. Existing panes are
+    // already in the DOM and are skipped here.
     for (const tab of tabs) {
         if (panes.has(tab.id)) {
             continue;

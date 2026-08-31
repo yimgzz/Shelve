@@ -151,6 +151,52 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 }
 
+// TestLoadMissingFileSftpBrowserEnabledDefaultTrue: a fresh config dir (no
+// settings.json) yields the phase-5d default — SFTP browser ON.
+func TestLoadMissingFileSftpBrowserEnabledDefaultTrue(t *testing.T) {
+	isolatedXDG(t)
+	s, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !s.SftpBrowserEnabled {
+		t.Fatal("missing settings.json must default sftpBrowserEnabled to true")
+	}
+}
+
+// TestLoadSftpBrowserEnabledPresenceAware (phase 5d D5d-4): a settings.json
+// that never persisted the flag is treated as enabled; an explicit `false`
+// (user disabled it) wins; an explicit `true` is kept.
+func TestLoadSftpBrowserEnabledPresenceAware(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"absent key → enabled", `{"theme":"dark"}`, true},
+		{"explicit false wins", `{"sftpBrowserEnabled":false}`, false},
+		{"explicit true kept", `{"sftpBrowserEnabled":true}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolatedXDG(t)
+			if err := os.MkdirAll(Path(), DirPerm); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(File(SettingsFileName), []byte(tc.raw), FilePerm); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got.SftpBrowserEnabled != tc.want {
+				t.Fatalf("sftpBrowserEnabled = %v, want %v", got.SftpBrowserEnabled, tc.want)
+			}
+		})
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	isolatedXDG(t)
 	s := DefaultSettings()
@@ -198,6 +244,9 @@ func TestLoadJSONMatchesMasterSchema(t *testing.T) {
 	}
 	if got.Theme != ThemeDark || got.Terminal.FontSize != 13 || got.Window.Width != 1280 {
 		t.Fatalf("unexpected settings: %+v", got)
+	}
+	if got.SftpBrowserEnabled {
+		t.Fatalf("explicit sftpBrowserEnabled:false must be respected, got %+v", got)
 	}
 }
 

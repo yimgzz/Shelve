@@ -163,6 +163,12 @@ export interface SftpTransfer {
 export interface StoreState {
     settings: Settings;
     vaultState: VaultState;
+    /**
+     * Left-panel mode (phase 5d D5d-3): "tree" shows the session list,
+     * "sftp" the SFTP browser. Defaults to "tree"; the store auto-switches
+     * to "sftp" when a ready tab becomes active (D5d-1).
+     */
+    leftMode: "tree" | "sftp";
     tree: NodeDTO[];
     selectedID: string | null;
     searchQ: string;
@@ -202,7 +208,10 @@ export const initialState: StoreState = {
         theme: "system",
         themeVariant: "",
         autoLockMinutes: 0,
-        sftpBrowserEnabled: false,
+        // Phase 5d: the SFTP browser is on by default (mirrors the backend
+        // default; AppService.GetSettings() at boot overrides with the
+        // persisted value via toSettings).
+        sftpBrowserEnabled: true,
         terminal: { fontFamily: "monospace", fontSize: 13, scrollback: 10000 },
         textEditorCommand: "xdg-open",
         sftpInitialPath: "~",
@@ -210,6 +219,7 @@ export const initialState: StoreState = {
         window: { width: 1280, height: 800, leftWidth: DEFAULT_LEFT_WIDTH },
     },
     vaultState: "locked",
+    leftMode: "tree",
     tree: [],
     selectedID: null,
     searchQ: "",
@@ -314,7 +324,14 @@ class Store {
 
     /** Activate (focus) a tab by ID. */
     activateTab(tabID: string): void {
-        this.set({ activeTabID: tabID });
+        const { tabs, settings } = this.state;
+        const tab = tabs.find((t) => t.id === tabID);
+        const patch: Partial<StoreState> = { activeTabID: tabID };
+        // Auto-switch to the SFTP panel when activating a ready tab (D5d-1).
+        if (tab && tab.state === "ready" && settings.sftpBrowserEnabled) {
+            patch.leftMode = "sftp";
+        }
+        this.set(patch);
     }
 
     /**
@@ -394,11 +411,6 @@ class Store {
         });
     }
 
-    /** Look up the session snapshot for a real tabID (race safety). */
-    getPendingSession(tabID: string): SessionDTO | undefined {
-        return this.state.pendingSessions[tabID];
-    }
-
     /** Remember a real tabID→session so late status events can create it. */
     registerPendingSession(tabID: string, dto: SessionDTO): void {
         this.set({ pendingSessions: { ...this.state.pendingSessions, [tabID]: dto } });
@@ -416,29 +428,54 @@ class Store {
         });
     }
 
-    /** Update one tab's status (from a status event or a Connect error). */
+    /**
+     * Update one tab's status (from a status event or a Connect error).
+     * Creates the tab on demand from the pending-session cache when a
+     * `terminal:status` event beats the optimistic-tab reconciliation
+     * (Phase 4b task 4). Auto-switches the left panel to the SFTP browser
+     * when the active tab turns ready (phase 5d D5d-1).
+     */
     setTabState(tabID: string, state: TabState, message?: string): void {
-        const { tabs } = this.state;
-        this.set({
-            tabs: tabs.map((t) =>
+        const { tabs, activeTabID, settings, pendingSessions } = this.state;
+        const patch: Partial<StoreState> = {};
+        if (tabs.some((t) => t.id === tabID)) {
+            patch.tabs = tabs.map((t) =>
                 t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t,
-            ),
-        });
+            );
+        } else {
+            const sess = pendingSessions[tabID];
+            if (!sess) {
+                return;
+            }
+            patch.tabs = [
+                ...tabs,
+                { id: tabID, session: sess, state, errorMessage: message || undefined },
+            ];
+        }
+        if (state === "ready" && tabID === activeTabID && settings.sftpBrowserEnabled) {
+            patch.leftMode = "sftp";
+        }
+        this.set(patch);
     }
+}
+
+/** True when the active tab exists and is "ready" (reused by shell + store). */
+export function hasReadyActiveTab(state: StoreState): boolean {
+    const tab = state.tabs.find((t) => t.id === state.activeTabID);
+    return !!tab && tab.state === "ready";
 }
 
 /**
  * Single source of truth for whether the SFTP panel replaces the tree
- * (master plan §6, phase 5c task 1): the setting must be on AND the active
- * tab must be ready. Otherwise the tree shows (with a hint when the setting
- * is on but no active ready tab exists).
+ * (master plan §6, phases 5c/5d): the setting must be on AND leftMode must
+ * be "sftp" AND the active tab must be ready. Otherwise the tree shows
+ * (with a hint when the setting is on but no active ready tab exists).
  */
 export function sftpPanelVisible(state: StoreState): boolean {
-    if (!state.settings.sftpBrowserEnabled) {
+    if (!state.settings.sftpBrowserEnabled || state.leftMode !== "sftp") {
         return false;
     }
-    const tab = state.tabs.find((t) => t.id === state.activeTabID);
-    return !!tab && tab.state === "ready";
+    return hasReadyActiveTab(state);
 }
 
 export const store = new Store();

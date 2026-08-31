@@ -7,11 +7,11 @@ A lightweight, fast, fully local SSH session manager. Go backend
 Sessions live in an encrypted vault (Argon2id + AES-256-GCM) under
 `$XDG_CONFIG_HOME/shelve`; no cloud, no telemetry, no accounts.
 
-**Status:** v1.1 — feature-complete (Phases 1–5c done, final gate closed). The
+**Status:** v1.1 — feature-complete (Phases 1–5d done, final gate closed). The
 app is a working SSH session manager: encrypted vault, session tree + live
-search, terminal tabs, and an optional SFTP browser (browse / upload / download /
-mkdir / rename / delete / edit-text-with-system-editor). Roadmap: `plans/`
-(master plan + phase plans).
+search, terminal tabs, and an SFTP browser that is **enabled by default**
+(browse / upload / download / mkdir / rename / delete /
+edit-text-with-system-editor). Roadmap: `plans/` (master plan + phase plans).
 
 ## Prerequisites
 
@@ -93,18 +93,32 @@ If the window fails to open under `make dev`:
 - **SFTP scope (v1):** the left panel replaces the session tree while the
   active session is ready — browse, upload, download, mkdir, rename, delete,
   and "edit text file with system editor". Drag & drop uploads are **out of
-  scope for v1** (D4).
+  scope for v1** (D4). The browser is on by default; use **[Sessions]** /
+  **[SFTP]** in the left panel to switch views, and the path bar to jump to
+  any directory.
 
 ## SFTP browser
 
-Enable it with **Ctrl+Shift+E** or Settings → General → "SFTP browser". With a
-connected (ready) tab active, the left panel becomes an SFTP browser rooted at
-the remote `$HOME`: breadcrumb navigation, [Upload] / [New folder] / [Refresh],
-double-click to open a folder, edit a text-like file in your system editor, or
-download others; right-click rows for Edit / Download / Upload to here / New
-folder / Rename / Delete. The footer shows live transfer progress. When the
-browser is enabled but no session is ready, the session tree shows with a hint
-line.
+The SFTP browser is **enabled by default**. With a connected (ready) tab
+active, the left panel shows the browser rooted at the remote `$HOME`.
+Disable or re-enable it with **Ctrl+Shift+E** or Settings → General → "SFTP
+browser".
+
+- **Path bar:** the header shows the current remote directory in an editable
+  field. Press **Enter** to navigate: type an absolute path (`/etc`), a
+  `~`-relative one (`~/src`), or just a folder name to descend from the
+  current directory; `Esc` (or clicking away without Enter) reverts the
+  field. The `←` button goes up one level.
+- **Buttons & rows:** [Upload] / [New folder] / [Refresh]; double-click a
+  folder to open it, a text-like file to edit it in your system editor, or
+  anything else to download it; right-click rows for Edit / Download / Upload
+  to here / New folder / Rename / Delete. The footer shows live transfer
+  progress.
+- **Sessions ↔ SFTP:** a **[Sessions]** button in the panel header switches
+  the left panel back to the session tree; the toolbar's **[SFTP]** button
+  returns to the browser. Connecting a session, or activating a ready tab,
+  auto-shows the browser. When it is enabled but no session is ready, the
+  tree shows with a hint line.
 
 ## Shortcuts
 

@@ -1,10 +1,11 @@
-// components/sftp-panel.ts — left-panel SFTP browser (Phase 5c; master plan
-// §6 SFTP panel). Replaces the session tree when settings.sftpBrowserEnabled
-// is on AND the active tab is ready (the decision lives in store.ts via
-// sftpPanelVisible; the shell mounts/unmounts by toggling display).
+// components/sftp-panel.ts — left-panel SFTP browser (Phases 5c/5d; master
+// plan §6 SFTP panel). Replaces the session tree when settings.sftpBrowserEnabled
+// is on AND leftMode is "sftp" AND the active tab is ready (the decision
+// lives in store.ts via sftpPanelVisible; the shell toggles display).
 //
-// Header: back button + breadcrumb (home = remote $HOME, clickable segments),
-// [Upload] [New folder] [Refresh]. List rows: icon / name / size / modified.
+// Header: [Sessions] toggle + back button + editable path bar (Enter to
+// navigate, Esc/blur reverts), [Upload] [New folder] [Refresh]. List rows:
+// icon / name / size / modified.
 // Double-click opens (dir → navigate, text-like → EditRemoteText, else →
 // DownloadThenSave). Context menu: Open / Edit as text / Download… / Upload
 // to here… / New folder… / Rename… / Delete… (+ Cancel edit while editing).
@@ -25,6 +26,8 @@ let unsub: (() => void) | null = null;
 
 let tabID = ""; // active ready tab the panel is browsing
 let curPath = "~"; // "~"-relative remote cwd (resolve() expands it server-side)
+let lastGoodPath = "~"; // curPath of the last successful List (path/back anchor)
+let justSubmitted = false; // true between an Enter submit and its List completion
 let entries: SftpEntryDTO[] | null = null;
 let loading = false;
 let errorMsg: string | null = null;
@@ -34,7 +37,7 @@ let inlineRename: { name: string } | null = null;
 let editingPath: string | null = null; // full remote path being edited
 
 let backBtn: HTMLButtonElement | null = null;
-let breadcrumbEl: HTMLElement | null = null;
+let pathInput: HTMLInputElement | null = null;
 let listEl: HTMLElement | null = null;
 let statusEl: HTMLElement | null = null;
 let progressEl: HTMLElement | null = null;
@@ -88,22 +91,6 @@ function parentOf(p: string): string {
     return root === "~" ? `~/${parent}` : `/${parent}`;
 }
 
-/** Path segments after the root prefix ([] for the root itself). */
-function segmentsOf(p: string): string[] {
-    if (!p || p === "~") {
-        return [];
-    }
-    return stripRoot(p).split("/").filter(Boolean);
-}
-
-/** Rebuild the full path for the segment at `idx` (relative to the root). */
-function segmentPath(idx: number): string {
-    const root = pathRoot(curPath);
-    const segs = segmentsOf(curPath);
-    const prefix = segs.slice(0, idx + 1).join("/");
-    return root === "~" ? `~/${prefix}` : `/${prefix}`;
-}
-
 /**
  * Resolve the SFTP browser start path for the active tab (plan P002 §4.1):
  * per-session value (if set) → global settings default → "~".
@@ -131,6 +118,7 @@ export function renderSftpPanel(target: HTMLElement): void {
     const t = tabs.find((x) => x.id === activeTabID);
     tabID = t && t.state === "ready" ? activeTabID! : "";
     curPath = initialPath();
+    lastGoodPath = curPath;
     selected = null;
     inlineCreate = false;
     inlineRename = null;
@@ -142,6 +130,7 @@ export function renderSftpPanel(target: HTMLElement): void {
     }
     updateFooter();
     updateStatus();
+    renderPathBar();
     renderList();
 }
 
@@ -157,6 +146,7 @@ function refresh(): void {
         // Active tab changed → reset navigation and any live edit.
         tabID = ready;
         curPath = initialPath();
+        lastGoodPath = curPath;
         selected = null;
         inlineCreate = false;
         inlineRename = null;
@@ -168,12 +158,12 @@ function refresh(): void {
         }
     }
     updateFooter();
-    // Don't clobber an in-progress inline input during unrelated churn.
+    // Don't clobber an in-progress edit (path bar or inline rows) during
+    // unrelated churn (phase 5d): the path bar is an input now.
     if (isTypingInPanel()) {
-        renderBreadcrumb();
         return;
     }
-    renderBreadcrumb();
+    renderPathBar();
     renderList();
 }
 
@@ -200,6 +190,13 @@ function mkBtn(label: string, onClick: () => void): HTMLButtonElement {
 function buildStatic(target: HTMLElement): void {
     const header = document.createElement("div");
     header.className = "sftp-header";
+    // [Sessions] (phase 5d D5d-1): switch the left panel back to the tree.
+    const sessionsBtn = document.createElement("button");
+    sessionsBtn.type = "button";
+    sessionsBtn.className = "btn small";
+    sessionsBtn.textContent = "Sessions";
+    sessionsBtn.title = "Show the session list";
+    sessionsBtn.addEventListener("click", () => store.set({ leftMode: "tree" }));
     backBtn = document.createElement("button");
     backBtn.type = "button";
     backBtn.className = "btn small icon-btn";
@@ -213,9 +210,36 @@ function buildStatic(target: HTMLElement): void {
             void loadList();
         }
     });
-    breadcrumbEl = document.createElement("nav");
-    breadcrumbEl.className = "sftp-breadcrumb";
-    header.append(backBtn, breadcrumbEl);
+    // Editable path bar (phase 5d task 3): mirrors curPath; Enter navigates,
+    // Esc/blur revert to curPath.
+    pathInput = document.createElement("input");
+    pathInput.type = "text";
+    pathInput.className = "sftp-path";
+    pathInput.placeholder = "~";
+    pathInput.title =
+        "Remote path — Enter to navigate: absolute (/etc), ~-relative (~/src), or a folder name below the current directory";
+    pathInput.autocomplete = "off";
+    pathInput.spellcheck = false;
+    pathInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            submitPath();
+        } else if (e.key === "Escape") {
+            if (pathInput) {
+                pathInput.value = curPath;
+            }
+        }
+    });
+    pathInput.addEventListener("blur", () => {
+        if (justSubmitted) {
+            justSubmitted = false;
+            return; // the submit already set curPath; nothing to revert
+        }
+        if (pathInput && pathInput.value !== curPath) {
+            pathInput.value = curPath;
+        }
+    });
+    header.append(sessionsBtn, backBtn, pathInput);
 
     const toolbar = document.createElement("div");
     toolbar.className = "toolbar sftp-toolbar";
@@ -249,6 +273,7 @@ async function loadList(): Promise<void> {
         entries = null;
         errorMsg = null;
         loading = false;
+        justSubmitted = false;
         renderList();
         return;
     }
@@ -262,11 +287,16 @@ async function loadList(): Promise<void> {
         }
         entries = res;
         selected = null;
+        lastGoodPath = curPath; // only a successful List commits the path
     } catch (err) {
         entries = null;
         errorMsg = String(err);
+        // Keep back/path-bar logic anchored to the last good directory; the
+        // input keeps the attempted path until the next render (phase 5d).
+        curPath = lastGoodPath;
     } finally {
         loading = false;
+        justSubmitted = false;
         renderList();
     }
 }
@@ -632,52 +662,36 @@ function makeInlineRenameRow(entry: SftpEntryDTO): HTMLElement {
     return row;
 }
 
-// -------------------------------------------------------------- breadcrumb ---
+// --------------------------------------------------------------- path bar ---
 
-function renderBreadcrumb(): void {
-    const bc = breadcrumbEl;
-    if (!bc) {
-        return;
+/**
+ * Mirror curPath into the path-bar input and refresh the back button
+ * (phase 5d task 3: the editable input replaces the clickable breadcrumb).
+ */
+function renderPathBar(): void {
+    if (pathInput) {
+        pathInput.value = curPath;
     }
-    bc.textContent = "";
-    const root = pathRoot(curPath);
-    const home = document.createElement("button");
-    home.type = "button";
-    home.className = "crumb";
-    home.textContent = root;
-    home.title = root === "~" ? "Remote home ($HOME)" : "Filesystem root";
-    home.addEventListener("click", () => {
-        if (curPath !== root) {
-            curPath = root;
-            void loadList();
-        }
-    });
-    bc.appendChild(home);
-
-    const segs = segmentsOf(curPath);
-    segs.forEach((seg, i) => {
-        const sep = document.createElement("span");
-        sep.className = "crumb-sep";
-        sep.textContent = "/";
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "crumb";
-        btn.textContent = seg;
-        btn.title = segmentPath(i);
-        const last = i === segs.length - 1;
-        btn.classList.toggle("current", last);
-        if (!last) {
-            btn.addEventListener("click", () => {
-                curPath = segmentPath(i);
-                void loadList();
-            });
-        }
-        bc.append(sep, btn);
-    });
-
     if (backBtn) {
         backBtn.disabled = parentOf(curPath) === curPath;
     }
+}
+
+/** Navigate to the path typed in the path bar (Enter, phase 5d task 3). */
+function submitPath(): void {
+    const inp = pathInput;
+    if (!inp) {
+        return;
+    }
+    let v = inp.value.trim();
+    if (v === "") {
+        v = "~";
+    } else if (!(v.startsWith("~") || v.startsWith("/"))) {
+        v = joinRemote(curPath, v); // relative → child of the visible cwd
+    }
+    justSubmitted = true;
+    curPath = v;
+    void loadList();
 }
 
 // ---------------------------------------------------------------- footer ---

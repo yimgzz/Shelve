@@ -207,25 +207,14 @@ function handleEvent(name: string, payload: unknown): void {
 }
 
 /**
- * Apply a terminal:status event to a tab. If the tab isn't in the store
- * yet (its `connecting` event can beat the optimistic-tab reconciliation,
- * Phase 4b task 4), create it on demand from the recorded pending session.
+ * Apply a terminal:status event to a tab. Delegates to store.setTabState,
+ * which updates the tab (creating it on demand from the recorded pending
+ * session when the event beats the optimistic-tab reconciliation, Phase 4b
+ * task 4) and runs the phase-5d left-panel auto-switch hook on "ready" —
+ * the hook logic lives in the store (D5d-1).
  */
 function updateTabState(tabID: string, state: TabState, message: string): void {
-    const { tabs } = store.getState();
-    if (tabs.some((t) => t.id === tabID)) {
-        store.set({
-            tabs: tabs.map((t) => (t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t)),
-        });
-        return;
-    }
-    const sess = store.getPendingSession(tabID);
-    if (!sess) {
-        return;
-    }
-    store.set({
-        tabs: [...tabs, { id: tabID, session: sess, state, errorMessage: message || undefined }],
-    });
+    store.setTabState(tabID, state, message);
 }
 
 /** Extract the payload from a WailsEvent (callback arg is `{ data, name }`). */

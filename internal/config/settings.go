@@ -42,13 +42,14 @@ type Settings struct {
 	Window             WindowSettings   `json:"window"`
 }
 
-// DefaultSettings returns the schema defaults from master plan §4.
+// DefaultSettings returns the schema defaults from master plan §4 (phase 5d
+// D5d-4: the SFTP browser is on by default; an explicit `false` wins).
 func DefaultSettings() Settings {
 	return Settings{
 		Theme:              ThemeSystem,
 		ThemeVariant:       "",
 		AutoLockMinutes:    0,
-		SftpBrowserEnabled: false,
+		SftpBrowserEnabled: true,
 		Terminal: TerminalSettings{
 			FontFamily: "monospace",
 			FontSize:   13,
@@ -68,6 +69,11 @@ func DefaultSettings() Settings {
 // Load reads settings.json from the config directory. A missing file yields
 // the defaults; unreadable or unparsable files return an error.
 // Zero/unknown values are normalized to safe fallbacks.
+//
+// Presence-aware default for sftpBrowserEnabled (phase 5d D5d-4): a
+// settings.json that never persisted the flag (fresh installs AND existing
+// configs written before the flag existed) is treated as enabled. An
+// explicit `false` the user wrote is respected.
 func Load() (Settings, error) {
 	s := DefaultSettings()
 	data, err := os.ReadFile(File(SettingsFileName))
@@ -79,6 +85,13 @@ func Load() (Settings, error) {
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return s, err
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return s, err
+	}
+	if _, ok := keys["sftpBrowserEnabled"]; !ok {
+		s.SftpBrowserEnabled = true
 	}
 	s.normalize()
 	return s, nil

@@ -5,7 +5,13 @@
 // menu (Phase 4d) that opens Settings / Lock vault / About.
 
 import { AppService } from "../../bindings/shelve/internal/wailsvc";
-import { store, sftpPanelVisible, DEFAULT_LEFT_WIDTH, type Settings } from "../store";
+import {
+    store,
+    sftpPanelVisible,
+    hasReadyActiveTab,
+    DEFAULT_LEFT_WIDTH,
+    type Settings,
+} from "../store";
 import { toast } from "./toasts";
 import { renderSearch } from "./search";
 import { renderTreeBody, openNewSession, openNewFolderAt } from "./tree";
@@ -71,6 +77,16 @@ export function renderShell(root: HTMLElement): void {
     btnNewFolder.textContent = "+ Folder";
     btnNewFolder.addEventListener("click", () => openNewFolderAt(""));
 
+    // [SFTP] (phase 5d D5d-1): switches the left panel back to the SFTP
+    // browser when it is hidden behind the session tree. Visible only when
+    // the setting is on, a ready tab exists, and the panel isn't shown.
+    const btnSftp = document.createElement("button");
+    btnSftp.type = "button";
+    btnSftp.className = "btn small";
+    btnSftp.textContent = "SFTP";
+    btnSftp.title = "Open the SFTP browser for the active session";
+    btnSftp.addEventListener("click", () => store.set({ leftMode: "sftp" }));
+
     // Gear menu (Phase 4d): [Settings…] / [Lock vault…] / [About], anchored
     // to the button at the right edge of the toolbar (master plan §6).
     const spacer = document.createElement("div");
@@ -86,7 +102,7 @@ export function renderShell(root: HTMLElement): void {
         const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
         openGearMenu(r.right - 8, r.bottom + 4);
     });
-    toolbar.append(btnNewSession, btnNewFolder, spacer, gear);
+    toolbar.append(btnNewSession, btnNewFolder, btnSftp, spacer, gear);
     left.appendChild(toolbar);
 
     // Tree / search body (scrollable) + a hint shown when the SFTP browser
@@ -107,13 +123,19 @@ export function renderShell(root: HTMLElement): void {
     renderSftpPanel(sftpHost);
 
     // Single source of truth (store.sftpPanelVisible): the panel replaces
-    // the tree only when the setting is on AND the active tab is ready.
+    // the tree only when the setting is on AND leftMode is "sftp" AND the
+    // active tab is ready (phase 5d D5d-3). The hint shows when the setting
+    // is on but no ready tab exists; the toolbar [SFTP] button shows when a
+    // ready tab exists but the panel is hidden behind the tree.
     const applyLeftMode = () => {
         const st = store.getState();
         const panel = sftpPanelVisible(st);
+        const readyTab = hasReadyActiveTab(st);
         treeHost.style.display = panel ? "none" : "";
         sftpHost.style.display = panel ? "" : "none";
-        sftpHint.style.display = st.settings.sftpBrowserEnabled && !panel ? "" : "none";
+        sftpHint.style.display = st.settings.sftpBrowserEnabled && !readyTab ? "" : "none";
+        btnSftp.style.display =
+            st.settings.sftpBrowserEnabled && readyTab && !panel ? "" : "none";
     };
     const leftModeUnsub = store.subscribe(applyLeftMode);
     applyLeftMode();

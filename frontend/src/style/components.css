@@ -896,41 +896,22 @@
     border-bottom: 1px solid var(--border);
 }
 
-.sftp-breadcrumb {
+/* Editable path bar (phase 5d task 3): replaces the clickable breadcrumb. */
+.sftp-path {
     flex: 1;
     min-width: 0;
-    display: flex;
-    align-items: center;
-    overflow-x: auto;
-    white-space: nowrap;
-    padding: 2px 4px;
-}
-
-.sftp-breadcrumb .crumb {
-    border: none;
-    background: transparent;
+    padding: 3px 8px 3px 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
     color: var(--text);
     font-size: 12px;
-    padding: 2px 5px;
-    border-radius: 4px;
-    cursor: pointer;
-    max-width: 160px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.sftp-breadcrumb .crumb:hover {
-    background: var(--bg-hover);
-}
-
-.sftp-breadcrumb .crumb.current {
-    color: var(--text-dim);
-    cursor: default;
-}
-
-.sftp-breadcrumb .crumb-sep {
-    color: var(--text-dim);
-    font-size: 12px;
+.sftp-path:focus {
+    outline: none;
+    border-color: var(--accent);
 }
 
 .sftp-toolbar {

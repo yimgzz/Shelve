@@ -8,7 +8,7 @@
 // folder. Expand/collapse is component-local (not persisted in v1).
 
 import { SessionService } from "../../bindings/shelve/internal/wailsvc";
-import { store, type NodeDTO, type SearchResultDTO } from "../store";
+import { store, type NodeDTO, type SearchResultDTO, type StoreState } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { openSessionEditor } from "./session-editor";
 import { confirmDialog } from "./confirm";
@@ -84,14 +84,31 @@ export function deleteSelectedNode(): void {
 
 // ------------------------------------------------------------ rendering ---
 
-/** Render the tree/search body into host (re-renders on store changes). */
+/** Render the tree/search body into host (re-renders on relevant store changes). */
 export function renderTreeBody(host: HTMLElement): void {
     bodyHost = host;
     if (unsub) {
         unsub();
     }
-    unsub = store.subscribe(() => rerender());
+    // The tree renders exactly three store fields (tree, searchQ,
+    // selectedID). Filter out updates to unrelated state — e.g. the 2 s
+    // monitor:metrics snapshots (plan P004), tab status, sftp progress —
+    // so they cannot trigger a full DOM rebuild that destroys a focused
+    // inline create/rename input and loses the typed text.
+    let prev = pickTreeState(store.getState());
+    unsub = store.subscribe((s) => {
+        const next = pickTreeState(s);
+        if (next.tree !== prev.tree || next.searchQ !== prev.searchQ || next.selectedID !== prev.selectedID) {
+            prev = next;
+            rerender();
+        }
+    });
     rerender();
+}
+
+/** Subset of the store the tree actually renders. */
+function pickTreeState(s: StoreState): Pick<StoreState, "tree" | "searchQ" | "selectedID"> {
+    return { tree: s.tree, searchQ: s.searchQ, selectedID: s.selectedID };
 }
 
 function rerender(): void {

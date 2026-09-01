@@ -117,6 +117,48 @@ func TestInProcessPasswordConnectAndEcho(t *testing.T) {
 	}
 }
 
+// TestInProcessInteractiveEchoLatency guards the interactive fast path of
+// the read pump (master plan §2 A6): a fresh keystroke burst echoed by the
+// remote must be flushed to terminal:data well under the batching tick,
+// not wait out a full tick. The bound is intentionally loose (5× the
+// 25 ms tick) so it stays robust under -race/CI scheduling while still
+// catching a regression that batches interactive echo (e.g. a lost fast
+// path or accidental tick inflation). Fine-grained tuning is validated
+// manually against the live app.
+func TestInProcessInteractiveEchoLatency(t *testing.T) {
+	const user, password = "carol", "pw456"
+	rig := newTestSSHServer(t, testSSHOpts{user: user, password: password})
+	m, em := newManagerForRig(t, rig)
+
+	tabID, err := m.Connect(rigPasswordSession(rig.Addr(), user, password))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitReady(t, m, em, tabID)
+
+	start := time.Now()
+	if err := m.Write(tabID, base64.StdEncoding.EncodeToString([]byte("hi\n"))); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	ev := em.WaitEvent(t, EventTerminalData, 15*time.Second)
+	latency := time.Since(start)
+
+	data, err := base64.StdEncoding.DecodeString(ev.payload.(TerminalDataPayload).Data)
+	if err != nil {
+		t.Fatalf("decode terminal data: %v", err)
+	}
+	if !strings.Contains(string(data), "echo: hi") {
+		t.Fatalf("terminal data = %q, want it to contain %q", data, "echo: hi")
+	}
+	if max := 5 * batchInterval; latency > max {
+		t.Fatalf("interactive echo latency %v exceeds guard %v", latency, max)
+	}
+
+	if err := m.Disconnect(tabID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestInProcessRemoteExit triggers a remote shell exit and asserts the
 // terminal:exit → closed transition plus post-close typed errors.
 func TestInProcessRemoteExit(t *testing.T) {

@@ -20,10 +20,23 @@ import (
 
 // Batching / backpressure parameters (master plan §2 A6, §5).
 const (
-	// batchInterval: flush pending output on this tick.
+	// batchInterval: flush pending output on this tick. Kept at the A6
+	// contract value: each terminal:data event crosses the Wails v3 event
+	// pipeline (mailbox goroutine → GTK main loop → webkit eval → JS), so a
+	// shorter tick under sustained output (tail -f style) multiplies that
+	// per-event churn and can exhaust process threads (pthread_create
+	// EAGAIN). Interactive latency is served by the fast path below, not by
+	// a shorter tick.
 	batchInterval = 50 * time.Millisecond
-	// batchBytes: flush pending output once it reaches this size.
-	batchBytes = 16 * 1024
+	// batchBytes: flush pending output once it reaches this size. Raised from
+	// 16 KB (plan phase-4c allows tuning the write-coalescing granularity):
+	// each terminal:data event is decoded, parsed and rendered on the JS
+	// main thread, so smaller batches starve keyboard input during output
+	// floods (Ctrl+C to a tail -f took tens of seconds). Larger batches cut
+	// the event rate 4× under sustained output while echo latency stays
+	// bounded by the 50 ms tick; the interactive fast path keeps fresh
+	// bursts instant.
+	batchBytes = 64 * 1024
 	// maxPendingBytes: backpressure limit — while the pending buffer
 	// exceeds 1 MiB, reads pause and the buffer is drained.
 	maxPendingBytes = 1 << 20
@@ -427,14 +440,17 @@ func (l *liveConn) fail(err error) {
 
 // pump is the per-ready-tab read pump (master plan §2 A6): a reader
 // goroutine fills the pending buffer and the pump emits terminal:data
-// on the 50 ms tick or once ≥16 KB is pending, and the final flush on
-// close. Backpressure (master plan §5): while pending exceeds 1 MiB
-// the reader blocks on its signal channel until the buffer is drained.
+// on the 50 ms tick, once ≥64 KB is pending, immediately when a NEW
+// burst starts (nothing pending, or the stream was quiet for a full
+// tick — the interactive fast path), and as the final flush on close.
+// Backpressure (master plan §5): while pending exceeds 1 MiB the reader
+// blocks on its signal channel until the buffer is drained.
 func (l *liveConn) pump() {
 	var (
 		mu           sync.Mutex
 		pending      []byte
 		burstStarted bool
+		lastEmit     time.Time // when terminal:data was last emitted (zero: none yet)
 	)
 	changed := make(chan struct{}, 1)
 	done := make(chan struct{})
@@ -445,10 +461,13 @@ func (l *liveConn) pump() {
 			n, err := l.ptyOut.Read(buf)
 			mu.Lock()
 			if n > 0 {
-				if len(pending) == 0 {
-					// A new output burst begins: mark it so the pump can
-					// flush immediately (interactive fast path) instead
-					// of waiting out the batching tick.
+				// Interactive fast path: a chunk that begins a NEW burst —
+				// nothing pending, or the stream went quiet for a full
+				// tick — flushes immediately instead of waiting out the
+				// batching tick. Sustained streams (pending never empties
+				// and no tick-long gap) still coalesce on the tick / 64 KB
+				// threshold, preserving the throughput contract (A6).
+				if len(pending) == 0 || time.Since(lastEmit) > batchInterval {
 					burstStarted = true
 				}
 				pending = append(pending, buf[:n]...)
@@ -474,6 +493,7 @@ func (l *liveConn) pump() {
 		}
 		data := pending
 		pending = nil
+		lastEmit = time.Now()
 		mu.Unlock()
 		l.m.emit.Emit(EventTerminalData, TerminalDataPayload{
 			TabID: l.tabID,
@@ -501,7 +521,7 @@ func (l *liveConn) pump() {
 		case start:
 			// Interactive fast path: the chunk that just arrived began a
 			// NEW burst, so flush at once instead of waiting for the
-			// 50 ms tick. Sustained streams (pending never empties
+			// batching tick. Sustained streams (pending never empties
 			// between reads) still coalesce on the tick / 16 KB
 			// threshold, preserving the throughput contract (A6).
 			flush()

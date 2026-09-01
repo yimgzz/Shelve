@@ -7,8 +7,10 @@
 //     renderer (one console.warn, no retry loop).
 //   - Addons: Fit (ResizeObserver → debounced fit → TerminalService.Resize),
 //     WebLinks.
-//   - term.onData → buffer chunks → flush on requestAnimationFrame →
-//     TerminalService.Write(tabID, bytesToB64(data)) (coalesces keystrokes).
+//   - term.onData → buffer chunks → flush immediately (no timer/rAF) →
+//     TerminalService.Write(tabID, bytesToB64(data)). Per-keystroke latency
+//     is bounded by the Wails/WebKitGTK bridge alone; coalescing a fast
+//     typist's keys would only add an extra hop before the echo.
 //   - `write(tabID, bytes)` from `terminal:data` → term.write, even when
 //     the pane is hidden (xterm retains scrollback).
 //   - Mouse (plan P003): a left-drag selection copies to the system
@@ -47,7 +49,6 @@ interface Entry {
     webgl: WebglAddon | null;
     ro: ResizeObserver | null;
     resizeTimer: number | null;
-    raf: number | null;
     inputBuf: string;
     // plan P003 (mouse copy/paste): the .term-xterm parent plus listener
     // bookkeeping so destroy() tears everything down leak-free.
@@ -60,7 +61,7 @@ interface Entry {
 
 const pool = new Map<string, Entry>();
 
-/** Flush buffered user input to the backend (called once per rAF). */
+/** Flush buffered user input to the backend (called immediately from onData). */
 function flushInput(tabID: string, e: Entry): void {
     if (!e.inputBuf) {
         return;
@@ -74,14 +75,39 @@ function flushInput(tabID: string, e: Entry): void {
     });
 }
 
-function scheduleFlush(tabID: string, e: Entry): void {
-    if (e.raf !== null) {
-        return;
+/** True when WebGL would run on a software rasterizer (llvmpipe, SwiftShader…). */
+function isSoftwareWebGL(): boolean {
+    try {
+        const c = document.createElement("canvas");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const gl = (c.getContext("webgl2") || c.getContext("webgl")) as any;
+        if (!gl) {
+            return true; // no GL at all → the addon would fail anyway
+        }
+        const ext = gl.getExtension("WEBGL_debug_renderer_info");
+        if (!ext) {
+            return false; // unknown → assume accelerated
+        }
+        const r = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || "").toLowerCase();
+        return r.includes("llvmpipe") || r.includes("softpipe") || r.includes("swiftshader") || r.includes("software");
+    } catch {
+        return true;
     }
-    e.raf = requestAnimationFrame(() => {
-        e.raf = null;
-        flushInput(tabID, e);
-    });
+}
+
+/**
+ * True when the xterm canvas renderer should be used instead of the WebGL
+ * addon. On Linux, WebKitGTK runs with the GPU dmabuf renderer disabled by
+ * default (main.go workaround), so GL is software (llvmpipe/SwiftShader) and
+ * the WebGL addon's full-grid repaints cost more than the incremental canvas
+ * renderer — measured as keystroke echo latency. Elsewhere (macOS/Windows on
+ * accelerated stacks) the software-GL probe decides.
+ */
+function useCanvasRenderer(): boolean {
+    if (/Linux/i.test(navigator.userAgent)) {
+        return true; // WebKitGTK + WEBKIT_DISABLE_DMABUF_RENDERER=1 default
+    }
+    return isSoftwareWebGL();
 }
 
 /**
@@ -115,12 +141,17 @@ export const TermPool = {
         term.loadAddon(new WebLinksAddon());
 
         let webgl: WebglAddon | null = null;
-        try {
-            webgl = new WebglAddon();
-            term.loadAddon(webgl);
-        } catch (err) {
-            console.warn("[xterm] WebGL unavailable, using the default renderer:", err);
-            webgl = null;
+        // On software-rendered WebKitGTK (Linux default, dmabuf disabled) the
+        // canvas renderer beats the WebGL addon (software GL); keep WebGL only
+        // on accelerated GL stacks.
+        if (!useCanvasRenderer()) {
+            try {
+                webgl = new WebglAddon();
+                term.loadAddon(webgl);
+            } catch (err) {
+                console.warn("[xterm] WebGL unavailable, using the default renderer:", err);
+                webgl = null;
+            }
         }
 
         const entry: Entry = {
@@ -129,7 +160,6 @@ export const TermPool = {
             webgl,
             ro: null,
             resizeTimer: null,
-            raf: null,
             inputBuf: "",
             el: parent,
             selecting: false,
@@ -187,7 +217,7 @@ export const TermPool = {
 
         term.onData((data) => {
             entry.inputBuf += data;
-            scheduleFlush(tabID, entry);
+            flushInput(tabID, entry);
         });
 
         // ---- Mouse copy/paste (plan P003 T3/T4) ---------------------------
@@ -290,9 +320,6 @@ export const TermPool = {
             return;
         }
         pool.delete(tabID);
-        if (e.raf !== null) {
-            cancelAnimationFrame(e.raf);
-        }
         if (e.resizeTimer !== null) {
             window.clearTimeout(e.resizeTimer);
         }

@@ -118,9 +118,11 @@ func (l *liveConn) run() {
 	l.fail(err)
 }
 
-// dial walks the hop chain in order, keeps intermediate clients alive,
-// and on the final hop requests a PTY (xterm-256color, 80x24) and a
-// shell, publishing the pty session and reaching the ready state.
+// dial walks the hop chain in order (hops after the first are tunneled
+// through the previous hop's SSH client as direct-tcpip channels),
+// keeps intermediate clients alive, and on the final hop requests a PTY
+// (xterm-256color, 80x24) and a shell, publishing the pty session and
+// reaching the ready state.
 func (l *liveConn) dial() error {
 	hops, timeout, parsed, err := buildSessionChain(l.session)
 	if err != nil {
@@ -136,7 +138,19 @@ func (l *liveConn) dial() error {
 			return hopErrorAt(h, i, len(hops), err)
 		}
 
-		nc, err := net.DialTimeout("tcp", addr, timeout)
+		var nc net.Conn
+		if i == 0 {
+			// First hop: real TCP dial from this machine.
+			nc, err = net.DialTimeout("tcp", addr, timeout)
+		} else {
+			// Later hops ride INSIDE the previous hop's SSH connection
+			// as a direct-tcpip channel — the jump-chain routing rule.
+			prev := l.clientsAt(i - 1)
+			if prev == nil {
+				return hopErrorAt(h, i, len(hops), errors.New("previous hop client missing"))
+			}
+			nc, err = dialHopVia(l.ctx, prev, addr, timeout)
+		}
 		if err != nil {
 			return hopErrorAt(h, i, len(hops), err)
 		}
@@ -281,6 +295,35 @@ func orDefaultPort(port int) int {
 		return defaultPort
 	}
 	return port
+}
+
+// dialHopVia opens the next hop's transport through the previous hop's
+// SSH client as a direct-tcpip channel — the jump-chain routing rule:
+// the next hop's SSH handshake rides INSIDE the established SSH
+// connection, so only the first hop is ever dialed from this machine
+// (master plan phase 3c). The per-hop ConnectTimeout still applies; a
+// channel open that outlives the timeout is dropped (its late result
+// lands in the buffered channel and is discarded).
+func dialHopVia(ctx context.Context, prev *ssh.Client, addr string, timeout time.Duration) (net.Conn, error) {
+	type res struct {
+		nc  net.Conn
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		nc, err := prev.Dial("tcp", addr)
+		ch <- res{nc: nc, err: err}
+	}()
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case r := <-ch:
+		return r.nc, r.err
+	case <-t.C:
+		return nil, fmt.Errorf("dial %s via previous hop: timeout after %s", addr, timeout)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // hopErrorAt attributes a hop failure to its position in the chain:

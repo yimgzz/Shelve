@@ -45,10 +45,11 @@ func (m *Manager) TestConnection(sess *model.Session) error {
 
 // dialHopChain dials every hop of sess (structured jumps + ProxyJump +
 // target) with the same auth / host-key / key-passphrase paths as Connect,
-// but opens NO pty/shell/forwards. It returns all dialed clients in hop
-// order (last = final hop); on error the partially-dialed clients are
-// closed before returning. connID keys any host-key / key-passphrase
-// prompts.
+// but opens NO pty/shell/forwards. Hops after the first are tunneled
+// through the previous hop's SSH client as direct-tcpip channels. It
+// returns all dialed clients in hop order (last = final hop); on error
+// the partially-dialed clients are closed before returning. connID keys
+// any host-key / key-passphrase prompts.
 func (m *Manager) dialHopChain(ctx context.Context, connID string, sess model.Session) ([]*ssh.Client, error) {
 	hops, timeout, _, err := buildSessionChain(sess)
 	if err != nil {
@@ -69,7 +70,16 @@ func (m *Manager) dialHopChain(ctx context.Context, connID string, sess model.Se
 			cleanup()
 			return nil, hopErrorAt(h, i, len(hops), err)
 		}
-		nc, err := net.DialTimeout("tcp", addr, timeout)
+		var nc net.Conn
+		if i == 0 {
+			nc, err = net.DialTimeout("tcp", addr, timeout)
+		} else {
+			if clients[i-1] == nil {
+				cleanup()
+				return nil, hopErrorAt(h, i, len(hops), errors.New("previous hop client missing"))
+			}
+			nc, err = dialHopVia(ctx, clients[i-1], addr, timeout)
+		}
 		if err != nil {
 			cleanup()
 			return nil, hopErrorAt(h, i, len(hops), err)

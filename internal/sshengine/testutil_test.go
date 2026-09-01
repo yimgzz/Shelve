@@ -152,6 +152,13 @@ type testSSHServer struct {
 	ln      net.Listener
 	addr    string
 	hostKey ssh.PublicKey
+
+	// directTCP records every direct-tcpip target this server bridged
+	// ("host:port"). The jump-chain regression test uses it to prove
+	// later hops are routed THROUGH the previous hop instead of being
+	// dialed directly from the client machine.
+	mu        sync.Mutex
+	directTCP []string
 }
 
 // newTestSSHServer starts an in-process SSH server and registers its
@@ -224,7 +231,7 @@ func (s *testSSHServer) handleConn(nc net.Conn, cfg *ssh.ServerConfig) {
 		case "session":
 			go handleTestSessionChannel(newChan)
 		case "direct-tcpip":
-			go handleTestDirectTCPIP(newChan)
+			go s.handleTestDirectTCPIP(newChan)
 		default:
 			_ = newChan.Reject(ssh.UnknownChannelType, "unsupported channel")
 		}
@@ -239,6 +246,20 @@ func (s *testSSHServer) port() int {
 	_, p, _ := net.SplitHostPort(s.addr)
 	n, _ := strconv.Atoi(p)
 	return n
+}
+
+// recordDirectTCP appends a served direct-tcpip target.
+func (s *testSSHServer) recordDirectTCP(host string, port int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.directTCP = append(s.directTCP, net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// directTCPReqs returns a copy of the served direct-tcpip targets.
+func (s *testSSHServer) directTCPReqs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.directTCP...)
 }
 
 func (s *testSSHServer) hostKeyB64() string { return testPubKeyB64(s.hostKey) }
@@ -297,9 +318,10 @@ type testExitStatusMsg struct {
 }
 
 // handleTestDirectTCPIP serves a "direct-tcpip" channel (the -L/-D
-// forward tunnel): it dials the requested destination and bridges both
-// directions with the channel.
-func handleTestDirectTCPIP(newChan ssh.NewChannel) {
+// forward tunnel AND the transport of later hop-chain hops): it dials
+// the requested destination and bridges both directions with the
+// channel, recording the target for the jump-chain regression test.
+func (s *testSSHServer) handleTestDirectTCPIP(newChan ssh.NewChannel) {
 	var msg struct {
 		Raddr string
 		Rport uint32
@@ -310,6 +332,7 @@ func handleTestDirectTCPIP(newChan ssh.NewChannel) {
 		_ = newChan.Reject(ssh.ConnectionFailed, "bad direct-tcpip request")
 		return
 	}
+	s.recordDirectTCP(msg.Raddr, int(msg.Rport))
 	target, err := net.Dial("tcp", net.JoinHostPort(msg.Raddr, strconv.Itoa(int(msg.Rport))))
 	if err != nil {
 		_ = newChan.Reject(ssh.ConnectionFailed, "connect failed")
@@ -326,13 +349,19 @@ func handleTestDirectTCPIP(newChan ssh.NewChannel) {
 			// forwarded channels carry no meaningful requests
 		}
 	}()
+	// Bridge both directions. CloseWrite must run in the SAME goroutine
+	// as the channel writes: x/crypto v0.53 reads/writes ch.sentEOF
+	// without a lock (channel.go:248 vs :589), so a CloseWrite racing an
+	// in-flight channel.Write trips -race. The main goroutine therefore
+	// only READS the channel; the writer goroutine propagates EOF after
+	// its copy returns.
 	go func() {
-		_, _ = io.Copy(target, ch)
+		_, _ = io.Copy(ch, target)
 		if cc, ok := ch.(interface{ CloseWrite() error }); ok {
 			_ = cc.CloseWrite()
 		}
 	}()
-	_, _ = io.Copy(ch, target)
+	_, _ = io.Copy(target, ch)
 }
 
 // ---------------------------------------------------------------------
@@ -410,6 +439,30 @@ func writeEncryptedKey(t *testing.T, passphrase string) (keyPath string, publicK
 	data := pem.EncodeToMemory(block)
 	keyPath = filepath.Join(t.TempDir(), "id_ed25519")
 	if err := os.WriteFile(keyPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return keyPath, signer.PublicKey()
+}
+
+// writePlainKey writes an UNENCRYPTED ed25519 private key to a temp file
+// and returns its path and public key (for tests that must reach auth
+// without a vault:key-prompt round-trip).
+func writePlainKey(t *testing.T) (keyPath string, publicKey ssh.PublicKey) {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath = filepath.Join(t.TempDir(), "id_ed25519")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return keyPath, signer.PublicKey()

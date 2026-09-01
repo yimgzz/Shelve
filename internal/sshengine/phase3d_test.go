@@ -280,6 +280,85 @@ func TestInProcessKeyPassphrase(t *testing.T) {
 	})
 }
 
+// TestInProcessKeyAuthJumpHost dials a chain THROUGH a jump host whose own
+// Auth is a key path (regression: the engine must use the jump host's key
+// for that hop — not the target session's password). Covers both Connect
+// (PTY path, live.go) and the shared bare-chain dial (TestConnection /
+// DialMonitorClient, testconn.go).
+func TestInProcessKeyAuthJumpHost(t *testing.T) {
+	keyPath, pub := writePlainKey(t)
+	jumpRig := newTestSSHServer(t, testSSHOpts{user: "tunnel", authorizedKeys: []ssh.PublicKey{pub}})
+	targetRig := newTestSSHServer(t, testSSHOpts{user: "u", password: "p"})
+
+	// Pre-seed known_hosts with BOTH hops' host keys so the dial reaches
+	// auth without host-key prompts.
+	khPath := filepath.Join(t.TempDir(), "known_hosts")
+	kh, err := knownhosts.New(khPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rig := range []*testSSHServer{jumpRig, targetRig} {
+		host, port := splitHostPortInt(t, rig.Addr())
+		if err := kh.Add(host, port, rig.hostKey.Type(), rig.hostKeyB64()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := kh.Save(); err != nil {
+		t.Fatal(err)
+	}
+	em := NewCapturingEmitter()
+	m := New(em, kh)
+
+	jumpHost, jumpPort := splitHostPortInt(t, jumpRig.Addr())
+	sess := &model.Session{
+		Host: "127.0.0.1", Port: targetRig.port(), User: "u",
+		Auth: model.Auth{Type: model.AuthPassword, Password: "p"},
+		JumpHosts: []model.JumpHost{
+			{Host: jumpHost, Port: jumpPort, User: "tunnel",
+				Auth: model.Auth{Type: model.AuthKey, KeyPath: keyPath}},
+		},
+	}
+
+	tabID, err := m.Connect(sess)
+	if err != nil {
+		t.Fatalf("Connect through key-auth jump host: %v", err)
+	}
+	waitReady(t, m, em, tabID)
+
+	// Regression (jump-chain routing): the target hop must be reached
+	// THROUGH the jump host via a direct-tcpip channel, never by dialing
+	// the target directly from the client machine. With the routing bug
+	// the jump host serves zero direct-tcpip requests.
+	wantTarget := net.JoinHostPort("127.0.0.1", strconv.Itoa(targetRig.port()))
+	waitFor(t, func() bool {
+		return len(jumpRig.directTCPReqs()) >= 1
+	}, "jump host serves direct-tcpip to target")
+	if !containsString(jumpRig.directTCPReqs(), wantTarget) {
+		t.Fatalf("jump host direct-tcpip targets = %v, want it to contain %s (target must be routed THROUGH the jump host)", jumpRig.directTCPReqs(), wantTarget)
+	}
+
+	_ = m.Disconnect(tabID)
+
+	// The bare-chain dial (TestConnection / DialMonitorClient) must apply
+	// the jump host's key the same way AND route through it again.
+	if err := m.TestConnection(sess); err != nil {
+		t.Fatalf("TestConnection through key-auth jump host: %v", err)
+	}
+	waitFor(t, func() bool {
+		return len(jumpRig.directTCPReqs()) >= 2
+	}, "TestConnection routes target via jump host")
+}
+
+// containsString reports whether s contains v.
+func containsString(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 // TestInProcessForwardL proves -L dial-through: a connection to the local
 // port reaches an in-test TCP echo server, and teardown emits "closed".
 func TestInProcessForwardL(t *testing.T) {

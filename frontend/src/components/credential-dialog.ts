@@ -9,7 +9,7 @@
 // sessions (A8-style destructive-op UX). Passwords never appear in the
 // list or read DTOs (master plan §8).
 
-import { CredentialService } from "../../bindings/shelve/internal/wailsvc";
+import { AppService, CredentialService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog, type DialogHandle } from "../ui/dialog";
 import { store, type CredentialDTO } from "../store";
 import { confirmDialog } from "./confirm";
@@ -42,7 +42,7 @@ function field(labelText: string, input: HTMLElement, opts?: { hint?: string }):
     return { wrap, err };
 }
 
-/** A hidden file input + Browse button that fills a text path input. */
+/** A native file picker + Browse button that fills a text path input. */
 function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; err: HTMLElement } {
     const row = document.createElement("div");
     row.className = "path-row";
@@ -55,6 +55,9 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
     input.autocomplete = "off";
     input.spellcheck = false;
 
+    // Legacy fallback: WebKitGTK file inputs expose only the basename
+    // (no File.path), so this is used solely when the native binding is
+    // unavailable. AppService.PickFile returns the full path.
     const file = document.createElement("input");
     file.type = "file";
     file.style.display = "none";
@@ -62,7 +65,16 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
     browse.type = "button";
     browse.className = "btn small";
     browse.textContent = "Browse…";
-    browse.addEventListener("click", () => file.click());
+    browse.addEventListener("click", async () => {
+        try {
+            const picked = await AppService.PickFile();
+            if (picked) {
+                input.value = picked;
+            }
+        } catch {
+            file.click(); // binding missing/unavailable: legacy picker
+        }
+    });
     file.addEventListener("change", () => {
         const f = file.files && file.files[0];
         if (f) {

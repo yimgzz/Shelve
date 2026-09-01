@@ -8,7 +8,7 @@
 // runs against the UNSAVED draft via SessionService.TestConnection
 // (host-key/key-passphrase prompt modals may appear mid-test = correct).
 
-import { SessionService } from "../../bindings/shelve/internal/wailsvc";
+import { AppService, SessionService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog, type DialogHandle } from "../ui/dialog";
 import { store, type SessionDTO, type JumpHostDTO, type CredentialDTO } from "../store";
 import { toast } from "./toasts";
@@ -32,26 +32,30 @@ export interface JumpHostInput {
     port: number;
     user: string;
     authType: number;
-    password?: string;
-    keyPath?: string;
+    // Present-but-maybe-undefined, matching the Wails-generated model.
+    password: string | undefined;
+    keyPath: string | undefined;
 }
 
 export interface SessionInput {
-    id?: string;
+    // The Wails-generated SessionInput model declares id/sftpInitialPath/
+    // credentialId as present-but-maybe-undefined members, so the local
+    // draft type matches ("" = absent/global-default).
+    id: string;
     folderId: string;
     name: string;
     host: string;
     port: number;
     user: string;
     authType: number;
-    password?: string;
-    keyPath?: string;
+    password: string | undefined;
+    keyPath: string | undefined;
     jumpHosts: JumpHostInput[];
     extraArgs: string;
-    /** Per-session SFTP browser start path (blank = global default). Plan P002. */
-    sftpInitialPath?: string;
-    /** Optional reference to a saved credential (plan P003). */
-    credentialId?: string;
+    /** Per-session SFTP browser start path ("" = global default). Plan P002. */
+    sftpInitialPath: string;
+    /** Optional reference to a saved credential ("" = none). Plan P003. */
+    credentialId: string;
 }
 
 const EXTRA_ARGS_HELP =
@@ -80,7 +84,7 @@ function field(labelText: string, input: HTMLElement, opts?: { hint?: string }):
     return { wrap, err };
 }
 
-/** A hidden file input + Browse button that fills a text path input. */
+/** A native file picker + Browse button that fills a text path input. */
 function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; err: HTMLElement } {
     const row = document.createElement("div");
     row.className = "path-row";
@@ -93,6 +97,9 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
     input.autocomplete = "off";
     input.spellcheck = false;
 
+    // Legacy fallback: WebKitGTK file inputs expose only the basename
+    // (no File.path), so this is used solely when the native binding is
+    // unavailable. AppService.PickFile returns the full path.
     const file = document.createElement("input");
     file.type = "file";
     file.style.display = "none";
@@ -100,7 +107,16 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
     browse.type = "button";
     browse.className = "btn small";
     browse.textContent = "Browse…";
-    browse.addEventListener("click", () => file.click());
+    browse.addEventListener("click", async () => {
+        try {
+            const picked = await AppService.PickFile();
+            if (picked) {
+                input.value = picked;
+            }
+        } catch {
+            file.click(); // binding missing/unavailable: legacy picker
+        }
+    });
     file.addEventListener("change", () => {
         const f = file.files && file.files[0];
         if (f) {
@@ -319,6 +335,8 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         keyRadio: HTMLInputElement;
         pwRadio: HTMLInputElement;
         keyPath: HTMLInputElement;
+        /** The row-level inline error slot (shown in either auth mode). */
+        err: HTMLElement;
     }
     const jumpHandles: JumpHandles[] = [];
 
@@ -373,17 +391,18 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         jumpRows.appendChild(row);
 
         const sync = () => {
+            // Both auth radios stay visible at all times so the user can
+            // switch between password and key; only the input controls
+            // toggle (same pattern as the main auth section).
             const key = keyRb.rb.checked;
             keyPath.row.style.display = key ? "" : "none";
             pw.style.display = key ? "none" : "";
-            keyRb.el.style.display = key ? "" : "none";
-            pwRb.el.style.display = key ? "none" : "";
         };
         pwRb.rb.addEventListener("change", sync);
         keyRb.rb.addEventListener("change", sync);
         sync();
 
-        const h: JumpHandles = { el: row, host, port, user, pw, keyRadio: keyRb.rb, pwRadio: pwRb.rb, keyPath: keyPathInput };
+        const h: JumpHandles = { el: row, host, port, user, pw, keyRadio: keyRb.rb, pwRadio: pwRb.rb, keyPath: keyPathInput, err };
         remove.addEventListener("click", () => {
             row.remove();
             const i = jumpHandles.indexOf(h);
@@ -475,7 +494,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         clearErrors();
         const authTypeValue = keyRb.rb.checked ? AUTH_KEY : AUTH_PASSWORD;
         const input: SessionInput = {
-            id: editing ? initial!.id : undefined,
+            id: editing ? initial!.id : "",
             folderId: editing ? initial!.folderId : opts.parentID,
             name: name.value.trim(),
             host: host.value.trim(),
@@ -494,7 +513,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
             })),
             extraArgs: extraArgs.value.trim(),
             sftpInitialPath: sftpPath.value.trim(),
-            credentialId: credentialId || undefined,
+            credentialId: credentialId || "",
         };
         const localErr: Array<[HTMLElement, string]> = [];
         if (!input.name) {
@@ -533,7 +552,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
             if (jumpMatch) {
                 const row = jumpHandles[Number(jumpMatch[1])];
                 if (row) {
-                    show(row.el.querySelector<HTMLElement>(".field-error")!);
+                    show(row.err);
                 }
                 continue;
             }

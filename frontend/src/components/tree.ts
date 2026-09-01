@@ -385,6 +385,8 @@ async function renameSession(id: string, newName: string): Promise<void> {
             keyPath: j.keyPath,
         })),
         extraArgs: dto.extraArgs,
+        sftpInitialPath: dto.sftpInitialPath ?? "",
+        credentialId: dto.credentialId ?? "",
     });
 }
 

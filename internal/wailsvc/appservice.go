@@ -3,13 +3,22 @@
 // Phase 2 adds VaultService, SessionService and the settings surface of
 // AppService; TerminalService and SftpService land in Phases 3/5.
 //
-// Services are plain structs (no Wails import in this package): the
-// Wails runtime is wired in main.go through an Emitter callback and
-// service registration, so every service stays callable and testable
-// headlessly (master plan Phase 2 goal).
+// Services are plain structs: the Wails runtime is wired in main.go
+// through an Emitter callback and service registration, so every service
+// stays callable and testable headlessly (master plan Phase 2 goal). The
+// one exception is AppService.PickFile, which opens the NATIVE file
+// dialog through the Wails runtime directly (a modal dialog has no
+// headless equivalent; §11 permits the Wails import in this package).
 package wailsvc
 
-import "shelve/internal/config"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"shelve/internal/config"
+)
 
 // AppService exposes app-level metadata and user settings to the
 // frontend. Bound as "AppService" in the generated JS/TS bindings.
@@ -29,6 +38,34 @@ func NewAppService(version string) *AppService {
 // GetVersion returns the application version.
 func (s *AppService) GetVersion() string {
 	return s.version
+}
+
+// ErrPickerUnavailable is returned by PickFile when the Wails runtime (or
+// its dialog manager) is not ready — e.g. the method was invoked during
+// startup before the runtime was created.
+var ErrPickerUnavailable = errors.New("file picker is unavailable")
+
+// PickFile opens the native OS file chooser and returns the FULL path of
+// the selected file; an empty string means the user cancelled the dialog.
+//
+// This is the authoritative source for SSH key paths: WebKitGTK file
+// inputs expose only the file's basename (the non-standard File.path is
+// not provided by the webview), which would break relative-to-CWD key
+// lookups with "ssh key file not found: <basename>".
+func (s *AppService) PickFile() (string, error) {
+	a := application.Get()
+	if a == nil || a.Dialog == nil {
+		return "", ErrPickerUnavailable
+	}
+	dlg := a.Dialog.OpenFileWithOptions(&application.OpenFileDialogOptions{
+		Title:          "Select an SSH private key",
+		CanChooseFiles: true,
+	})
+	path, err := dlg.PromptForSingleSelection()
+	if err != nil {
+		return "", fmt.Errorf("pick file: %w", err)
+	}
+	return path, nil
 }
 
 // GetSettings returns current settings (defaults when the file is

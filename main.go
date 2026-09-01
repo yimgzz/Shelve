@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -21,6 +22,17 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
+	// WebKitGTK blank-window workaround (master plan §11, README
+	// "Troubleshooting"): on some desktops (NVIDIA/gbm, Wayland sessions)
+	// the GPU dmabuf renderer produces an empty gray window. Default to
+	// disabling it — the webview falls back to software rendering, which
+	// is reliable everywhere. This covers EVERY launch path (make run,
+	// the AppImage, make dev) from one place. Users can still force it
+	// off by exporting WEBKIT_DISABLE_DMABUF_RENDERER=0 first.
+	if os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
+		_ = os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+	}
+
 	a, err := app.New()
 	if err != nil {
 		log.Fatal(err)

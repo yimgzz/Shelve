@@ -284,14 +284,16 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
 ## Troubleshooting
 
 - **Blank / hung window on some desktops** (NVIDIA/gbm, Wayland sessions):
-  Wails sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` automatically; if the window
-  is still blank, launch `make run` with the renderer disabled explicitly —
-  on Wayland desktops the reliably-working invocation is:
+  the app disables the WebKit dmabuf renderer **by default**
+  (`WEBKIT_DISABLE_DMABUF_RENDERER=1` is set at startup — covers `make run`,
+  `make dev` and the AppImage alike). If you still get a blank window, force
+  the X11 backend as well:
   ```
-  GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 make run
+  GDK_BACKEND=x11 make run
   ```
-  (plain `WEBKIT_DISABLE_DMABUF_RENDERER=1 make run` also works on most
-  setups). Verified 2026-09-01 on ALT Linux + Wayland.
+  (or `GDK_BACKEND=x11 ./bin/shelve-<version>-x86_64.AppImage`). To opt out
+  of the default workaround, export `WEBKIT_DISABLE_DMABUF_RENDERER=0` before
+  launching. Verified 2026-09-01 on ALT Linux + Wayland.
 - **In-container window fails under `make dev`** (GTK/DBus session limits inside
   the container, WebKit sandbox namespace limits — observed on GNOME/XWayland
   ALT Linux): use the always-supported workflow `make build` + `make run`

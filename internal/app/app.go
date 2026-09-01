@@ -7,6 +7,7 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"log"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"shelve/internal/sshengine"
 	"shelve/internal/sshx/knownhosts"
 	"shelve/internal/store"
+	"shelve/internal/termws"
 	"shelve/internal/vault"
 	"shelve/internal/wailsvc"
 )
@@ -30,11 +32,12 @@ const exitShutdownTimeout = 3 * time.Second
 
 // App is the composition root shared by all Wails services.
 type App struct {
-	vault   *vault.Vault
-	store   *store.Store
-	engine  *sshengine.Manager
-	sftpMgr *sftp.Manager
-	monMgr  *monitor.Manager
+	vault     *vault.Vault
+	store     *store.Store
+	engine    *sshengine.Manager
+	sftpMgr   *sftp.Manager
+	monMgr    *monitor.Manager
+	termwsSrv *termws.Server
 
 	appService        *wailsvc.AppService
 	vaultService      *wailsvc.VaultService
@@ -74,6 +77,23 @@ func New() (*App, error) {
 	}
 	engine := sshengine.New(emit, kh)
 
+	// Plan P005: raw terminal I/O rides a same-origin WebSocket instead of
+	// the Wails event bridge (input starvation + thread churn under output
+	// floods). The transport lives on the app's HTTP transport (wrapped in
+	// main.go); here it is wired as the engine's data sink and input path.
+	termwsSrv := termws.NewServer()
+	termwsSrv.SetInputHandler(engine.WriteRaw)
+	// Safety net (plan P005): if the webview can never upgrade /terminal,
+	// output falls back to the legacy terminal:data events instead of
+	// stalling every tab on a socket that will never arrive.
+	termwsSrv.SetFallback(func(tabID string, data []byte) {
+		emit.Emit(sshengine.EventTerminalData, sshengine.TerminalDataPayload{
+			TabID: tabID,
+			Data:  base64.StdEncoding.EncodeToString(data),
+		})
+	})
+	engine.SetDataSink(termwsSrv)
+
 	// SFTP per-tab clients ride on the engine's active connections (master
 	// plan §5). The manager is attached to the engine structurally and
 	// registers its per-tab closer so clients die with their tab.
@@ -104,6 +124,7 @@ func New() (*App, error) {
 		engine:            engine,
 		sftpMgr:           sftpMgr,
 		monMgr:            monMgr,
+		termwsSrv:         termwsSrv,
 		emitter:           emit,
 		appService:        wailsvc.NewAppService(Version),
 		vaultService:      wailsvc.NewVaultService(v, st, engine, sftpMgr, emit),
@@ -150,6 +171,12 @@ func (a *App) MonitorService() *wailsvc.MonitorService {
 	return a.monitorService
 }
 
+// TerminalWS returns the plan P005 terminal I/O WebSocket server, mounted
+// by main.go on the app's HTTP transport at /terminal.
+func (a *App) TerminalWS() *termws.Server {
+	return a.termwsSrv
+}
+
 // SetEmitter wires the Wails-backed event emitter. Called from main.go
 // after the runtime is constructed (before Run).
 func (a *App) SetEmitter(e wailsvc.Emitter) {
@@ -160,6 +187,9 @@ func (a *App) SetEmitter(e wailsvc.Emitter) {
 // on application exit (master plan §5 order: engine before the store
 // flush; §4: flush on exit).
 func (a *App) Shutdown() {
+	// Drop the terminal transport first so blocked output writers release
+	// before the engine tears down its connections.
+	_ = a.termwsSrv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), exitShutdownTimeout)
 	a.engine.Shutdown(ctx)
 	cancel()

@@ -8,9 +8,10 @@
 //   - Addons: Fit (ResizeObserver → debounced fit → TerminalService.Resize),
 //     WebLinks.
 //   - term.onData → buffer chunks → flush immediately (no timer/rAF) →
-//     TerminalService.Write(tabID, bytesToB64(data)). Per-keystroke latency
-//     is bounded by the Wails/WebKitGTK bridge alone; coalescing a fast
-//     typist's keys would only add an extra hop before the echo.
+//     the terminal WebSocket (plan P005), falling back to
+//     TerminalService.Write before the socket connects. Per-keystroke
+//     latency is bounded by the socket alone; coalescing a fast typist's
+//     keys would only add an extra hop before the echo.
 //   - `write(tabID, bytes)` from `terminal:data` → term.write, even when
 //     the pane is hidden (xterm retains scrollback).
 //   - Mouse (plan P003): a left-drag selection copies to the system
@@ -30,6 +31,7 @@ import type { TerminalSettings } from "../store";
 import { currentThemeTokens } from "../ui/theme";
 import { copyText, readText } from "../ui/clipboard";
 import { bytesToB64 } from "../ui/b64";
+import { sendInput } from "./ws";
 
 /** Options for creating a new pooled terminal (read from settings/theme). */
 export interface TermCreateOptions {
@@ -69,10 +71,15 @@ function flushInput(tabID: string, e: Entry): void {
     const str = e.inputBuf;
     e.inputBuf = "";
     const bytes = new TextEncoder().encode(str);
-    void TerminalService.Write(tabID, bytesToB64(bytes)).catch(() => {
-        // Write failures (e.g. tab already closed server-side) are
-        // surfaced through terminal:status; nothing actionable here.
-    });
+    // Plan P005: keystrokes ride the terminal WebSocket (a plain macrotask
+    // that stays responsive even under output floods); before the socket is
+    // up, fall back to the Wails service call.
+    if (!sendInput(tabID, bytes)) {
+        void TerminalService.Write(tabID, bytesToB64(bytes)).catch(() => {
+            // Write failures (e.g. tab already closed server-side) are
+            // surfaced through terminal:status; nothing actionable here.
+        });
+    }
 }
 
 /** True when WebGL would run on a software rasterizer (llvmpipe, SwiftShader…). */

@@ -139,7 +139,7 @@ Notes:
 | `vault:hostkey-prompt` | `{connID, host, port, keyType, keyB64, fingerprint}` | sshx host-key cb |
 | `vault:key-prompt` | `{connID, keyPath}` | encrypted private key |
 | `terminal:status` | `{tabID, state, message?}` | sshengine |
-| `terminal:data` | `{tabID, data b64}` (batched ≤50 ms / ≤16 KB) | sshengine |
+| `terminal:data` | `{tabID, data b64}` (batched ≤50 ms / ≤64 KB; **plan P005:** production output rides the `/terminal` WebSocket as raw binary — this event stays as the headless/fallback path) | sshengine |
 | `terminal:exit` | `{tabID, exitStatus?}` | sshengine |
 | `ssh:forward` | `{tabID, spec, state, localAddr?, error?}` | sshengine |
 | `sftp:progress` | `{transferID, direction, doneBytes, totalBytes}` | sftp |
@@ -160,7 +160,9 @@ Notes:
 7. Vault writes always atomic (temp file + rename), never truncated on failure.
 8. SFTP edit temp files `0600` under `tmp/`, swept on lock/exit/startup.
 9. No network calls except to user SSH hosts and local port-forward sockets on
-   `127.0.0.1`. No telemetry, no update checks, no crash reporting.
+   `127.0.0.1`, plus the local terminal-I/O WebSocket on the app's own
+   loopback-bound HTTP transport (`/terminal`, plan P005). No telemetry, no
+   update checks, no crash reporting.
 10. Corrupt/undecryptable vault → refuse to unlock, never auto-overwrite.
 
 ## 6. Conventions

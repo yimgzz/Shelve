@@ -3,6 +3,7 @@ module shelve
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pkg/sftp v1.13.7
 	github.com/testcontainers/testcontainers-go v0.35.0
@@ -16,7 +17,6 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/containerd/containerd v1.7.18 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect

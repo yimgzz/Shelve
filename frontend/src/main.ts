@@ -20,6 +20,7 @@ import {
 } from "./components/prompts";
 import { toast } from "./components/toasts";
 import { TermPool } from "./terminal/xterm";
+import { initTerminalWs, isTerminalWsActive, setTerminalOutputHandler } from "./terminal/ws";
 import { b64ToBytes } from "./ui/b64";
 import { initShortcuts } from "./ui/shortcuts";
 import { initAutoLock } from "./ui/autolock";
@@ -163,9 +164,13 @@ function handleEvent(name: string, payload: unknown): void {
             break;
         }
         case EV.TerminalData: {
-            // Batched b64 output → this tab's pooled terminal. Routed
-            // directly (not through store.set) so high-throughput data
-            // never triggers a full UI re-render (perf guard, §2 A6).
+            // Plan P005: while the terminal WebSocket is active it is the
+            // authoritative byte channel (the engine routes output to the
+            // sink, so this event normally never fires then). This legacy
+            // path remains as the pre-connect / headless fallback.
+            if (isTerminalWsActive()) {
+                break;
+            }
             const tabID = String(p.tabID ?? "");
             TermPool.write(tabID, b64ToBytes(String(p.data ?? "")));
             break;
@@ -290,6 +295,12 @@ async function boot(): Promise<void> {
     window.__dsmDev = true;
 
     subscribeEvents();
+
+    // Plan P005: the terminal I/O WebSocket is the primary byte channel.
+    // Output frames decode straight into the term pool; start it before any
+    // tab can open so keystrokes never wait on the Wails bridge.
+    setTerminalOutputHandler((tabID, bytes) => TermPool.write(tabID, bytes));
+    initTerminalWs();
 
     // Global keyboard shortcuts + opt-in auto-lock (Phase 4d). Both install
     // their document listeners exactly once at boot (listener-audit rule).

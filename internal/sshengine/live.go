@@ -37,9 +37,12 @@ const (
 	// bounded by the 50 ms tick; the interactive fast path keeps fresh
 	// bursts instant.
 	batchBytes = 64 * 1024
-	// maxPendingBytes: backpressure limit — while the pending buffer
-	// exceeds 1 MiB, reads pause and the buffer is drained.
-	maxPendingBytes = 1 << 20
+	// maxPendingBytes: flow-control cap — the reader pauses SSH reads while
+	// the pending buffer exceeds this, letting the transport drain (plan
+	// P005). With the WebSocket transport, blocking sink writes are the
+	// natural backpressure and the SSH channel window throttles the remote;
+	// the cap keeps memory flat when the frontend cannot keep up.
+	maxPendingBytes = 256 * 1024
 	// readBufSize: one SSH channel read.
 	readBufSize = 32 * 1024
 	// defaultPort: fallback for a 0/absent port (sessions are
@@ -443,8 +446,10 @@ func (l *liveConn) fail(err error) {
 // on the 50 ms tick, once ≥64 KB is pending, immediately when a NEW
 // burst starts (nothing pending, or the stream was quiet for a full
 // tick — the interactive fast path), and as the final flush on close.
-// Backpressure (master plan §5): while pending exceeds 1 MiB the reader
-// blocks on its signal channel until the buffer is drained.
+// Flow control (plan P005): while pending exceeds maxPendingBytes the
+// reader pauses (the transport's blocking sink write is the throttle; the
+// SSH channel window applies remote backpressure meanwhile), which keeps
+// memory flat and input responsive under output floods.
 func (l *liveConn) pump() {
 	var (
 		mu           sync.Mutex
@@ -453,6 +458,7 @@ func (l *liveConn) pump() {
 		lastEmit     time.Time // when terminal:data was last emitted (zero: none yet)
 	)
 	changed := make(chan struct{}, 1)
+	drained := make(chan struct{}, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -471,6 +477,16 @@ func (l *liveConn) pump() {
 					burstStarted = true
 				}
 				pending = append(pending, buf[:n]...)
+				// Real flow control (plan P005): pause SSH reads while over
+				// the cap so the transport can drain. When the browser
+				// socket is full or the webview is disconnected, the sink
+				// write blocks; this bound keeps memory flat and the SSH
+				// channel window throttles the remote meanwhile.
+				for len(pending) > maxPendingBytes {
+					mu.Unlock()
+					<-drained
+					mu.Lock()
+				}
 			}
 			mu.Unlock()
 			select {
@@ -489,16 +505,36 @@ func (l *liveConn) pump() {
 		mu.Lock()
 		if len(pending) == 0 {
 			mu.Unlock()
+			// Wake a reader paused on flow control even on the empty drain
+			// (e.g. the final flush on the done path).
+			select {
+			case drained <- struct{}{}:
+			default:
+			}
 			return
 		}
 		data := pending
 		pending = nil
 		lastEmit = time.Now()
 		mu.Unlock()
-		l.m.emit.Emit(EventTerminalData, TerminalDataPayload{
-			TabID: l.tabID,
-			Data:  base64.StdEncoding.EncodeToString(data),
-		})
+		// Plan P005: with a raw-data sink wired, output goes there directly
+		// (blocking = transport flow control); otherwise the legacy
+		// terminal:data emitter path is used (headless tests unchanged).
+		l.m.mu.Lock()
+		sink := l.m.dataSink
+		l.m.mu.Unlock()
+		if sink != nil {
+			sink.OnTerminalData(l.tabID, data)
+		} else {
+			l.m.emit.Emit(EventTerminalData, TerminalDataPayload{
+				TabID: l.tabID,
+				Data:  base64.StdEncoding.EncodeToString(data),
+			})
+		}
+		select {
+		case drained <- struct{}{}:
+		default:
+		}
 	}
 
 	for {
@@ -522,7 +558,7 @@ func (l *liveConn) pump() {
 			// Interactive fast path: the chunk that just arrived began a
 			// NEW burst, so flush at once instead of waiting for the
 			// batching tick. Sustained streams (pending never empties
-			// between reads) still coalesce on the tick / 16 KB
+			// between reads) still coalesce on the tick / 64 KB
 			// threshold, preserving the throughput contract (A6).
 			flush()
 			continue

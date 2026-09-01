@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -38,12 +39,22 @@ func main() {
 		log.Fatal(err)
 	}
 
+	assetsHandler := application.AssetFileServerFS(assets)
 	wailsApp := application.New(application.Options{
 		Name:        "shelve",
 		Description: "Lightweight local SSH session manager",
 		Icon:        appIcon,
 		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assets),
+			// Plan P005: /terminal upgrades to the terminal I/O WebSocket
+			// (same-origin with the webview); everything else serves the
+			// embedded frontend as before.
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/terminal" {
+					a.TerminalWS().ServeHTTP(w, r)
+					return
+				}
+				assetsHandler.ServeHTTP(w, r)
+			}),
 		},
 		Services: []application.Service{
 			application.NewService(a.AppService()),

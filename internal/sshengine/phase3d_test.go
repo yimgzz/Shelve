@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,6 +153,64 @@ func TestInProcessInteractiveEchoLatency(t *testing.T) {
 	}
 	if max := 5 * batchInterval; latency > max {
 		t.Fatalf("interactive echo latency %v exceeds guard %v", latency, max)
+	}
+
+	if err := m.Disconnect(tabID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// sinkFunc adapts a func to the TerminalDataSink interface (plan P005).
+type sinkFunc func(tabID string, data []byte)
+
+func (f sinkFunc) OnTerminalData(tabID string, data []byte) { f(tabID, data) }
+
+// TestDataSinkRoutesOutput: with a TerminalDataSink wired, raw terminal
+// output goes to the sink and the terminal:data event is suppressed
+// (plan P005 — the WebSocket transport replaces the event bridge for
+// terminal bytes).
+func TestDataSinkRoutesOutput(t *testing.T) {
+	const user, password = "dave", "pw"
+	rig := newTestSSHServer(t, testSSHOpts{user: user, password: password})
+	m, em := newManagerForRig(t, rig)
+
+	type rec struct {
+		tabID string
+		data  []byte
+	}
+	var mu sync.Mutex
+	var got []rec
+	m.SetDataSink(sinkFunc(func(tabID string, data []byte) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, rec{tabID: tabID, data: data})
+	}))
+
+	tabID, err := m.Connect(rigPasswordSession(rig.Addr(), user, password))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitReady(t, m, em, tabID)
+
+	if err := m.Write(tabID, base64.StdEncoding.EncodeToString([]byte("hi\n"))); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	var saw []byte
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(string(saw), "echo: hi") && time.Now().Before(deadline) {
+		mu.Lock()
+		for _, g := range got {
+			saw = append(saw, g.data...)
+		}
+		got = nil
+		mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(string(saw), "echo: hi") {
+		t.Fatalf("sink output = %q, want it to contain %q", saw, "echo: hi")
+	}
+	if em.Has(EventTerminalData) {
+		t.Fatal("terminal:data was emitted despite a wired data sink")
 	}
 
 	if err := m.Disconnect(tabID); err != nil {

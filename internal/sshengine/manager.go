@@ -128,6 +128,15 @@ type Emitter interface {
 	Emit(event string, payload any)
 }
 
+// TerminalDataSink receives raw terminal output bytes instead of the
+// terminal:data event (plan P005). Set once at startup by the composition
+// root when a dedicated transport is wired; nil keeps the legacy emitter
+// path (headless tests unchanged). It MAY block — blocking is the intended
+// transport flow control that propagates backpressure to the pump.
+type TerminalDataSink interface {
+	OnTerminalData(tabID string, data []byte)
+}
+
 // Typed errors (master plan phase 3c). Error messages never contain
 // passwords or key material (master plan §8.3).
 var (
@@ -161,7 +170,10 @@ type Manager struct {
 	prompts     map[string]*promptSlot // connID → pending prompt
 	passphrases map[string]string      // keyPath → passphrase (A2 cache)
 	emit        Emitter
-	kh          *knownhosts.Manager
+	// dataSink is the plan P005 raw terminal-output transport (nil: the
+	// pump emits terminal:data events through emit instead).
+	dataSink TerminalDataSink
+	kh       *knownhosts.Manager
 	// PromptTimeout bounds a pending prompt; zero disables the
 	// host-key prompt timer. Default DefaultPromptTimeout.
 	PromptTimeout time.Duration
@@ -183,6 +195,14 @@ func New(emit Emitter, kh *knownhosts.Manager) *Manager {
 		kh:            kh,
 		PromptTimeout: DefaultPromptTimeout,
 	}
+}
+
+// SetDataSink installs the raw terminal-output transport (plan P005); nil
+// restores the terminal:data emitter path.
+func (m *Manager) SetDataSink(s TerminalDataSink) {
+	m.mu.Lock()
+	m.dataSink = s
+	m.mu.Unlock()
 }
 
 // TabInfo is a snapshot of one tab record (state introspection).
@@ -246,6 +266,16 @@ func (m *Manager) startConnect(tabID string, sess model.Session) {
 // Write decodes dataB64 and feeds the tab's pty stdin. Typed
 // ErrUnknownTab / ErrTabNotReady (connecting, error, closed).
 func (m *Manager) Write(tabID, dataB64 string) error {
+	data, err := base64.StdEncoding.DecodeString(dataB64)
+	if err != nil {
+		return fmt.Errorf("sshengine: invalid base64 terminal input: %v", err)
+	}
+	return m.WriteRaw(tabID, data)
+}
+
+// WriteRaw feeds raw bytes to the tab's pty stdin (plan P005: the termws
+// transport calls this directly, bypassing base64 over IPC).
+func (m *Manager) WriteRaw(tabID string, data []byte) error {
 	l := m.getTab(tabID)
 	if l == nil {
 		return ErrUnknownTab
@@ -255,10 +285,6 @@ func (m *Manager) Write(tabID, dataB64 string) error {
 	m.mu.Unlock()
 	if st != stateReady {
 		return fmt.Errorf("%w: tab is %s", ErrTabNotReady, st)
-	}
-	data, err := base64.StdEncoding.DecodeString(dataB64)
-	if err != nil {
-		return fmt.Errorf("sshengine: invalid base64 terminal input: %v", err)
 	}
 	if _, err := in.Write(data); err != nil {
 		return fmt.Errorf("sshengine: write to terminal: %v", err)

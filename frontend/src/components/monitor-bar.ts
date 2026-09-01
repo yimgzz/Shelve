@@ -22,6 +22,19 @@ let host: HTMLElement | null = null;
 let unsub: (() => void) | null = null;
 /** tabID currently being monitored by the backend (Start already called). */
 let monitored: string | null = null;
+/** True while the Disk tooltip is open. Survives metric-driven rebuilds so
+ *  the tooltip can be re-opened after the hovered node is replaced. */
+let diskTooltipOpen = false;
+/** Last known pointer position (document mousemove). Geometry-based hit-test
+ *  for the rebuilt Disk item: on a 2 s refresh the hovered node is replaced,
+ *  so neither mouseenter (never re-fires) nor :hover (may lag the insertion)
+ *  can be relied on. */
+let lastPX = -1;
+let lastPY = -1;
+const pointerMove = (e: MouseEvent): void => {
+    lastPX = e.clientX;
+    lastPY = e.clientY;
+};
 
 // ------------------------------------------------------------- formatters --
 
@@ -132,6 +145,33 @@ function uptimeItem(m: MonitorMetrics | null): HTMLElement {
     return monItem(labelSpan("Uptime"), m ? valueSpan(formatUptime(m.uptimeSeconds)) : staleValue());
 }
 
+/** True if the last known pointer position is over `item` (8 px tolerance for
+ *  small layout shifts between metric renders). */
+function isPointerNear(item: HTMLElement | null): boolean {
+    if (!item || lastPX < 0 || lastPY < 0) {
+        return false;
+    }
+    const PAD = 8;
+    const r = item.getBoundingClientRect();
+    return (
+        lastPX >= r.left - PAD &&
+        lastPX <= r.right + PAD &&
+        lastPY >= r.top - PAD &&
+        lastPY <= r.bottom + PAD
+    );
+}
+
+/** Show + position the fixed Disk tooltip above `item`. Shared by the
+ *  mouseenter handler and the post-rebuild reopen so both paths agree. */
+function positionTooltip(item: HTMLElement, tip: HTMLElement): void {
+    const r = item.getBoundingClientRect();
+    tip.style.display = "block";
+    const h = tip.offsetHeight; // measurable now that it is displayed
+    tip.style.position = "fixed";
+    tip.style.left = `${Math.max(4, Math.min(r.left, window.innerWidth - 330))}px`;
+    tip.style.top = `${Math.max(4, r.top - h - 6)}px`;
+}
+
 function diskItem(m: MonitorMetrics | null): HTMLElement {
     const el = document.createElement("div");
     el.className = "mon-item";
@@ -151,14 +191,11 @@ function diskItem(m: MonitorMetrics | null): HTMLElement {
     tip.textContent = m.dfText.trim() || "df unavailable";
     el.appendChild(tip);
     const showTip = () => {
-        const r = el.getBoundingClientRect();
-        tip.style.display = "block";
-        const h = tip.offsetHeight; // measurable now that it is displayed
-        tip.style.position = "fixed";
-        tip.style.left = `${Math.max(4, Math.min(r.left, window.innerWidth - 330))}px`;
-        tip.style.top = `${Math.max(4, r.top - h - 6)}px`;
+        diskTooltipOpen = true;
+        positionTooltip(el, tip);
     };
     const hideTip = () => {
+        diskTooltipOpen = false;
         tip.style.display = "none";
     };
     el.addEventListener("mouseenter", showTip);
@@ -173,6 +210,13 @@ function render(): void {
     if (!el) {
         return;
     }
+    // Was the pointer interacting with Disk when this refresh hit? Captured
+    // BEFORE the wipe: the rebuild removes the hovered node, which in WebKit
+    // can also fire mouseleave on it (clearing diskTooltipOpen).
+    const oldDisk = el.querySelector<HTMLElement>(".mon-disk");
+    const oldTip = oldDisk?.querySelector<HTMLElement>(".mon-tooltip");
+    const diskWasHovered =
+        isPointerNear(oldDisk) || (diskTooltipOpen && oldTip?.style.display === "block");
     el.textContent = "";
     const st = store.getState();
     const tab = st.tabs.find((t) => t.id === st.activeTabID);
@@ -214,12 +258,25 @@ function render(): void {
     el.appendChild(netItem("Up", data ? data.netUpBps : null));
     el.appendChild(netItem("Down", data ? data.netDownBps : null));
     el.appendChild(uptimeItem(data));
-    el.appendChild(diskItem(data));
+    const diskEl = diskItem(data);
+    el.appendChild(diskEl);
+    // Re-open the tooltip if the refresh interrupted a hover: the replacement
+    // node cannot receive mouseenter again (and may have lost mouseleave to
+    // the removed node), so we replay the decision from captured geometry.
+    const tip = diskEl.querySelector<HTMLElement>(".mon-tooltip");
+    if (tip && diskWasHovered) {
+        diskTooltipOpen = true;
+        positionTooltip(diskEl, tip);
+    } else {
+        diskTooltipOpen = false;
+    }
 }
 
 /** Mount the monitor bar into `el` (the .status-band footer) and subscribe. */
 export function renderMonitorBar(el: HTMLElement): void {
     host = el;
+    document.removeEventListener("mousemove", pointerMove);
+    document.addEventListener("mousemove", pointerMove);
     if (unsub) {
         unsub();
     }

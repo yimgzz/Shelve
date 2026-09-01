@@ -1,13 +1,20 @@
 // Package monitor provides per-tab remote system monitoring (plan P004): it
-// periodically executes a read-only POSIX-shell script over an active tab's
-// final-hop SSH connection and emits `monitor:metrics` snapshots (hostname,
-// CPU%, RAM, net speeds, uptime, df) for the bottom status bar.
+// periodically executes a read-only POSIX-shell script over a DEDICATED SSH
+// connection to the active tab's final hop and emits `monitor:metrics`
+// snapshots (hostname, CPU%, RAM, net speeds, uptime, df) for the bottom
+// status bar.
+//
+// The dedicated connection (dialed once per Start via the structural Dialer,
+// satisfied by sshengine.Manager.DialMonitorClient) is fully independent of
+// the tab's PTY channel, so monitor execs can never contend with terminal
+// output — a 2 s exec on the live connection previously stalled `tail -f`
+// style output for up to seconds (P004 fix).
 //
 // Layering follows master plan §5/§11: the Manager talks to the engine only
-// through the structural TabProvider interface (satisfied by
-// sshengine.Manager) and never imports wailsvc or the engine. Events flow
-// through an Emitter wired by the composition root. Only the ACTIVE tab is
-// monitored — the frontend drives lifecycle via Start/Stop (plan P004 D2).
+// through the structural Dialer interface and never imports wailsvc or the
+// engine. Events flow through an Emitter wired by the composition root. Only
+// the ACTIVE tab is monitored — the frontend drives lifecycle via
+// Start/Stop (plan P004 D2).
 package monitor
 
 import (
@@ -53,11 +60,16 @@ const (
 	maxConsecutiveFailures = 5
 )
 
-// TabProvider exposes an active tab's final-hop SSH client. sshengine.Manager
-// satisfies it structurally (master plan §5); monitor must not import the
-// engine.
-type TabProvider interface {
-	SSHClient(tabID string) (*ssh.Client, error)
+// Dialer opens a DEDICATED SSH connection chain for a tab's monitoring.
+// sshengine.Manager satisfies it structurally (DialMonitorClient); monitor
+// must not import the engine (master plan §5). All returned clients must be
+// closed together when monitoring stops.
+type Dialer interface {
+	// DialMonitorClient dials a NEW connection to the tab's final hop with
+	// the same auth/host-key/key-passphrase paths as the live tab, but no
+	// PTY. Returns every hop client (last = final hop), fully independent
+	// of the tab's terminal channel.
+	DialMonitorClient(tabID string) ([]*ssh.Client, error)
 }
 
 // Emitter is a minimal Go→JS event sink (master plan §5). Structurally
@@ -70,8 +82,8 @@ type Emitter interface {
 // Typed errors. Messages never contain credentials or key material
 // (master plan §8.3).
 var (
-	// ErrNoProvider: no TabProvider has been attached yet.
-	ErrNoProvider = errors.New("monitor: no tab provider attached")
+	// ErrNoProvider: no Dialer has been attached yet.
+	ErrNoProvider = errors.New("monitor: no dialer attached")
 )
 
 // execFn runs the collection script on the client and returns the raw
@@ -79,15 +91,17 @@ var (
 // production default is execScript.
 type execFn func(ctx context.Context, client *ssh.Client, script string) ([]byte, error)
 
-// Manager owns the per-tab ticker goroutines. All fields except emit are
-// guarded by mu; emit is set at construction and immutable afterwards.
-// execFn/Interval/ExecTimeout are test knobs and must be set before Start.
+// Manager owns the per-tab ticker goroutines and their dedicated SSH
+// connections. All fields except emit are guarded by mu; emit is set at
+// construction and immutable afterwards. execFn/Interval/ExecTimeout are
+// test knobs and must be set before Start.
 type Manager struct {
-	mu   sync.Mutex
-	prov TabProvider
-	emit Emitter
-	runs map[string]context.CancelFunc // tabID → cancel of its tick goroutine
-	prev map[string]*rawSample         // tabID → previous sample (delta baseline)
+	mu      sync.Mutex
+	dial    Dialer
+	emit    Emitter
+	runs    map[string]context.CancelFunc // tabID → cancel of its tick goroutine
+	prev    map[string]*rawSample         // tabID → previous sample (delta baseline)
+	clients map[string][]*ssh.Client      // tabID → dedicated hop clients (last = target)
 
 	Interval    time.Duration
 	ExecTimeout time.Duration
@@ -100,56 +114,70 @@ func New(emit Emitter) *Manager {
 		emit:        emit,
 		runs:        map[string]context.CancelFunc{},
 		prev:        map[string]*rawSample{},
+		clients:     map[string][]*ssh.Client{},
 		Interval:    DefaultInterval,
 		ExecTimeout: DefaultExecTimeout,
 		exec:        execScript,
 	}
 }
 
-// Attach wires the TabProvider (the engine). Idempotent: a later call
-// replaces the provider.
-func (m *Manager) Attach(p TabProvider) {
+// Attach wires the Dialer (the engine). Idempotent: a later call replaces
+// the dialer.
+func (m *Manager) Attach(d Dialer) {
 	m.mu.Lock()
-	m.prov = p
+	m.dial = d
 	m.mu.Unlock()
 }
 
 // Start begins periodic metric collection for tabID (plan P004 D2): it
-// validates the tab through the provider (propagating engine
-// ErrUnknownTab/ErrTabNotReady), cancels any existing run for the tab
-// (restart resets the delta baselines), and spawns the tick goroutine.
-// Idempotent.
+// opens the tab's DEDICATED monitoring connection (propagating engine
+// ErrUnknownTab/ErrTabNotReady and dial/auth errors), cancels any existing
+// run for the tab (restart resets the delta baselines), and spawns the tick
+// goroutine. Idempotent.
 func (m *Manager) Start(tabID string) error {
-	prov := m.provider()
-	if prov == nil {
+	d := m.dialer()
+	if d == nil {
 		return ErrNoProvider
 	}
-	if _, err := prov.SSHClient(tabID); err != nil {
+	clients, err := d.DialMonitorClient(tabID)
+	if err != nil {
 		return err
 	}
 	m.mu.Lock()
+	old := m.clients[tabID]
 	if cancel, ok := m.runs[tabID]; ok {
 		cancel()
 	}
+	m.clients[tabID] = clients
 	delete(m.prev, tabID)
 	ctx, cancel := context.WithCancel(context.Background())
 	m.runs[tabID] = cancel
 	m.mu.Unlock()
+	// Release the previous dedicated connection. The old tick goroutine
+	// sees its canceled ctx (tick checks ctx before counting failures) and
+	// exits without touching the new run.
+	if len(old) > 0 {
+		go closeClients(old)
+	}
 	go m.tick(ctx, tabID)
 	return nil
 }
 
-// Stop cancels the tick goroutine for tabID and drops its state. Safe and
-// idempotent for an unknown or never-started tab.
+// Stop cancels the tick goroutine for tabID, drops its state and closes the
+// dedicated connection. Safe and idempotent for an unknown or never-started
+// tab.
 func (m *Manager) Stop(tabID string) {
 	m.mu.Lock()
 	cancel, ok := m.runs[tabID]
 	delete(m.runs, tabID)
 	delete(m.prev, tabID)
+	cs := m.clients[tabID]
+	delete(m.clients, tabID)
 	m.mu.Unlock()
 	if ok {
 		cancel()
 	}
+	closeClients(cs)
 }
 
 // HandleTabClosed is the OnTabClosed hook registered on the engine: it stops
@@ -160,19 +188,28 @@ func (m *Manager) HandleTabClosed(tabID string) {
 	m.Stop(tabID)
 }
 
-// CloseAll stops every ticker (app-shutdown belt-and-braces; per-tab
-// teardown normally happens through HandleTabClosed). Idempotent.
+// CloseAll stops every ticker and closes every dedicated connection
+// (app-shutdown belt-and-braces; per-tab teardown normally happens through
+// HandleTabClosed). Idempotent.
 func (m *Manager) CloseAll() {
 	m.mu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(m.runs))
+	all := make([][]*ssh.Client, 0, len(m.clients))
 	for id, c := range m.runs {
 		cancels = append(cancels, c)
 		delete(m.runs, id)
 		delete(m.prev, id)
 	}
+	for id, cs := range m.clients {
+		all = append(all, cs)
+		delete(m.clients, id)
+	}
 	m.mu.Unlock()
 	for _, c := range cancels {
 		c()
+	}
+	for _, cs := range all {
+		closeClients(cs)
 	}
 }
 
@@ -199,6 +236,15 @@ func (m *Manager) tick(ctx context.Context, tabID string) {
 		cancel()
 		switch {
 		case err != nil:
+			// A Stop/restart canceled ctx while the exec was in flight
+			// (e.g. the old dedicated connection was released): exit
+			// without counting a failure — never let a stale run kill a
+			// newer one via the self-stop path.
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			failures++
 			if failures >= maxConsecutiveFailures {
 				m.Stop(tabID)
@@ -223,24 +269,36 @@ func (m *Manager) tick(ctx context.Context, tabID string) {
 	}
 }
 
-// runExec resolves the tab's client through the provider and runs the
-// collection script with the ticker's default execFn.
+// runExec runs the collection script over the tab's DEDICATED connection
+// with the ticker's default execFn.
 func (m *Manager) runExec(ctx context.Context, tabID, script string) ([]byte, error) {
-	prov := m.provider()
-	if prov == nil {
-		return nil, ErrNoProvider
+	cs := m.clientsFor(tabID)
+	if len(cs) == 0 {
+		return nil, errors.New("monitor: dedicated connection missing")
 	}
-	client, err := prov.SSHClient(tabID)
-	if err != nil {
-		return nil, err
-	}
-	return m.execFn()(ctx, client, script)
+	return m.execFn()(ctx, cs[len(cs)-1], script)
 }
 
-func (m *Manager) provider() TabProvider {
+func (m *Manager) dialer() Dialer {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.prov
+	return m.dial
+}
+
+func (m *Manager) clientsFor(tabID string) []*ssh.Client {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.clients[tabID]
+}
+
+// closeClients closes a dedicated hop chain last→first (target first).
+// Guards nil entries (unit-test placeholder clients).
+func closeClients(cs []*ssh.Client) {
+	for i := len(cs) - 1; i >= 0; i-- {
+		if cs[i] != nil {
+			cs[i].Close()
+		}
+	}
 }
 
 func (m *Manager) execFn() execFn {

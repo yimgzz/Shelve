@@ -2,7 +2,7 @@ package monitor
 
 // Unit tests for plan P004: parser, delta math, formatters and the Manager
 // lifecycle (Start/Stop/HandleTabClosed/failure-stop) against a fake
-// TabProvider + injected execFn — no SSH server needed.
+// Dialer + injected execFn — no SSH server needed.
 
 import (
 	"context"
@@ -45,17 +45,17 @@ tmpfs            64M     0   64M   0% /dev
 DFH_END
 `
 
-// fakeProvider returns a non-nil-free client for known tabIDs (execFn is
-// injected, so the client itself is never used).
-type fakeProvider struct {
+// fakeDialer returns a placeholder client slice for known tabIDs (execFn is
+// injected, so the clients themselves are never used).
+type fakeDialer struct {
 	tabIDs map[string]bool
 }
 
-func (f *fakeProvider) SSHClient(tabID string) (*ssh.Client, error) {
+func (f *fakeDialer) DialMonitorClient(tabID string) ([]*ssh.Client, error) {
 	if !f.tabIDs[tabID] {
 		return nil, errors.New("monitor: unknown tab")
 	}
-	return nil, nil
+	return []*ssh.Client{nil}, nil
 }
 
 // recEmitter records monitor:metrics payloads in order.
@@ -80,11 +80,11 @@ func (r *recEmitter) snapshot() []MetricsPayload {
 	return append([]MetricsPayload(nil), r.events...)
 }
 
-// newTestManager wires a Manager over a fake provider with fast knobs.
-func newTestManager(t *testing.T, prov *fakeProvider, emit *recEmitter) *Manager {
+// newTestManager wires a Manager over a fake dialer with fast knobs.
+func newTestManager(t *testing.T, d *fakeDialer, emit *recEmitter) *Manager {
 	t.Helper()
 	m := New(emit)
-	m.Attach(prov)
+	m.Attach(d)
 	m.Interval = 50 * time.Millisecond
 	m.ExecTimeout = time.Second
 	return m
@@ -227,7 +227,7 @@ func TestFormatUptime(t *testing.T) {
 
 func TestManagerEmitsBaselineThenDeltas(t *testing.T) {
 	emit := &recEmitter{}
-	m := newTestManager(t, &fakeProvider{tabIDs: map[string]bool{"t1": true}}, emit)
+	m := newTestManager(t, &fakeDialer{tabIDs: map[string]bool{"t1": true}}, emit)
 
 	var calls int
 	m.exec = func(context.Context, *ssh.Client, string) ([]byte, error) {
@@ -282,7 +282,7 @@ func TestManagerEmitsBaselineThenDeltas(t *testing.T) {
 
 func TestManagerStopEndsEmissions(t *testing.T) {
 	emit := &recEmitter{}
-	m := newTestManager(t, &fakeProvider{tabIDs: map[string]bool{"t1": true}}, emit)
+	m := newTestManager(t, &fakeDialer{tabIDs: map[string]bool{"t1": true}}, emit)
 	m.exec = func(context.Context, *ssh.Client, string) ([]byte, error) {
 		return []byte(sampleOut1), nil
 	}
@@ -306,7 +306,7 @@ func TestManagerStopEndsEmissions(t *testing.T) {
 }
 
 func TestManagerStartUnknownTabFails(t *testing.T) {
-	m := newTestManager(t, &fakeProvider{tabIDs: map[string]bool{}}, &recEmitter{})
+	m := newTestManager(t, &fakeDialer{tabIDs: map[string]bool{}}, &recEmitter{})
 	if err := m.Start("nope"); err == nil {
 		t.Fatal("Start on an unknown tab must fail")
 	}
@@ -314,7 +314,7 @@ func TestManagerStartUnknownTabFails(t *testing.T) {
 
 func TestManagerHandleTabClosedIsIdempotentAndStops(t *testing.T) {
 	emit := &recEmitter{}
-	m := newTestManager(t, &fakeProvider{tabIDs: map[string]bool{"t1": true}}, emit)
+	m := newTestManager(t, &fakeDialer{tabIDs: map[string]bool{"t1": true}}, emit)
 	m.exec = func(context.Context, *ssh.Client, string) ([]byte, error) {
 		return []byte(sampleOut1), nil
 	}
@@ -339,7 +339,7 @@ func TestManagerHandleTabClosedIsIdempotentAndStops(t *testing.T) {
 
 func TestManagerStopsSelfAfterConsecutiveFailures(t *testing.T) {
 	emit := &recEmitter{}
-	m := newTestManager(t, &fakeProvider{tabIDs: map[string]bool{"t1": true}}, emit)
+	m := newTestManager(t, &fakeDialer{tabIDs: map[string]bool{"t1": true}}, emit)
 	m.Interval = 10 * time.Millisecond
 	m.exec = func(context.Context, *ssh.Client, string) ([]byte, error) {
 		return nil, errors.New("boom")
@@ -363,7 +363,7 @@ func TestManagerStopsSelfAfterConsecutiveFailures(t *testing.T) {
 
 func TestManagerCloseAll(t *testing.T) {
 	emit := &recEmitter{}
-	m := newTestManager(t, &fakeProvider{tabIDs: map[string]bool{"t1": true}}, emit)
+	m := newTestManager(t, &fakeDialer{tabIDs: map[string]bool{"t1": true}}, emit)
 	m.exec = func(context.Context, *ssh.Client, string) ([]byte, error) {
 		return []byte(sampleOut1), nil
 	}

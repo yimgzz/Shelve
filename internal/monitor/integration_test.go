@@ -21,13 +21,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// liveProvider is a TabProvider backed by a real SSH client to the test box.
-type liveProvider struct {
+// liveDialer is a Dialer backed by a real SSH client to the test box.
+type liveDialer struct {
 	cli *ssh.Client
 }
 
-func (p *liveProvider) SSHClient(string) (*ssh.Client, error) {
-	return p.cli, nil
+func (d *liveDialer) DialMonitorClient(string) ([]*ssh.Client, error) {
+	return []*ssh.Client{d.cli}, nil
 }
 
 // boxEmitter records monitor:metrics payloads in order (integration-local
@@ -104,7 +104,7 @@ func TestMonitorCollectsRealMetrics(t *testing.T) {
 
 	emit := &boxEmitter{}
 	m := New(emit)
-	m.Attach(&liveProvider{cli: cli})
+	m.Attach(&liveDialer{cli: cli})
 	m.Interval = 200 * time.Millisecond
 	m.ExecTimeout = 5 * time.Second
 

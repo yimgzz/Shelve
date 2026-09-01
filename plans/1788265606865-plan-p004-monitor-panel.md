@@ -229,3 +229,35 @@ flowchart LR
 - `monitoringEnabled` defaults to ON, is toggleable in Settings, presence-aware on load, and honored at runtime (bar + backend ticker stop when off).
 - Ticker lifecycle is fully tied to tab state: no leaks on tab close, switch, lock, or app exit (`-race` clean).
 - All four make gates pass from a clean container; README documents the feature and its Linux-only, read-only-command model.
+
+---
+
+## Addendum 2026-09-01 — dedicated monitoring connection (post-implementation fix)
+
+**Deviation from D1:** the exec is no longer run over the tab's existing
+final-hop connection. User-visible bug: with an active `tail -f`, terminal
+output stuttered every 2 s — the monitor exec on the shared connection
+paused PTY data delivery for up to seconds (verified via pump read-gap
+instrumentation). Fix: the monitor opens a **dedicated SSH connection** to
+the final hop per Start (`sshengine.Manager.DialMonitorClient`, reusing the
+same dial chain + auth/passphrase caches and a separate `tabID+"-monitor"`
+connID), so metric execs never contend with the PTY channel.
+
+Consequences:
+- `monitor.Manager` now talks to the engine through the structural `Dialer`
+  interface (`DialMonitorClient(tabID) ([]*ssh.Client, error)`, all hop
+  clients owned and closed by the monitor on Stop/tab-close/shutdown)
+  instead of `TabProvider.SSHClient`. `SSHClient` remains for SFTP.
+- Start dials synchronously (auth errors surface immediately to the frontend
+  toast); the dedicated conn is released on Stop/HandleTabClosed/CloseAll
+  and on restart.
+- The `tick` loop now checks `ctx.Done()` before counting a failure, so a
+  Stop/restart releasing the connection mid-exec can never let a stale run
+  kill a newer one via the self-stop path.
+- Unit tests use a fake `Dialer`; the integration test passes a real client
+  through a `liveDialer`. New engine test
+  [`internal/sshengine/monitor_client_test.go`](../internal/sshengine/monitor_client_test.go)
+  asserts the dedicated client is independently usable and coexists with the
+  live PTY.
+- Still no new network endpoints beyond the user's own SSH hosts
+  (master §8.9); commands stay read-only and static.

@@ -8,8 +8,10 @@ import (
 // MonitorService exposes the per-tab system monitor to the frontend (plan
 // P004). Only the ACTIVE tab is monitored at a time: the frontend calls
 // Start when the active tab turns ready and Stop when it switches/closes or
-// the monitoring setting is disabled. The monitor rides the tab's existing
-// SSH connection (master plan §2 A5); commands are read-only.
+// the monitoring setting is disabled. The monitor runs over a DEDICATED SSH
+// connection to the tab's final hop (engine DialMonitorClient) — fully
+// independent of the terminal's PTY channel, so metric execs can never
+// stall terminal output; commands are read-only.
 type MonitorService struct {
 	vault *vault.Vault
 	mon   *monitor.Manager

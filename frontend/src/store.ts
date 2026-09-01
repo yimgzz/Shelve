@@ -42,6 +42,8 @@ export interface Settings {
    themeVariant: string;
    autoLockMinutes: number;
     sftpBrowserEnabled: boolean;
+    /** Bottom-bar system monitor (plan P004). Defaults to ON. */
+    monitoringEnabled: boolean;
     terminal: TerminalSettings;
     textEditorCommand: string;
     /** Global SFTP browser start path ("~" default). Plan P002. */
@@ -160,6 +162,27 @@ export interface SftpTransfer {
     finished: boolean;
 }
 
+/**
+ * Latest system-monitor snapshot for a tab (plan P004, monitor:metrics).
+ * Raw numbers only — formatting (MB/GB/TB, uptime) happens in the
+ * monitor-bar component. `updatedAt` drives the stale-dimming heuristic.
+ */
+export interface MonitorMetrics {
+    hostname: string;
+    cpuPercent: number;
+    memUsedBytes: number;
+    memTotalBytes: number;
+    netUpBps: number;
+    netDownBps: number;
+    uptimeSeconds: number;
+    diskUsedPct: number;
+    diskRoot: string;
+    /** Full `df -h` output for the hover tooltip. */
+    dfText: string;
+    /** Epoch ms of the last monitor:metrics event for this tab. */
+    updatedAt: number;
+}
+
 export interface StoreState {
     settings: Settings;
     vaultState: VaultState;
@@ -199,6 +222,11 @@ export interface StoreState {
      * Never persisted.
      */
     forwards: Record<string, ForwardDTO[]>;
+    /**
+     * tabID → latest system-monitor snapshot (monitor:metrics events, plan
+     * P004), rendered by the bottom monitor bar. Never persisted.
+     */
+    monitor: Record<string, MonitorMetrics>;
 }
 
 export const DEFAULT_LEFT_WIDTH = 320;
@@ -210,8 +238,10 @@ export const initialState: StoreState = {
         autoLockMinutes: 0,
         // Phase 5d: the SFTP browser is on by default (mirrors the backend
         // default; AppService.GetSettings() at boot overrides with the
-        // persisted value via toSettings).
+        // persisted value via toSettings). Same rule for the plan-P004
+        // system monitor.
         sftpBrowserEnabled: true,
+        monitoringEnabled: true,
         terminal: { fontFamily: "monospace", fontSize: 13, scrollback: 10000 },
         textEditorCommand: "xdg-open",
         sftpInitialPath: "~",
@@ -230,6 +260,7 @@ export const initialState: StoreState = {
     pendingSessions: {},
     forwards: {},
     sftpTransfers: {},
+    monitor: {},
 };
 
 type Listener = (state: StoreState) => void;
@@ -362,7 +393,9 @@ class Store {
         delete forwards[tabID];
         const sftpTransfers = { ...this.state.sftpTransfers };
         delete sftpTransfers[tabID];
-        this.set({ tabs: remaining, activeTabID: nextActive, forwards, sftpTransfers });
+        const monitor = { ...this.state.monitor };
+        delete monitor[tabID];
+        this.set({ tabs: remaining, activeTabID: nextActive, forwards, sftpTransfers, monitor });
     }
 
     /** Cache an ssh:forward lifecycle event for a tab (latest state per spec). */
@@ -388,6 +421,11 @@ class Store {
             list.push(t);
         }
         this.set({ sftpTransfers: { ...this.state.sftpTransfers, [tabID]: list } });
+    }
+
+    /** Cache the latest monitor snapshot for a tab (monitor:metrics, P004). */
+    setMonitorMetrics(tabID: string, m: MonitorMetrics): void {
+        this.set({ monitor: { ...this.state.monitor, [tabID]: m } });
     }
 
     /** Drop a tab's transfer cache (called when the tab closes). */

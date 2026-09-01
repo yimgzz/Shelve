@@ -40,6 +40,7 @@ func main() {
 			application.NewService(a.CredentialService()),
 			application.NewService(a.TerminalService()),
 			application.NewService(a.SftpService()),
+			application.NewService(a.MonitorService()),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,

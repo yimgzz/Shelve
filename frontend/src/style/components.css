@@ -1061,3 +1061,82 @@
     gap: 6px;
     flex-shrink: 0;
 }
+
+/* ---------- System monitor bar (plan P004) ---------- */
+
+.mon-hostname {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.mon-item {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.mon-label {
+    color: var(--text-dim);
+}
+
+.mon-value {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.mon-value.stale,
+.mon-hostname.stale {
+    color: var(--text-dim);
+    opacity: 0.6;
+}
+
+/* Thin 2 px gauge track + fill; warn ≥80 %, crit ≥95 %. */
+.mon-gauge {
+    position: relative;
+    display: inline-block;
+    width: 46px;
+    height: 4px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--text-dim) 22%, transparent);
+    overflow: hidden;
+}
+
+.mon-gauge-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 2px;
+    background: var(--ok);
+    transition: width 400ms ease;
+}
+
+.mon-gauge-fill.warn {
+    background: var(--warn);
+}
+
+.mon-gauge-fill.crit {
+    background: var(--error);
+}
+
+/* Disk item: hover tooltip with the full df -h listing. Visibility and
+   position (fixed, above the item) are driven by JS in monitor-bar.ts so
+   the tooltip escapes the status band's overflow clipping. */
+.mon-disk .mon-tooltip {
+    display: none;
+    z-index: 60;
+    min-width: 260px;
+    max-width: 520px;
+    max-height: 40vh;
+    overflow: auto;
+    padding: 8px 10px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre;
+    cursor: default;
+}

@@ -174,6 +174,17 @@ export function openSettingsDialog(): void {
     sftpWrap.classList.add("settings-check-wrap");
     general.appendChild(sftpWrap);
 
+    // Plan P004: bottom-bar system monitor (hostname/CPU/RAM/net/uptime/df).
+    const monCheck = document.createElement("input");
+    monCheck.type = "checkbox";
+    monCheck.className = "settings-check";
+    monCheck.checked = current.monitoringEnabled;
+    const monWrap = settingField("System monitoring", monCheck, {
+        hint: "Shows hostname, CPU, RAM, network, uptime and disk usage under the terminal.",
+    });
+    monWrap.classList.add("settings-check-wrap");
+    general.appendChild(monWrap);
+
     const sftpPath = document.createElement("input");
     sftpPath.type = "text";
     sftpPath.className = "input mono";
@@ -296,6 +307,7 @@ export function openSettingsDialog(): void {
                 themeVariant: selVariant,
                 autoLockMinutes: clamp(Math.floor(Number(autoLock.value) || 0), 0, 60 * 24),
                 sftpBrowserEnabled: sftpCheck.checked,
+                monitoringEnabled: monCheck.checked,
                 terminal: {
                     fontFamily: fontFamily.value.trim() || "monospace",
                     fontSize: clamp(Math.round(Number(fontSize.value) || 13), 8, 24),

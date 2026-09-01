@@ -19,7 +19,7 @@ import { renderSftpPanel } from "./sftp-panel";
 import { openGearMenu } from "./gear";
 import { renderTabStrip } from "./tabs";
 import { renderTerminalView } from "./terminal-view";
-import { renderStatusBar } from "./statusbar";
+import { renderMonitorBar } from "./monitor-bar";
 
 const MIN_LEFT = 240;
 const MAX_LEFT = 480;
@@ -204,9 +204,10 @@ export function renderShell(root: HTMLElement): void {
 
     root.appendChild(right);
 
-    // ---- Status bar (active tab: user@host via jumps + forward summary) ----
+    // ---- Bottom monitor bar (plan P004): hostname/CPU/RAM/net/uptime/disk
+    // for the active ready tab; replaced the Phase 4c user@host status bar.
     const status = document.createElement("footer");
     status.className = "status-band";
     root.appendChild(status);
-    renderStatusBar(status);
+    renderMonitorBar(status);
 }

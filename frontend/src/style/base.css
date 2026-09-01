@@ -1,8 +1,9 @@
 /* Shelve — reset + layout grid (master plan §6 Layout).
    body is a full-viewport grid: left panel | 4px splitter | right pane,
-   with a 22px status-band row at the bottom. The left panel and splitter
-   span both rows so the bottom strip under the tree shares the same
-   --bg-panel color as the status band (no bare --bg gap in the corner). */
+   with a 30px status-band row at the bottom (hosts the plan-P004 system
+   monitor bar). The left panel and splitter span both rows so the bottom
+   strip under the tree shares the same --bg-panel color as the status band
+   (no bare --bg gap in the corner). */
 
 * {
     box-sizing: border-box;
@@ -17,7 +18,7 @@ body {
 body {
     display: grid;
     grid-template-columns: var(--left-w, 320px) 4px 1fr;
-    grid-template-rows: 1fr 22px;
+    grid-template-rows: 1fr 30px;
     grid-template-areas:
         "left split right"
         "left split status";
@@ -102,7 +103,7 @@ body {
     grid-area: status;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
     padding: 0 10px;
     font-size: 12px;
     color: var(--text-dim);
@@ -110,16 +111,6 @@ body {
     border-top: 1px solid var(--border);
     white-space: nowrap;
     overflow: hidden;
-}
-
-/* Port-forward summary (Phase 4c status bar). */
-.status-band .fwd {
-    color: var(--text-dim);
-}
-
-.status-band .fwd.failed {
-    color: var(--error);
-    opacity: 0.85;
 }
 
 button,

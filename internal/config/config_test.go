@@ -197,6 +197,53 @@ func TestLoadSftpBrowserEnabledPresenceAware(t *testing.T) {
 	}
 }
 
+// TestLoadMissingFileMonitoringEnabledDefaultTrue (plan P004): a fresh
+// config dir (no settings.json) yields the monitoring default — ON.
+func TestLoadMissingFileMonitoringEnabledDefaultTrue(t *testing.T) {
+	isolatedXDG(t)
+	s, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !s.MonitoringEnabled {
+		t.Fatal("missing settings.json must default monitoringEnabled to true")
+	}
+}
+
+// TestLoadMonitoringEnabledPresenceAware (plan P004): a settings.json that
+// never persisted the flag is treated as enabled; an explicit `false`
+// (user disabled it) wins; an explicit `true` is kept. Mirrors the
+// phase-5d sftpBrowserEnabled rule.
+func TestLoadMonitoringEnabledPresenceAware(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"absent key → enabled", `{"theme":"dark"}`, true},
+		{"explicit false wins", `{"monitoringEnabled":false}`, false},
+		{"explicit true kept", `{"monitoringEnabled":true}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolatedXDG(t)
+			if err := os.MkdirAll(Path(), DirPerm); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(File(SettingsFileName), []byte(tc.raw), FilePerm); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got.MonitoringEnabled != tc.want {
+				t.Fatalf("monitoringEnabled = %v, want %v", got.MonitoringEnabled, tc.want)
+			}
+		})
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	isolatedXDG(t)
 	s := DefaultSettings()
@@ -204,6 +251,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	s.ThemeVariant = "catppuccin-mocha"
 	s.AutoLockMinutes = 15
 	s.SftpBrowserEnabled = true
+	s.MonitoringEnabled = false
 	s.SftpInitialPath = "/srv/data"
 	s.SftpOpenCommand = "xdg-open --raw"
 	s.Terminal.FontSize = 14
@@ -334,8 +382,8 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 	}
 	for k := range m {
 		switch k {
-		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "terminal",
-			"textEditorCommand", "sftpInitialPath", "sftpOpenCommand", "window":
+		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "monitoringEnabled",
+			"terminal", "textEditorCommand", "sftpInitialPath", "sftpOpenCommand", "window":
 		default:
 			t.Fatalf("unexpected settings key %q", k)
 		}

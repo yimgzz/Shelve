@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"shelve/internal/config"
+	"shelve/internal/monitor"
 	"shelve/internal/sftp"
 	"shelve/internal/sshengine"
 	"shelve/internal/sshx/knownhosts"
@@ -33,6 +34,7 @@ type App struct {
 	store   *store.Store
 	engine  *sshengine.Manager
 	sftpMgr *sftp.Manager
+	monMgr  *monitor.Manager
 
 	appService        *wailsvc.AppService
 	vaultService      *wailsvc.VaultService
@@ -40,6 +42,7 @@ type App struct {
 	credentialService *wailsvc.CredentialService
 	terminalService   *wailsvc.TerminalService
 	sftpService       *wailsvc.SftpService
+	monitorService    *wailsvc.MonitorService
 	emitter           *wailsvc.LateEmitter
 }
 
@@ -76,7 +79,18 @@ func New() (*App, error) {
 	// registers its per-tab closer so clients die with their tab.
 	sftpMgr := sftp.New(config.File(config.TmpDirName), emit)
 	sftpMgr.Attach(engine)
-	engine.OnTabClosed(sftpMgr.HandleTabClosed)
+
+	// Plan P004: per-tab system monitor (active-tab only; lifecycle driven
+	// by the frontend via MonitorService.Start/Stop). Also rides the engine
+	// connections and registers its per-tab closer so ticker goroutines die
+	// with their tab. The engine holds ONE OnTabClosed hook, so the two
+	// closers are composed here (plan P004 D3).
+	monMgr := monitor.New(emit)
+	monMgr.Attach(engine)
+	engine.OnTabClosed(func(tabID string) {
+		sftpMgr.HandleTabClosed(tabID)
+		monMgr.HandleTabClosed(tabID)
+	})
 
 	// Stale sweep on start: a previous crash could have left editor temps in
 	// tmp/ (master plan §8.8). Single-instance app (A7) → safe to delete all.
@@ -89,6 +103,7 @@ func New() (*App, error) {
 		store:             st,
 		engine:            engine,
 		sftpMgr:           sftpMgr,
+		monMgr:            monMgr,
 		emitter:           emit,
 		appService:        wailsvc.NewAppService(Version),
 		vaultService:      wailsvc.NewVaultService(v, st, engine, sftpMgr, emit),
@@ -96,6 +111,7 @@ func New() (*App, error) {
 		credentialService: wailsvc.NewCredentialService(st, v),
 		terminalService:   wailsvc.NewTerminalService(st, v, engine),
 		sftpService:       wailsvc.NewSftpService(v, sftpMgr),
+		monitorService:    wailsvc.NewMonitorService(v, monMgr),
 	}, nil
 }
 
@@ -129,6 +145,11 @@ func (a *App) SftpService() *wailsvc.SftpService {
 	return a.sftpService
 }
 
+// MonitorService returns the Wails-facing system-monitor service.
+func (a *App) MonitorService() *wailsvc.MonitorService {
+	return a.monitorService
+}
+
 // SetEmitter wires the Wails-backed event emitter. Called from main.go
 // after the runtime is constructed (before Run).
 func (a *App) SetEmitter(e wailsvc.Emitter) {
@@ -148,6 +169,8 @@ func (a *App) Shutdown() {
 	if err := a.sftpMgr.Cleanup(); err != nil {
 		log.Printf("app: sftp cleanup on shutdown: %v", err)
 	}
+	// Stop any monitor ticker the per-tab teardown hook missed (idempotent).
+	a.monMgr.CloseAll()
 	if a.vault.IsUnlocked() {
 		if err := a.store.Flush(); err != nil {
 			log.Printf("app: flush on exit failed: %v", err)

@@ -7,11 +7,14 @@ A lightweight, fast, fully local SSH session manager. Go backend
 Sessions live in an encrypted vault (Argon2id + AES-256-GCM) under
 `$XDG_CONFIG_HOME/shelve`; no cloud, no telemetry, no accounts.
 
-**Status:** v1.1 — feature-complete (Phases 1–5d done, final gate closed). The
+**Status:** v1.1 — feature-complete (Phases 1–5d done, final gate closed) plus
+post-v1 refinements (terminal mouse behavior P003, system monitor P004). The
 app is a working SSH session manager: encrypted vault, session tree + live
-search, terminal tabs, and an SFTP browser that is **enabled by default**
+search, terminal tabs, an SFTP browser that is **enabled by default**
 (browse / upload / download / mkdir / rename / delete /
-edit-text-with-system-editor). Roadmap: `plans/` (master plan + phase plans).
+edit-text-with-system-editor), and a MobaXterm-style **system monitor bar**
+under the terminal (hostname / CPU / RAM / network / uptime / disk — enabled
+by default). Roadmap: `plans/` (master plan + phase plans).
 
 ## Prerequisites
 
@@ -78,8 +81,9 @@ If the window fails to open under `make dev`:
   in the container, run the binary on the host). The in-container hot-reload
   loop is then not available — but UI phases are QA'd via the host-run binary.
 - **Settings** (gear menu → Settings): theme, auto-lock minutes, SFTP browser
-  toggle, terminal font/size/scrollback, and the text-editor command are saved
-  to `settings.json`. Theme and terminal options apply live.
+  toggle, system-monitor toggle, terminal font/size/scrollback, and the
+  text-editor command are saved to `settings.json`. Theme and terminal
+  options apply live.
 - **SFTP temp files & edit logs:** the app keeps per-edit temp copies and
   editor logs under the config-directory `tmp/` (i.e.
   `$XDG_CONFIG_HOME/shelve/tmp/`). `tmp/edit-*.log` captures the
@@ -160,6 +164,27 @@ browser".
   returns to the browser. Connecting a session, or activating a ready tab,
   auto-shows the browser. When it is enabled but no session is ready, the
   tree shows with a hint line.
+
+## System monitor bar
+
+The bottom bar under the terminal shows a live snapshot of the **active**
+connection, MobaXterm-style, left to right: remote **hostname**, **CPU** load
+(percent gauge), **RAM** (used / total, units chosen automatically between
+MB/GB/TB), **upload** and **download** speeds (bytes/s, summed across all
+non-loopback interfaces), **uptime**, and **disk** usage of the main partition
+(`/`). Hover over the disk item to see the full `df -h` listing.
+
+- **Enabled by default.** Toggle it in Settings → General → "System
+  monitoring". When disabled the bar is empty and no metrics are collected.
+- **How it works:** every 2 seconds the app runs a small set of **read-only**
+  commands on the remote host over the active SSH connection
+  (`cat`/`awk`/`df` on `/proc/stat`, `/proc/meminfo`, `/proc/net/dev`,
+  `/proc/uptime`, `df`). CPU% and network speeds are computed as deltas
+  between consecutive samples. **Linux targets only** — on other hosts the
+  bar stays empty.
+- **Privileges:** the commands run as your SSH user (the same access the
+  terminal already has). No new network connections are made; nothing is
+  installed or changed on the remote host.
 
 ## Shortcuts
 
@@ -258,9 +283,15 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
 
 ## Troubleshooting
 
-- **Blank / hung window on some desktops** (NVIDIA/gbm): Wails sets
-  `WEBKIT_DISABLE_DMABUF_RENDERER=1` automatically; if the window is still
-  blank, export that variable manually before `make run` and relaunch.
+- **Blank / hung window on some desktops** (NVIDIA/gbm, Wayland sessions):
+  Wails sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` automatically; if the window
+  is still blank, launch `make run` with the renderer disabled explicitly —
+  on Wayland desktops the reliably-working invocation is:
+  ```
+  GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 make run
+  ```
+  (plain `WEBKIT_DISABLE_DMABUF_RENDERER=1 make run` also works on most
+  setups). Verified 2026-09-01 on ALT Linux + Wayland.
 - **In-container window fails under `make dev`** (GTK/DBus session limits inside
   the container, WebKit sandbox namespace limits — observed on GNOME/XWayland
   ALT Linux): use the always-supported workflow `make build` + `make run`

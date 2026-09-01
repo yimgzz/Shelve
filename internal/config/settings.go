@@ -35,6 +35,7 @@ type Settings struct {
 	ThemeVariant       string           `json:"themeVariant"` // "" = family default; concrete palette id
 	AutoLockMinutes    int              `json:"autoLockMinutes"`
 	SftpBrowserEnabled bool             `json:"sftpBrowserEnabled"`
+	MonitoringEnabled  bool             `json:"monitoringEnabled"` // bottom-bar system monitor (plan P004)
 	Terminal           TerminalSettings `json:"terminal"`
 	TextEditorCommand  string           `json:"textEditorCommand"`
 	SftpInitialPath    string           `json:"sftpInitialPath"` // global SFTP browser start path ("~" default)
@@ -44,12 +45,15 @@ type Settings struct {
 
 // DefaultSettings returns the schema defaults from master plan §4 (phase 5d
 // D5d-4: the SFTP browser is on by default; an explicit `false` wins).
+// Plan P004: the system monitor is ON by default too (same presence-aware
+// rule — an explicit `false` wins, see Load).
 func DefaultSettings() Settings {
 	return Settings{
 		Theme:              ThemeSystem,
 		ThemeVariant:       "",
 		AutoLockMinutes:    0,
 		SftpBrowserEnabled: true,
+		MonitoringEnabled:  true,
 		Terminal: TerminalSettings{
 			FontFamily: "monospace",
 			FontSize:   13,
@@ -92,6 +96,12 @@ func Load() (Settings, error) {
 	}
 	if _, ok := keys["sftpBrowserEnabled"]; !ok {
 		s.SftpBrowserEnabled = true
+	}
+	// Plan P004: same presence-aware rule for monitoringEnabled — a fresh
+	// install or a pre-P004 settings.json (no key persisted) is treated as
+	// enabled; an explicit `false` the user wrote is respected.
+	if _, ok := keys["monitoringEnabled"]; !ok {
+		s.MonitoringEnabled = true
 	}
 	s.normalize()
 	return s, nil

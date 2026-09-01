@@ -39,6 +39,7 @@ const EV = {
     TerminalExit: "terminal:exit",
     Forward: "ssh:forward",
     SftpProgress: "sftp:progress",
+    MonitorMetrics: "monitor:metrics",
     AppToast: "app:toast",
 };
 
@@ -53,7 +54,10 @@ function toSettings(raw: Record<string, unknown>): Settings {
        themeVariant: typeof raw.themeVariant === "string" ? raw.themeVariant : "",
        autoLockMinutes: Number(raw.autoLockMinutes ?? 0),
         sftpBrowserEnabled: Boolean(raw.sftpBrowserEnabled),
-        terminal: {
+       // Plan P004: presence-aware default ON (the backend also forces
+       // `true` when the key is absent, so `?? true` is belt-and-braces).
+       monitoringEnabled: Boolean(raw.monitoringEnabled ?? true),
+       terminal: {
             fontFamily: String(term.fontFamily ?? "monospace"),
             fontSize: Number(term.fontSize ?? 13),
             scrollback: Number(term.scrollback ?? 10000),
@@ -137,6 +141,7 @@ function handleEvent(name: string, payload: unknown): void {
                     pendingSessions: {},
                     forwards: {},
                     sftpTransfers: {},
+                    monitor: {},
                 });
                 void mount(next);
             }
@@ -201,6 +206,25 @@ function handleEvent(name: string, payload: unknown): void {
             });
             break;
         }
+        case EV.MonitorMetrics: {
+            // Bottom monitor bar cache (plan P004). Raw numbers; formatting
+            // happens in monitor-bar.ts.
+            const tabID = String(p.tabID ?? "");
+            store.setMonitorMetrics(tabID, {
+                hostname: String(p.hostname ?? ""),
+                cpuPercent: Number(p.cpuPercent ?? 0),
+                memUsedBytes: Number(p.memUsedBytes ?? 0),
+                memTotalBytes: Number(p.memTotalBytes ?? 0),
+                netUpBps: Number(p.netUpBps ?? 0),
+                netDownBps: Number(p.netDownBps ?? 0),
+                uptimeSeconds: Number(p.uptimeSeconds ?? 0),
+                diskUsedPct: Number(p.diskUsedPct ?? 0),
+                diskRoot: String(p.diskRoot ?? ""),
+                dfText: String(p.dfText ?? ""),
+                updatedAt: Date.now(),
+            });
+            break;
+        }
         default:
             console.warn(`[main] unhandled event ${name}`, payload);
     }
@@ -233,6 +257,7 @@ function subscribeEvents(): void {
     Events.On(EV.TerminalExit, (ev) => handleEvent(EV.TerminalExit, eventData(ev)));
     Events.On(EV.Forward, (ev) => handleEvent(EV.Forward, eventData(ev)));
     Events.On(EV.SftpProgress, (ev) => handleEvent(EV.SftpProgress, eventData(ev)));
+    Events.On(EV.MonitorMetrics, (ev) => handleEvent(EV.MonitorMetrics, eventData(ev)));
 
     // OS theme changes (only honored in system mode).
     Events.On(Common.ThemeChanged, () => {

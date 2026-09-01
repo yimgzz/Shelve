@@ -432,8 +432,9 @@ func (l *liveConn) fail(err error) {
 // the reader blocks on its signal channel until the buffer is drained.
 func (l *liveConn) pump() {
 	var (
-		mu      sync.Mutex
-		pending []byte
+		mu           sync.Mutex
+		pending      []byte
+		burstStarted bool
 	)
 	changed := make(chan struct{}, 1)
 	done := make(chan struct{})
@@ -444,6 +445,12 @@ func (l *liveConn) pump() {
 			n, err := l.ptyOut.Read(buf)
 			mu.Lock()
 			if n > 0 {
+				if len(pending) == 0 {
+					// A new output burst begins: mark it so the pump can
+					// flush immediately (interactive fast path) instead
+					// of waiting out the batching tick.
+					burstStarted = true
+				}
 				pending = append(pending, buf[:n]...)
 			}
 			mu.Unlock()
@@ -478,6 +485,8 @@ func (l *liveConn) pump() {
 		mu.Lock()
 		over := len(pending) > maxPendingBytes
 		big := len(pending) >= batchBytes
+		start := burstStarted
+		burstStarted = false
 		mu.Unlock()
 		switch {
 		case over:
@@ -489,6 +498,14 @@ func (l *liveConn) pump() {
 		case big:
 			flush()
 			continue
+		case start:
+			// Interactive fast path: the chunk that just arrived began a
+			// NEW burst, so flush at once instead of waiting for the
+			// 50 ms tick. Sustained streams (pending never empties
+			// between reads) still coalesce on the tick / 16 KB
+			// threshold, preserving the throughput contract (A6).
+			flush()
+			continue
 		}
 		select {
 		case <-done:
@@ -498,7 +515,9 @@ func (l *liveConn) pump() {
 		case <-ticker.C:
 			flush()
 		case <-changed:
-			// Small batch: wait out the 50 ms window before flushing.
+			// start was false (continuation of an ongoing stream): loop
+			// around and re-check burstStarted; a brand-new burst that
+			// arrived during the select is picked up on the next pass.
 		}
 	}
 }

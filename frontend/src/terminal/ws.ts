@@ -1,21 +1,29 @@
-// terminal/ws.ts — plan P005: same-origin WebSocket transport for terminal
-// I/O, bypassing the Wails event bridge (which starves keyboard input via
-// its promise-chain delivery and churns goroutines/threads under output
+// terminal/ws.ts — plan P005: a WebSocket transport for terminal I/O,
+// bypassing the Wails event bridge (which starves keyboard input via its
+// promise-chain delivery and churns goroutines/threads under output
 // floods). Browser WebSocket message handlers are ordinary macrotasks, so
 // keydown stays responsive even mid-flood; input rides the same socket in
 // the opposite direction.
+//
+// The webview page loads from the wails:// custom URI scheme, which cannot
+// carry WebSockets, so the socket lives on a dedicated loopback listener
+// started by the Go side (internal/termws). This module discovers its
+// address with a plain GET /termws-port on the wails:// asset handler and
+// connects to ws://127.0.0.1:<port>/terminal.
 //
 // Frame format (shared with internal/termws/frame.go):
 //
 //	[u8 tabIDLen][tabID ASCII][u32 payloadLen BE][payload bytes]
 //
-// The socket lives on the app's own HTTP transport at /terminal, so the URL
-// is derived from window.location — no port discovery, no mixed content.
+// Payloads above MAX_PAYLOAD are split into several frames by the sender.
 
 const MAX_TABID_LEN = 64;
+const MAX_PAYLOAD = 256 * 1024;
 
 let ws: WebSocket | null = null;
+let wsURL: string | null = null;
 let retryTimer: number | null = null;
+let resolving = false;
 /** Installed by main.ts: routes decoded output frames to the term pool. */
 let outputHandler: ((tabID: string, bytes: Uint8Array) => void) | null = null;
 
@@ -32,6 +40,14 @@ function encodeFrame(tabID: string, payload: Uint8Array): Uint8Array<ArrayBuffer
     new DataView(out.buffer).setUint32(1 + id.length, payload.length, false);
     out.set(payload, 1 + id.length + 4);
     return out;
+}
+
+function splitIntoFrames(tabID: string, payload: Uint8Array): Uint8Array<ArrayBuffer>[] {
+    const frames: Uint8Array<ArrayBuffer>[] = [];
+    for (let off = 0; off < payload.length; off += MAX_PAYLOAD) {
+        frames.push(encodeFrame(tabID, payload.subarray(off, off + MAX_PAYLOAD)));
+    }
+    return frames;
 }
 
 function handleMessage(ev: MessageEvent): void {
@@ -56,9 +72,27 @@ function handleMessage(ev: MessageEvent): void {
     outputHandler(id, view.subarray(off, off + size));
 }
 
+/** Discover the loopback terminal WebSocket address via GET /termws-port. */
+async function resolveTerminalWsUrl(): Promise<string> {
+    const ctl = new AbortController();
+    const timer = window.setTimeout(() => ctl.abort(), 5000);
+    try {
+        const resp = await fetch("/termws-port", { signal: ctl.signal });
+        if (!resp.ok) {
+            throw new Error(`termws-port: HTTP ${resp.status}`);
+        }
+        const addr = (await resp.text()).trim();
+        if (!addr) {
+            throw new Error("termws-port: empty address");
+        }
+        return `ws://${addr}/terminal`;
+    } finally {
+        window.clearTimeout(timer);
+    }
+}
+
 function connect(): void {
-    const proto = window.location.protocol === "https:" ? "wss://" : "ws://";
-    const socket = new WebSocket(`${proto}${window.location.host}/terminal`);
+    const socket = new WebSocket(wsURL!);
     socket.binaryType = "arraybuffer";
     socket.onmessage = handleMessage;
     socket.onopen = () => {
@@ -86,8 +120,30 @@ function scheduleRetry(): void {
     }
     retryTimer = window.setTimeout(() => {
         retryTimer = null;
-        connect();
+        void ensureConnected();
     }, 1000);
+}
+
+/** Resolve the address if needed, then connect. Never throws. */
+async function ensureConnected(): Promise<void> {
+    if (resolving) {
+        return;
+    }
+    resolving = true;
+    try {
+        if (wsURL === null) {
+            wsURL = await resolveTerminalWsUrl();
+        }
+        if (isTerminalWsActive()) {
+            return;
+        }
+        connect();
+    } catch {
+        wsURL = null; // re-resolve on the next retry
+        scheduleRetry();
+    } finally {
+        resolving = false;
+    }
 }
 
 /** True while the terminal socket is open. */
@@ -100,14 +156,16 @@ export function isTerminalWsActive(): boolean {
  * not open — callers fall back to the Wails service call.
  */
 export function sendInput(tabID: string, bytes: Uint8Array): boolean {
-    if (isTerminalWsActive()) {
-        ws!.send(encodeFrame(tabID, bytes));
-        return true;
+    if (!isTerminalWsActive()) {
+        return false;
     }
-    return false;
+    for (const frame of splitIntoFrames(tabID, bytes)) {
+        ws!.send(frame);
+    }
+    return true;
 }
 
 /** Start the terminal transport (call once at boot). */
 export function initTerminalWs(): void {
-    connect();
+    void ensureConnected();
 }

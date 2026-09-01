@@ -222,3 +222,128 @@ func TestFallbackWhenNeverConnected(t *testing.T) {
 		t.Fatal("fallback not invoked after grace")
 	}
 }
+
+func TestStartBindsLoopbackAndServes(t *testing.T) {
+	s := NewServer()
+	addr, err := s.Start("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if addr == "" {
+		t.Fatal("empty address")
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	// A second Start is idempotent and reports the same address.
+	if again, err := s.Start("127.0.0.1:0"); err != nil || again != addr {
+		t.Fatalf("second start = %q/%v, want %q/nil", again, err, addr)
+	}
+
+	c := dialWS(t, "ws://"+addr+"/terminal")
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	go s.OnTerminalData("t", []byte("loopback"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, data, err := c.Read(ctx)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if _, p, err := DecodeFrame(data); err != nil || string(p) != "loopback" {
+		t.Fatalf("frame decode: %v, payload %q", err, p)
+	}
+}
+
+func TestTermWSPortEndpoint(t *testing.T) {
+	s, base := startServer(t)
+
+	// Not started yet: the endpoint reports 503.
+	resp, err := http.Get(base + "/termws-port")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status before start = %d, want 503", resp.StatusCode)
+	}
+
+	addr, err := s.Start("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	resp, err = http.Get(base + "/termws-port")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != addr {
+		t.Fatalf("address = %q, want %q", got, addr)
+	}
+
+	// Non-GET is rejected.
+	req, _ := http.NewRequest(http.MethodPost, base+"/termws-port", nil)
+	r2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2.Body.Close()
+	if r2.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, want 405", r2.StatusCode)
+	}
+}
+
+func TestCloseStopsLoopbackListener(t *testing.T) {
+	s := NewServer()
+	addr, err := s.Start("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, _, err := websocket.Dial(ctx, "ws://"+addr+"/terminal", nil); err == nil {
+		t.Fatal("dial succeeded after Close")
+	}
+}
+
+func TestOriginPolicy(t *testing.T) {
+	_, base := startServer(t)
+
+	// A foreign web page origin must be rejected.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := websocket.Dial(ctx, base+"/terminal", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{"http://evil.example"}},
+	})
+	if err == nil {
+		t.Fatal("foreign origin was accepted")
+	}
+
+	// The wails:// custom-scheme page origin must be accepted.
+	c, _, err := websocket.Dial(ctx, base+"/terminal", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{"wails://wails"}},
+	})
+	if err != nil {
+		t.Fatalf("wails:// origin rejected: %v", err)
+	}
+	defer c.Close(websocket.StatusNormalClosure, "")
+
+	// An opaque ("null") origin — how WebKitGTK may serialize the page
+	// origin — must be accepted too.
+	c2, _, err := websocket.Dial(ctx, base+"/terminal", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{"null"}},
+	})
+	if err != nil {
+		t.Fatalf("null origin rejected: %v", err)
+	}
+	defer c2.Close(websocket.StatusNormalClosure, "")
+}

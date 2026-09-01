@@ -1,18 +1,20 @@
 // Package termws implements the plan P005 terminal I/O transport: a
-// same-origin WebSocket carrying raw terminal bytes between the engine and
-// the webview, bypassing the Wails v3 event bridge — which starves keyboard
-// input (promise-chain microtask starvation) and churns goroutines/threads
-// under sustained output floods (pthread_create EAGAIN).
+// WebSocket carrying raw terminal bytes between the engine and the webview,
+// bypassing the Wails v3 event bridge — which starves keyboard input
+// (promise-chain microtask starvation) and churns goroutines/threads under
+// sustained output floods (pthread_create EAGAIN).
 //
-// The socket lives on the app's existing HTTP transport (the asset handler
-// is wrapped in main.go), so the webview connects with
-// ws(s)://<location.host>/terminal and no separate port or credential is
-// needed. Exactly one connection is active (single-window app, master plan
-// A7); a second upgrade is rejected.
+// The webview loads from the wails:// custom URI scheme, which cannot carry
+// WebSockets, so the socket rides a dedicated 127.0.0.1 loopback listener
+// started by Server.Start; the frontend discovers the port via GET
+// /termws-port on the wails:// asset handler (see ServeHTTP) and connects
+// with ws://127.0.0.1:<port>/terminal. Exactly one connection is active
+// (single-window app, master plan A7); a second upgrade is rejected.
 //
-// Security (master plan §8.9, documented exception): the listener is the
-// app's own loopback-bound HTTP transport; Origin is validated against the
-// known local origins; frames are capped.
+// Security (master plan §8.9, documented exception): the listener is bound
+// to loopback only, the port is random per run and never leaves the app,
+// Origin is validated against the wails:// page origin (plus loopback and
+// opaque origins), and frames are capped.
 package termws
 
 import (

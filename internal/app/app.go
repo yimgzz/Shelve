@@ -77,15 +77,18 @@ func New() (*App, error) {
 	}
 	engine := sshengine.New(emit, kh)
 
-	// Plan P005: raw terminal I/O rides a same-origin WebSocket instead of
-	// the Wails event bridge (input starvation + thread churn under output
-	// floods). The transport lives on the app's HTTP transport (wrapped in
-	// main.go); here it is wired as the engine's data sink and input path.
+	// Plan P005: raw terminal I/O rides a WebSocket instead of the Wails
+	// event bridge (input starvation + thread churn under output floods).
+	// The webview loads from the wails:// custom scheme, which cannot carry
+	// WebSockets, so the socket lives on a dedicated 127.0.0.1 loopback
+	// listener; the frontend learns the port via GET /termws-port on the
+	// asset handler. Here the server is wired as the engine's data sink and
+	// input path.
 	termwsSrv := termws.NewServer()
 	termwsSrv.SetInputHandler(engine.WriteRaw)
-	// Safety net (plan P005): if the webview can never upgrade /terminal,
-	// output falls back to the legacy terminal:data events instead of
-	// stalling every tab on a socket that will never arrive.
+	// Safety net (plan P005): if the webview can never reach the loopback
+	// socket, output falls back to the legacy terminal:data events instead
+	// of stalling every tab on a socket that will never arrive.
 	termwsSrv.SetFallback(func(tabID string, data []byte) {
 		emit.Emit(sshengine.EventTerminalData, sshengine.TerminalDataPayload{
 			TabID: tabID,
@@ -93,6 +96,9 @@ func New() (*App, error) {
 		})
 	})
 	engine.SetDataSink(termwsSrv)
+	if _, err := termwsSrv.Start("127.0.0.1:0"); err != nil {
+		log.Printf("termws: loopback listener failed (%v); terminal I/O falls back to legacy events", err)
+	}
 
 	// SFTP per-tab clients ride on the engine's active connections (master
 	// plan §5). The manager is attached to the engine structurally and

@@ -45,11 +45,15 @@ func main() {
 		Description: "Lightweight local SSH session manager",
 		Icon:        appIcon,
 		Assets: application.AssetOptions{
-			// Plan P005: /terminal upgrades to the terminal I/O WebSocket
-			// (same-origin with the webview); everything else serves the
-			// embedded frontend as before.
+			// Plan P005: /termws-port provisions the loopback terminal
+			// WebSocket address to the frontend (the webview loads from the
+			// wails:// custom scheme, which cannot carry WebSockets, so the
+			// socket lives on a dedicated 127.0.0.1 listener started by the
+			// app). /terminal is also delegated for tests/back-compat;
+			// everything else serves the embedded frontend as before.
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/terminal" {
+				switch r.URL.Path {
+				case "/terminal", "/termws-port":
 					a.TerminalWS().ServeHTTP(w, r)
 					return
 				}

@@ -225,3 +225,49 @@ type TerminalDataSink interface {
 4. Composition root + AppService endpoint.
 5. Frontend WS client + xterm/main wiring + fallback.
 6. Docs (AGENTS.md) + `make test` + `make lint` + manual QA at 10K RPS.
+
+---
+
+## 9. Addendum (implemented, 2026-09-01) — loopback listener instead of same-origin mount
+
+**Status: implemented.** The as-built transport deviates from §3.6: the
+`/terminal` upgrade is NOT served on the app's own HTTP transport, because
+**the Linux webview loads from the `wails://` custom URI scheme, which cannot
+carry WebSockets** (Wails' own `stream.go` documents exactly this; the
+custom-scheme ResponseWriter has no Hijacker, and a browser cannot open a
+socket to a custom scheme at all). Symptoms of shipping the §3.6 version:
+session output blocked until `fallbackGrace` (slow 5–10 s session open), then
+the legacy-event bridge flood returned (`pthread_create EAGAIN` crash).
+
+### 9.1 What changed
+
+- **Loopback listener** ([`internal/termws/server.go`](../internal/termws/server.go)):
+  `Server.Start("127.0.0.1:0")` binds an ephemeral-port listener and serves
+  `/terminal` upgrades on it. `Close()` also closes the listener.
+- **Port provisioning**: `GET /termws-port` (same `ServeHTTP`, mounted on the
+  `wails://` asset handler in [`main.go`](../main.go)) returns the bound
+  address as plain text. The frontend fetches it and connects to
+  `ws://127.0.0.1:<port>/terminal`. No service/bindings change needed — the
+  Wails runtime already uses plain fetches to `wails://` URLs.
+- **Origin check**: `wails://*` (webview page origin, host varies by build),
+  `localhost:*`, `127.0.0.1:*`. A literal `Origin: null` (WebKitGTK's opaque
+  serialization of the custom-scheme page) is stripped before Accept —
+  coder/websocket cannot match it (`url.Parse("null")` has no host). Any
+  `http(s)://` web origin (DNS rebinding / CSRF) is rejected. A random
+  per-run port + Origin check keeps other local processes out.
+- **`fallbackGrace` 15 s → 3 s** (var, test-overridable): a broken socket now
+  degrades to legacy events quickly instead of stalling first output.
+- **Read limit** `maxPayload+1024` on accepted connections (input frames are
+  sender-capped).
+- **Diagnostics**: `log.Printf` on listener bind, webview connect, first
+  accept rejection, and fallback engagement — decisive for any future
+  transport issue.
+- **Frontend** ([`frontend/src/terminal/ws.ts`](../frontend/src/terminal/ws.ts)):
+  async address resolution with 5 s fetch timeout + 1 s retry loop (never
+  throws); input frames split to ≤256 KB before send.
+- **Tests**: loopback bind + serve round-trip, idempotent second `Start`,
+  `/termws-port` 503→200 + method check, `Close` stops the listener.
+
+Security (§8.9 of the master plan) still holds: loopback-only bind, ephemeral
+port provisioned only to the webview, Origin checked against the `wails://`
+page origin, capped frames.

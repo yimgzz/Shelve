@@ -79,6 +79,30 @@ function destroyTerminals(): void {
     TermPool.destroyAll();
 }
 
+/**
+ * Restore keyboard focus to the active terminal. Moving the window between
+ * monitors (WebKitGTK) moves DOM focus to <body>, silently killing xterm
+ * input — keydowns still reach the document but never the terminal's hidden
+ * textarea. Re-focus on window focus/visibility change; a form field
+ * (search, dialog) owns the keyboard and must not be stolen from.
+ */
+function restoreTerminalFocus(): void {
+    const st = store.getState();
+    if (st.vaultState !== "unlocked" || !st.activeTabID) {
+        return;
+    }
+    const ae = document.activeElement;
+    if (
+        ae instanceof HTMLElement &&
+        (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.tagName === "SELECT" || ae.isContentEditable)
+    ) {
+        return;
+    }
+    TermPool.activate(st.activeTabID);
+    // Late recovery for WebKitGTK canvas presentation after maximize/resize.
+    TermPool.recoverAll();
+}
+
 // Tracks whether the app shell is currently rendered. The unlock success
 // path is driven from BOTH the resolved Unlock promise and the
 // vault:state-changed event (H2); this guard makes the double signal
@@ -306,6 +330,34 @@ async function boot(): Promise<void> {
     // their document listeners exactly once at boot (listener-audit rule).
     initShortcuts();
     initAutoLock();
+
+    // Multi-monitor fix: restore xterm textarea focus after window moves
+    // (WebKitGTK drops DOM focus to <body>). window.focus + visibilitycover
+    // the move itself; the capture-phase keydown fallback catches cases where
+    // neither event fires (first keystroke refocuses, the next lands).
+    window.addEventListener("focus", restoreTerminalFocus);
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+            restoreTerminalFocus();
+        }
+    });
+    document.addEventListener(
+        "keydown",
+        (e) => {
+            if (store.getState().vaultState !== "unlocked") {
+                return;
+            }
+            const t = e.target as Element | null;
+            const ae = document.activeElement;
+            if (
+                (!t || t === document.body || t === document.documentElement) &&
+                (!ae || ae === document.body || ae === document.documentElement)
+            ) {
+                restoreTerminalFocus();
+            }
+        },
+        true,
+    );
 
     // Re-paint live terminals whenever the applied theme changes (mode,
     // variant, or OS theme switch in system mode). Plan P001 §5.

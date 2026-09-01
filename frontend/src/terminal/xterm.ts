@@ -52,6 +52,10 @@ interface Entry {
     ro: ResizeObserver | null;
     resizeTimer: number | null;
     inputBuf: string;
+    /** True while the user is deliberately reading scrollback (viewport
+     *  scrolled above the buffer bottom). Suppresses scroll-to-bottom after
+     *  fits so a resize never yanks the user out of history. */
+    userScrolledUp: boolean;
     // plan P003 (mouse copy/paste): the .term-xterm parent plus listener
     // bookkeeping so destroy() tears everything down leak-free.
     el: HTMLElement;
@@ -82,6 +86,220 @@ function flushInput(tabID: string, e: Entry): void {
     }
 }
 
+/** Guarded read of the renderer's CSS cell metrics (private API; the pinned
+ *  @xterm/xterm 5.5 typings do not expose `term.dimensions`). */
+function cellMetrics(e: Entry): { width: number; height: number } | null {
+    try {
+        const dims = (
+            e.term as unknown as {
+                _core?: { _renderService?: { dimensions?: { css?: { cell?: { width?: number; height?: number } } } } };
+            }
+        )._core?._renderService?.dimensions;
+        const w = dims?.css?.cell?.width;
+        const h = dims?.css?.cell?.height;
+        if (w && h) {
+            return { width: w, height: h };
+        }
+    } catch {
+        /* ignore */
+    }
+    return null;
+}
+
+/** Keep the prompt visible after a fit unless the user is deliberately
+ *  reading scrollback (onScroll sets userScrolledUp while the viewport is
+ *  above the buffer bottom). Mirrors xterm's own write()-time behavior:
+ *  output/geometry changes scroll to the bottom only when the user was
+ *  already there. */
+function ensureCursorVisible(e: Entry): void {
+    if (e.userScrolledUp) {
+        return;
+    }
+    try {
+        e.term.scrollToBottom();
+    } catch {
+        /* ignore */
+    }
+}
+
+/**
+ * Undo the FitAddon's container-padding over-count. FitAddon measures the
+ * parent (.term-xterm) computed height and subtracts only the xterm ELEMENT's
+ * padding — it never sees the 8px padding on .term-xterm itself. When the
+ * arithmetic leaves a fractional remainder, it emits one row too many; that
+ * last row (usually the shell prompt) overflows the content box and is
+ * clipped by overflow:hidden directly above the 30px monitor band.
+ *
+ * Fix: clamp rows to the true content-box height (clientHeight minus the
+ * container's vertical padding).
+ */
+function clampRowsToContainer(e: Entry): void {
+    try {
+        if (e.el.offsetParent === null) {
+            return; // hidden pane — zero-size container
+        }
+        const m = cellMetrics(e);
+        if (!m) {
+            return; // renderer unmeasured (mid-DPR transition); retried later
+        }
+        const style = window.getComputedStyle(e.el);
+        const padV = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+        const avail = e.el.clientHeight - padV;
+        if (avail < m.height) {
+            return; // degenerate; leave the fit result for activation to fix
+        }
+        const rows = Math.max(1, Math.floor(avail / m.height));
+        if (rows !== e.term.rows) {
+            e.term.resize(e.term.cols, rows);
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
+/** True when the xterm renderer is stuck: the IntersectionObserver render
+ *  pause is active, or cell metrics are unmeasured. WebKitGTK can leave the
+ *  terminal screen reported as non-intersecting after a window resize/move
+ *  (no follow-up observation fires) — xterm then keeps parsing output into
+ *  the buffer but never paints it: streaming and input look frozen. */
+function rendererStuck(e: Entry): boolean {
+    try {
+        const rs = (
+            e.term as unknown as { _core?: { _renderService?: { _isPaused?: boolean } } }
+        )._core?._renderService;
+        if (rs && rs._isPaused === true) {
+            return true;
+        }
+    } catch {
+        /* ignore */
+    }
+    return cellMetrics(e) === null;
+}
+
+/** Force the xterm renderer out of a stuck state after a resize/monitor
+ *  move: clear the IntersectionObserver render pause, re-measure chars and
+ *  repaint at the current devicePixelRatio (WebKitGTK does not reliably fire
+ *  the matchMedia resolution events xterm relies on for DPR changes), then
+ *  nudge WebKit to re-composite the canvas (visibility toggle, no layout
+ *  shift). Guarded: only touches private API inside try/catch. */
+function recoverRenderer(e: Entry): void {
+    try {
+        const rs = (
+            e.term as unknown as {
+                _core?: {
+                    _renderService?: {
+                        _isPaused?: boolean;
+                        _needsFullRefresh?: boolean;
+                        handleDevicePixelRatioChange?: () => void;
+                        handleCharSizeChanged?: () => void;
+                        refreshRows?: (start: number, end: number) => void;
+                        clearTextureAtlas?: () => void;
+                    };
+                };
+            }
+        )._core?._renderService;
+        if (!rs) {
+            return;
+        }
+        if (rs._isPaused === true) {
+            rs._isPaused = false;
+            rs._needsFullRefresh = false;
+        }
+        if (typeof rs.handleDevicePixelRatioChange === "function") {
+            rs.handleDevicePixelRatioChange();
+        } else if (typeof rs.handleCharSizeChanged === "function") {
+            rs.handleCharSizeChanged();
+        }
+        if (typeof rs.refreshRows === "function") {
+            rs.refreshRows(0, e.term.rows - 1);
+        }
+        if (typeof rs.clearTextureAtlas === "function") {
+            rs.clearTextureAtlas();
+        }
+        e.term.refresh(0, e.term.rows - 1);
+
+        const xel = e.term.element as HTMLElement | null;
+        if (xel) {
+            xel.style.visibility = "hidden";
+            void xel.offsetHeight; // force a synchronous reflow
+            requestAnimationFrame(() => {
+                xel.style.visibility = "";
+            });
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
+/** One fit cycle: recompute cols/rows (padding-corrected), keep the prompt
+ *  visible, and notify the pty of the final geometry. FitAddon no-ops while
+ *  the renderer reports zero cell metrics (unmeasured — e.g. mid resize), so
+ *  when the renderer looks stuck we recover it first and re-fit. */
+function doFit(tabID: string, e: Entry): void {
+    try {
+        e.fit.fit();
+    } catch {
+        return;
+    }
+    if (rendererStuck(e)) {
+        recoverRenderer(e);
+        try {
+            e.fit.fit();
+        } catch {
+            /* ignore */
+        }
+    }
+    clampRowsToContainer(e);
+    ensureCursorVisible(e);
+    void TerminalService.Resize(tabID, e.term.cols, e.term.rows).catch(() => {
+        /* ignore: tab teardown race */
+    });
+}
+
+/**
+ * Window-level resize net. Moving a window between monitors with different
+ * scale factors triggers a multi-step WM resize (size change, then a
+ * devicePixelRatio change that WebKitGTK does not reliably report through
+ * matchMedia). The per-container ResizeObserver debounce can win that race,
+ * leaving the terminal sized for an intermediate geometry that no later RO
+ * event corrects. Re-fit every live terminal 250 ms after the window
+ * settles. Installed once per app lifetime.
+ */
+let winResizeTimer: number | null = null;
+let winResizeHooked = false;
+function onWindowResize(): void {
+    if (winResizeTimer !== null) {
+        window.clearTimeout(winResizeTimer);
+    }
+    winResizeTimer = window.setTimeout(() => {
+        winResizeTimer = null;
+        for (const [id, e] of pool) {
+            // Maximize/monitor-move on HiDPI screens can leave the xterm
+            // renderer paused or WebKit's canvas composite stale; recover
+            // first, then settle the geometry.
+            recoverRenderer(e);
+            doFit(id, e);
+        }
+        // WebKitGTK can take longer than 250 ms to finish the surface
+        // reconfiguration after a big resize (maximize on a HiDPI monitor);
+        // one delayed second pass is cheap insurance against the renderer
+        // ending up paused / canvas composite going stale after the fact.
+        winResizeTimer = window.setTimeout(() => {
+            winResizeTimer = null;
+            for (const [, e] of pool) {
+                recoverRenderer(e);
+            }
+        }, 1000);
+    }, 250);
+}
+function hookWindowResize(): void {
+    if (winResizeHooked) {
+        return;
+    }
+    winResizeHooked = true;
+    window.addEventListener("resize", onWindowResize);
+}
+
 /** True when WebGL would run on a software rasterizer (llvmpipe, SwiftShader…). */
 function isSoftwareWebGL(): boolean {
     try {
@@ -104,15 +322,16 @@ function isSoftwareWebGL(): boolean {
 
 /**
  * True when the xterm canvas renderer should be used instead of the WebGL
- * addon. On Linux, WebKitGTK runs with the GPU dmabuf renderer disabled by
- * default (main.go workaround), so GL is software (llvmpipe/SwiftShader) and
- * the WebGL addon's full-grid repaints cost more than the incremental canvas
- * renderer — measured as keystroke echo latency. Elsewhere (macOS/Windows on
+ * addon. On Linux/WebKitGTK the canvas renderer is the reliable choice:
+ * the WebGL addon freezes input/streaming whenever the window moves between
+ * monitors with different scale factors (verified on multi-monitor X11), and
+ * on software GL (llvmpipe/SwiftShader) its full-grid repaints cost more
+ * than the incremental canvas renderer. Elsewhere (macOS/Windows on
  * accelerated stacks) the software-GL probe decides.
  */
 function useCanvasRenderer(): boolean {
     if (/Linux/i.test(navigator.userAgent)) {
-        return true; // WebKitGTK + WEBKIT_DISABLE_DMABUF_RENDERER=1 default
+        return true; // WebKitGTK: WebGL addon breaks on monitor moves
     }
     return isSoftwareWebGL();
 }
@@ -168,6 +387,7 @@ export const TermPool = {
             ro: null,
             resizeTimer: null,
             inputBuf: "",
+            userScrolledUp: false,
             el: parent,
             selecting: false,
             onDocMouseUp: null,
@@ -193,13 +413,12 @@ export const TermPool = {
         }
 
         term.open(parent);
-        try {
-            fit.fit();
-        } catch {
-            /* zero-sized container; fit again on activation */
-        }
+        doFit(tabID, entry);
 
-        // Debounced fit + pty resize on container size changes.
+        // Debounced fit + pty resize on container size changes. A second pass
+        // on the next frame catches the layout settling after a resize storm
+        // (the renderer may report unmeasured cell metrics on the first pass,
+        // making FitAddon no-op).
         const ro = new ResizeObserver(() => {
             if (entry.resizeTimer !== null) {
                 window.clearTimeout(entry.resizeTimer);
@@ -209,18 +428,31 @@ export const TermPool = {
                 if (pool.get(tabID) !== entry) {
                     return;
                 }
-                try {
-                    entry.fit.fit();
-                } catch {
-                    return;
-                }
-                void TerminalService.Resize(tabID, entry.term.cols, entry.term.rows).catch(() => {
-                    /* ignore: tab teardown race */
+                doFit(tabID, entry);
+                requestAnimationFrame(() => {
+                    if (pool.get(tabID) !== entry) {
+                        return;
+                    }
+                    doFit(tabID, entry);
                 });
             }, 150);
         });
         ro.observe(parent);
         entry.ro = ro;
+
+        // Track deliberate scroll-up so fits don't yank the user out of
+        // scrollback history (see ensureCursorVisible).
+        term.onScroll(() => {
+            try {
+                const buf = term.buffer.active;
+                entry.userScrolledUp = buf.viewportY < buf.baseY;
+            } catch {
+                /* ignore */
+            }
+        });
+
+        // One window-level resize listener for the whole pool (settled re-fit).
+        hookWindowResize();
 
         term.onData((data) => {
             entry.inputBuf += data;
@@ -312,11 +544,7 @@ export const TermPool = {
         if (!e) {
             return;
         }
-        try {
-            e.fit.fit();
-        } catch {
-            /* ignored */
-        }
+        doFit(tabID, e);
         e.term.focus();
     },
 
@@ -353,20 +581,24 @@ export const TermPool = {
         }
     },
 
+    /** Run the renderer recovery on every live instance (window focus after
+     *  a maximize/resize is a good late signal; harmless when healthy). */
+    recoverAll(): void {
+        for (const [, e] of pool) {
+            recoverRenderer(e);
+        }
+    },
+
     /**
      * Apply updated terminal settings to every live instance (Settings Save,
      * Phase 4d). `term.options.*` re-applies live; a fit keeps geometry sane.
      */
     applySettings(settings: TerminalSettings): void {
-        for (const e of pool.values()) {
+        for (const [id, e] of pool) {
             e.term.options.fontFamily = settings.fontFamily;
             e.term.options.fontSize = settings.fontSize;
             e.term.options.scrollback = settings.scrollback;
-            try {
-                e.fit.fit();
-            } catch {
-                /* zero-sized container; fit again on activation */
-            }
+            doFit(id, e);
         }
     },
 

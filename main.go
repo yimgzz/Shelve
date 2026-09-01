@@ -23,14 +23,21 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
-	// WebKitGTK blank-window workaround (master plan §11, README
-	// "Troubleshooting"): on some desktops (NVIDIA/gbm, Wayland sessions)
-	// the GPU dmabuf renderer produces an empty gray window. Default to
-	// disabling it — the webview falls back to software rendering, which
-	// is reliable everywhere. This covers EVERY launch path (make run,
-	// the AppImage, make dev) from one place. Users can still force it
-	// off by exporting WEBKIT_DISABLE_DMABUF_RENDERER=0 first.
-	if os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
+	// WebKitGTK renderer selection.
+	//
+	// Software-only rendering (WEBKIT_DISABLE_DMABUF_RENDERER=1) was the
+	// original default (master plan §11, README "Troubleshooting") as a
+	// blank-window workaround for GPU-problematic setups (NVIDIA/gbm,
+	// Wayland sessions). But it breaks canvas presentation when the window
+	// is moved between monitors with different scale factors on X11 — the
+	// terminal freezes (no repaints) until the window returns to the
+	// original screen (verified: enabling dmabuf removes the freeze).
+	//
+	// Fix: default to the GPU dmabuf renderer everywhere EXCEPT explicit
+	// Wayland sessions (the case the original workaround targeted). Users
+	// can still force either side via WEBKIT_DISABLE_DMABUF_RENDERER=0/1.
+	if os.Getenv("XDG_SESSION_TYPE") == "wayland" &&
+		os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
 		_ = os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
 	}
 

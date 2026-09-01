@@ -283,17 +283,37 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
 
 ## Troubleshooting
 
+- **Terminal freezes on a second monitor with a different scale factor**
+  (mixed-DPI X11: e.g. one 100 % screen + one 200 % screen — verified
+  2026-09-01). Moving or maximizing the window on the higher-DPI monitor can
+  stop input echo and streaming output from being painted, while the app
+  itself keeps running (keystrokes, transport and xterm rendering all
+  continue; only WebKitGTK's canvas presentation stalls). This is a
+  WebKitGTK limitation, not an app bug.
+  - What the app does about it: the GPU dmabuf renderer is enabled by default
+    on X11 (it fixes the freeze when *moving* between mixed-scale monitors);
+    terminal focus is restored after window moves; the fit logic clamps rows
+    to the container's real height (so the prompt line is never clipped under
+    the monitor bar).
+  - Remaining limitation: **maximizing** the window on the higher-DPI monitor
+    while a command streams output can still freeze presentation — there is no
+    reliable app-side workaround (the WebGL renderer is unusable on
+    WebKitGTK/mixed-DPI and makes moves worse; renderer-recovery passes don't
+    help). The practical fix is to make the scale factors uniform across
+    monitors (set all monitors to the same zoom/scale in the desktop display
+    settings), after which every scenario behaves normally.
 - **Blank / hung window on some desktops** (NVIDIA/gbm, Wayland sessions):
-  the app disables the WebKit dmabuf renderer **by default**
+  on explicit Wayland sessions the app disables the WebKit dmabuf renderer
   (`WEBKIT_DISABLE_DMABUF_RENDERER=1` is set at startup — covers `make run`,
   `make dev` and the AppImage alike). If you still get a blank window, force
   the X11 backend as well:
   ```
   GDK_BACKEND=x11 make run
   ```
-  (or `GDK_BACKEND=x11 ./bin/shelve-<version>-x86_64.AppImage`). To opt out
-  of the default workaround, export `WEBKIT_DISABLE_DMABUF_RENDERER=0` before
-  launching. Verified 2026-09-01 on ALT Linux + Wayland.
+  (or `GDK_BACKEND=x11 ./bin/shelve-<version>-x86_64.AppImage`). To force the
+  software renderer anywhere (X11 included), export
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1` before launching; to force the GPU
+  renderer on Wayland, export `WEBKIT_DISABLE_DMABUF_RENDERER=0`.
 - **In-container window fails under `make dev`** (GTK/DBus session limits inside
   the container, WebKit sandbox namespace limits — observed on GNOME/XWayland
   ALT Linux): use the always-supported workflow `make build` + `make run`

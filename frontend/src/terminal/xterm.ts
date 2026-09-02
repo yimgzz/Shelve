@@ -583,6 +583,20 @@ export const TermPool = {
             return;
         }
         doFit(tabID, e);
+        // WebKitGTK keeps compositing the pane's pre-hide surface after a tab
+        // switch (display:none → flex): xterm's renderer does not repaint the
+        // re-shown terminal on its own (the stale canvas layer shows the
+        // previous frame stretched until the first interaction forces a
+        // repaint). Force the recovery path — unpause + refresh + WebKit
+        // re-composite nudge — exactly like the window-resize path
+        // (onWindowResize), then repeat on the next frame to cover WebKit's
+        // late-layout timing.
+        recoverRenderer(e);
+        requestAnimationFrame(() => {
+            if (pool.get(tabID) === e) {
+                recoverRenderer(e);
+            }
+        });
         e.term.focus();
     },
 

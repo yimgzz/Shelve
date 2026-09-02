@@ -272,11 +272,24 @@ function renderStrip(): void {
 
         el.append(dot, label, close);
         strip.appendChild(el);
-
-        if (tab.id === activeTabID) {
-            el.scrollIntoView({ block: "nearest", inline: "nearest" });
-        }
     }
 
     stripHost.appendChild(strip);
+
+    // Reveal the active tab by scrolling ONLY the tab strip (never ancestor
+    // containers): mirrors scrollIntoView({inline:"nearest"}) via viewport
+    // rects, so unrelated scroll containers (the right pane, the page) are
+    // never scrolled as a side effect of a tab activation/rebuild.
+    if (activeTabID) {
+        const activeEl = strip.querySelector<HTMLElement>(`.tab[data-tab-id="${activeTabID}"]`);
+        if (activeEl) {
+            const sr = strip.getBoundingClientRect();
+            const er = activeEl.getBoundingClientRect();
+            if (er.left < sr.left) {
+                strip.scrollLeft += er.left - sr.left;
+            } else if (er.right > sr.right) {
+                strip.scrollLeft += er.right - sr.right;
+            }
+        }
+    }
 }

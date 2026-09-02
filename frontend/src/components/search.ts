@@ -9,6 +9,9 @@ import { store } from "../store";
 const DEBOUNCE_MS = 100;
 
 let searchInput: HTMLInputElement | null = null;
+/** Store subscription of the current mount; released before the next
+ *  renderSearch so lock/unlock remounts never accumulate listeners. */
+let searchUnsub: (() => void) | null = null;
 
 /** Focus the search box (used by the Ctrl+K/Ctrl+L shortcut in 4d). */
 export function focusSearch(): void {
@@ -18,6 +21,13 @@ export function focusSearch(): void {
 
 /** Render the search header into host. Call once per shell mount. */
 export function renderSearch(host: HTMLElement): void {
+    // Release the previous mount's subscription (the old DOM node is gone,
+    // but its store listener would otherwise persist forever — listener
+    // audit rule).
+    if (searchUnsub) {
+        searchUnsub();
+        searchUnsub = null;
+    }
     host.textContent = "";
 
     const wrap = document.createElement("div");
@@ -86,7 +96,7 @@ export function renderSearch(host: HTMLElement): void {
     wrap.append(input, clear);
     host.appendChild(wrap);
 
-    // Keep the subscription alive for the shell's lifetime. The host is
-    // torn down on lock/unlock remount; release there to avoid leaks.
-    (wrap as unknown as { __unsub?: () => void }).__unsub = unsub;
+    // Kept for the shell's lifetime; released at the top of the next
+    // renderSearch (lock/unlock remount) to avoid leaks.
+    searchUnsub = unsub;
 }

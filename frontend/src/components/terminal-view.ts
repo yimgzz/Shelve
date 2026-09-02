@@ -6,7 +6,7 @@
 // buttons ([Retry] → Reconnect, [Close tab]).
 
 import { store } from "../store";
-import type { Tab } from "../store";
+import type { Tab, TerminalSettings } from "../store";
 import { TermPool } from "../terminal/xterm";
 import { TerminalService } from "../../bindings/shelve/internal/wailsvc";
 
@@ -14,6 +14,15 @@ let paneHost: HTMLElement | null = null;
 let paneEl: HTMLElement | null = null;
 let unsub: (() => void) | null = null;
 let lastActive: string | null = null;
+/**
+ * Reference identity of the last reconcile inputs (tabs / activeTabID /
+ * settings.terminal). Guards reconcile against unrelated store churn
+ * (monitor metrics, sftp progress, search, tree) that would otherwise
+ * re-loop every pane/tab on every store set.
+ */
+let lastReconcileTabs: Tab[] | null = null;
+let lastReconcileActive: string | null = null;
+let lastReconcileTerm: TerminalSettings | null = null;
 
 interface Pane {
     el: HTMLElement;
@@ -134,6 +143,21 @@ function reconcile(): void {
     }
     const { tabs, activeTabID, settings } = store.getState();
 
+    // Skip all DOM work when nothing this view renders changed (reference
+    // identity comparison). The store mutates on many things the terminal
+    // view does not draw — monitor metrics, sftp progress, search queries,
+    // tree refreshes — so this guard removes the per-set pane/tab loops.
+    if (
+        lastReconcileTabs === tabs &&
+        lastReconcileActive === activeTabID &&
+        lastReconcileTerm === settings.terminal
+    ) {
+        return;
+    }
+    lastReconcileTabs = tabs;
+    lastReconcileActive = activeTabID;
+    lastReconcileTerm = settings.terminal;
+
     // Drop any "No open sessions" placeholder; re-added below when needed.
     paneEl.querySelector(".empty-state")?.remove();
 
@@ -201,6 +225,11 @@ export function renderTerminalView(host: HTMLElement): void {
     if (unsub) {
         unsub();
     }
+    // A fresh mount must always run the first reconcile, even when the store
+    // contents are unchanged since the previous mount (same references).
+    lastReconcileTabs = null;
+    lastReconcileActive = null;
+    lastReconcileTerm = null;
     unsub = store.subscribe(reconcile);
     reconcile();
 }

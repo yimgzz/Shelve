@@ -37,6 +37,12 @@ declare global {
 
 /** Persist the current left-panel width (debounced, partial update). */
 let saveTimer: number | null = null;
+/**
+ * Left-mode subscriber of the current shell mount. renderShell re-runs on
+ * every lock/unlock cycle; the previous subscription must be released or
+ * every unlock permanently adds one more listener (listener-audit rule).
+ */
+let leftModeUnsub: (() => void) | null = null;
 function persistLeftWidth(): void {
     const { settings } = store.getState();
     if (saveTimer !== null) {
@@ -50,6 +56,10 @@ function persistLeftWidth(): void {
 
 /** Render the app shell into the given root element. */
 export function renderShell(root: HTMLElement): void {
+    if (leftModeUnsub) {
+        leftModeUnsub();
+        leftModeUnsub = null;
+    }
     root.textContent = "";
 
     // ---- Left panel ----
@@ -137,9 +147,8 @@ export function renderShell(root: HTMLElement): void {
         btnSftp.style.display =
             st.settings.sftpBrowserEnabled && readyTab && !panel ? "" : "none";
     };
-    const leftModeUnsub = store.subscribe(applyLeftMode);
+    leftModeUnsub = store.subscribe(applyLeftMode);
     applyLeftMode();
-    void leftModeUnsub; // kept alive for the shell's lifetime
 
     root.appendChild(left);
 

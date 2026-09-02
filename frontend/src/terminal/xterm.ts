@@ -272,6 +272,14 @@ function doFit(tabID: string, e: Entry): void {
  */
 let winResizeTimer: number | null = null;
 let winResizeHooked = false;
+
+// recoverAll throttle (P007): recoverAll forces a full renderer recovery
+// pass over every pooled terminal. It is called from focus-recovery paths
+// that can fire on EVERY stray keydown while focus sits on <body>
+// (main.ts restoreTerminalFocus), so the heavy pass must be rate-limited.
+const RECOVER_ALL_THROTTLE_MS = 300;
+let lastRecoverAllAt = 0;
+
 function onWindowResize(): void {
     if (winResizeTimer !== null) {
         window.clearTimeout(winResizeTimer);
@@ -634,8 +642,15 @@ export const TermPool = {
     },
 
     /** Run the renderer recovery on every live instance (window focus after
-     *  a maximize/resize is a good late signal; harmless when healthy). */
+     *  a maximize/resize is a good late signal; harmless when healthy).
+     *  Rate-limited: focus-recovery paths may call this on every stray
+     *  keydown while focus sits on <body> (P007). */
     recoverAll(): void {
+        const now = Date.now();
+        if (now - lastRecoverAllAt < RECOVER_ALL_THROTTLE_MS) {
+            return;
+        }
+        lastRecoverAllAt = now;
         for (const [, e] of pool) {
             recoverRenderer(e);
         }

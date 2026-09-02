@@ -46,7 +46,8 @@ type Store struct {
 	sessions       map[string]model.Session
 	credentials    map[string]model.Credential
 	savedJumpHosts map[string]model.SavedJumpHost
-	order          map[string][]string // parentID ("" = root) → ordered child node IDs
+	order          map[string][]string  // parentID ("" = root) → ordered child node IDs
+	searchIdx      map[string]lowerSess // session ID → pre-lowercased search fields (P007)
 
 	timerMu sync.Mutex
 	timer   *time.Timer
@@ -63,6 +64,7 @@ func New(save SaveFunc) *Store {
 		credentials:    map[string]model.Credential{},
 		savedJumpHosts: map[string]model.SavedJumpHost{},
 		order:          map[string][]string{},
+		searchIdx:      map[string]lowerSess{},
 		save:           save,
 	}
 }
@@ -278,6 +280,12 @@ func (s *Store) Load(payload []byte) error {
 		}
 	}
 
+	// Rebuild the pre-lowercased search index for the freshly loaded set.
+	s.searchIdx = make(map[string]lowerSess, len(s.sessions))
+	for id, sess := range s.sessions {
+		s.searchIdx[id] = indexSession(sess)
+	}
+
 	s.order = order
 	return nil
 }
@@ -346,6 +354,7 @@ func (s *Store) CreateSession(folderID string, session model.Session) (string, e
 		return "", err
 	}
 	s.sessions[sess.ID] = sess
+	s.searchIdx[sess.ID] = indexSession(sess)
 	s.order[folderID] = append(s.order[folderID], sess.ID)
 	s.scheduleSave()
 	return sess.ID, nil
@@ -376,6 +385,7 @@ func (s *Store) UpdateSession(session model.Session) error {
 		return err
 	}
 	s.sessions[sess.ID] = sess
+	s.searchIdx[sess.ID] = indexSession(sess)
 	s.scheduleSave()
 	return nil
 }
@@ -394,6 +404,7 @@ func (s *Store) DuplicateSession(id string) (string, error) {
 	dst.Name = src.Name + " (copy)"
 	dst.JumpHosts = append([]model.JumpHost(nil), src.JumpHosts...)
 	s.sessions[dst.ID] = dst
+	s.searchIdx[dst.ID] = indexSession(dst)
 
 	parent := src.FolderID
 	list := s.order[parent]
@@ -676,6 +687,7 @@ func (s *Store) DeleteNode(id string) (int, error) {
 		}
 		delete(s.folders, x)
 		delete(s.sessions, x)
+		delete(s.searchIdx, x)
 	}
 	s.order[parent] = removeID(s.order[parent], id)
 	s.scheduleSave()
@@ -798,6 +810,25 @@ type SearchHit struct {
 	FolderPath string
 }
 
+// lowerSess caches the pre-lowercased Name/Host/User of one session so
+// Search avoids a ToLower pass per field per query (P007). Kept in sync
+// with s.sessions on every mutation that changes these fields; placement
+// changes (MoveNode) and reference soft-nulls do not affect search keys.
+type lowerSess struct {
+	name string
+	host string
+	user string
+}
+
+// indexSession derives a session's pre-lowercased search fields.
+func indexSession(sess model.Session) lowerSess {
+	return lowerSess{
+		name: strings.ToLower(sess.Name),
+		host: strings.ToLower(sess.Host),
+		user: strings.ToLower(sess.User),
+	}
+}
+
 // Search returns every session whose Name, Host or User contains q as a
 // case-insensitive substring (master plan §2 A9), with its folder path
 // for display context. Results are sorted by ID for a stable order. The
@@ -811,10 +842,11 @@ func (s *Store) Search(q string) []SearchHit {
 	defer s.mu.RUnlock()
 
 	var out []SearchHit
-	for id, sess := range s.sessions {
-		if !containsFold(sess.Name, q) && !containsFold(sess.Host, q) && !containsFold(sess.User, q) {
+	for id, l := range s.searchIdx {
+		if !strings.Contains(l.name, q) && !strings.Contains(l.host, q) && !strings.Contains(l.user, q) {
 			continue
 		}
+		sess := s.sessions[id]
 		out = append(out, SearchHit{
 			ID:         id,
 			Name:       sess.Name,
@@ -825,10 +857,6 @@ func (s *Store) Search(q string) []SearchHit {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
-}
-
-func containsFold(haystack, needle string) bool {
-	return strings.Contains(strings.ToLower(haystack), needle)
 }
 
 // folderPathLocked returns the slash-joined path of the folder with the

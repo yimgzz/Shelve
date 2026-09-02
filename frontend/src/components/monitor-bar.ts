@@ -205,25 +205,21 @@ function diskItem(m: MonitorMetrics | null): HTMLElement {
 
 // ------------------------------------------------------------------ render --
 
+/** Change-detection key of the last DOM rebuild (see render). */
+let lastRenderKey = "";
+
 function render(): void {
     const el = host;
     if (!el) {
         return;
     }
-    // Was the pointer interacting with Disk when this refresh hit? Captured
-    // BEFORE the wipe: the rebuild removes the hovered node, which in WebKit
-    // can also fire mouseleave on it (clearing diskTooltipOpen).
-    const oldDisk = el.querySelector<HTMLElement>(".mon-disk");
-    const oldTip = oldDisk?.querySelector<HTMLElement>(".mon-tooltip");
-    const diskWasHovered =
-        isPointerNear(oldDisk) || (diskTooltipOpen && oldTip?.style.display === "block");
-    el.textContent = "";
     const st = store.getState();
     const tab = st.tabs.find((t) => t.id === st.activeTabID);
     const visible = st.settings.monitoringEnabled && !!tab && tab.state === "ready";
     const wantMonitored = visible && tab ? tab.id : null;
 
-    // Backend lifecycle — only on a transition (plan P004 D2/D5).
+    // Backend lifecycle — only on a transition (plan P004 D2/D5). Runs
+    // before the DOM guard so Start/Stop always follows the active tab.
     if (wantMonitored !== monitored) {
         if (monitored) {
             // Stop is cleanup-only; failures are irrelevant (tab likely
@@ -235,12 +231,36 @@ function render(): void {
             void MonitorService.Start(monitored).catch((err) => toast("error", String(err)));
         }
     }
+
+    const m = tab ? st.monitor[tab.id] : undefined;
+    const fresh = !!m && Date.now() - m.updatedAt < STALE_MS;
+
+    // Change detection: rebuild the bar only when something it draws changed
+    // — the visibility inputs (active tab id/state, monitoring setting) or
+    // the metrics snapshot for that tab. Every metric event carries a fresh
+    // updatedAt, which doubles as a monotonic change counter; the `fresh`
+    // flag preserves the stale-dim flip even when the backend ticker has
+    // stopped. Unrelated store churn (sftp progress, search, tree refresh,
+    // tab status) must not wipe and rebuild the bar.
+    const key = `${wantMonitored ?? ""}|${m?.updatedAt ?? -1}|${fresh}`;
+    if (key === lastRenderKey) {
+        return;
+    }
+    lastRenderKey = key;
+
+    // Was the pointer interacting with Disk when this refresh hit? Captured
+    // BEFORE the wipe: the rebuild removes the hovered node, which in WebKit
+    // can also fire mouseleave on it (clearing diskTooltipOpen).
+    const oldDisk = el.querySelector<HTMLElement>(".mon-disk");
+    const oldTip = oldDisk?.querySelector<HTMLElement>(".mon-tooltip");
+    const diskWasHovered =
+        isPointerNear(oldDisk) || (diskTooltipOpen && oldTip?.style.display === "block");
+    el.textContent = "";
+
     if (!visible || !tab) {
         return;
     }
 
-    const m = st.monitor[tab.id];
-    const fresh = !!m && Date.now() - m.updatedAt < STALE_MS;
     const data = fresh ? m : null;
 
     // 1. Hostname.
@@ -280,6 +300,9 @@ export function renderMonitorBar(el: HTMLElement): void {
     if (unsub) {
         unsub();
     }
+    // A fresh mount must always rebuild once, even if the store contents
+    // happen to equal the previous mount's last-rendered state.
+    lastRenderKey = "";
     unsub = store.subscribe(render);
     render();
 }

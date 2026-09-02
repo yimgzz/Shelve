@@ -1033,3 +1033,70 @@ func TestSavedJumpHostReferenceSemantics(t *testing.T) {
 		t.Fatalf("dangling jumpHostRef = %q after Load, want cleared", sessAfter.JumpHostRef)
 	}
 }
+
+// TestSearchIndexSync verifies the pre-lowercased search index (P007) stays
+// in sync with sessions across create/update/duplicate/delete — without a
+// reload — and that matching remains case-insensitive.
+func TestSearchIndexSync(t *testing.T) {
+	s := New(nil)
+
+	s1, err := s.CreateSession("", testSession("Alpha Server"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(s.Search("alpha")); got != 1 {
+		t.Fatalf("Search(alpha) = %d hits, want 1", got)
+	}
+	if got := len(s.Search("ALPHA")); got != 1 {
+		t.Fatalf("Search(ALPHA) = %d hits, want 1 (case-insensitive)", got)
+	}
+	if got := len(s.Search("nomatch")); got != 0 {
+		t.Fatalf("Search(nomatch) = %d hits, want 0", got)
+	}
+
+	// Rename must be reflected immediately (index updated on UpdateSession).
+	upd, err := s.Session(s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upd.Name = "Beta Box"
+	if err := s.UpdateSession(upd); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(s.Search("beta")); got != 1 {
+		t.Fatalf("after rename: Search(beta) = %d hits, want 1", got)
+	}
+	if got := len(s.Search("alpha")); got != 0 {
+		t.Fatalf("after rename: Search(alpha) = %d hits, want 0", got)
+	}
+
+	// Duplicate copies the (current) fields into the index too.
+	d1, err := s.DuplicateSession(s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(s.Search("beta")); got != 2 {
+		t.Fatalf("after duplicate: Search(beta) = %d hits, want 2", got)
+	}
+
+	// Delete removes the index entry.
+	if _, err := s.DeleteNode(d1); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(s.Search("beta")); got != 1 {
+		t.Fatalf("after delete: Search(beta) = %d hits, want 1", got)
+	}
+
+	// Reload rebuilds the index from the encoded payload.
+	raw, err := s.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := New(nil)
+	if err := s2.Load(raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(s2.Search("beta")); got != 1 {
+		t.Fatalf("after reload: Search(beta) = %d hits, want 1", got)
+	}
+}

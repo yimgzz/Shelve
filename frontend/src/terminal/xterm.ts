@@ -67,6 +67,20 @@ interface Entry {
 
 const pool = new Map<string, Entry>();
 
+/** Transmit raw terminal input to the backend. Plan P005: keystrokes ride the
+ *  terminal WebSocket (a plain macrotask that stays responsive even under
+ *  output floods); before the socket is up, fall back to the Wails service
+ *  call. Shared by typed input and the custom key handler so Ctrl+C and
+ *  Shift+Backspace take exactly the same path as ordinary keystrokes. */
+function sendBytes(tabID: string, bytes: Uint8Array): void {
+    if (!sendInput(tabID, bytes)) {
+        void TerminalService.Write(tabID, bytesToB64(bytes)).catch(() => {
+            // Write failures (e.g. tab already closed server-side) are
+            // surfaced through terminal:status; nothing actionable here.
+        });
+    }
+}
+
 /** Flush buffered user input to the backend (called immediately from onData). */
 function flushInput(tabID: string, e: Entry): void {
     if (!e.inputBuf) {
@@ -74,16 +88,7 @@ function flushInput(tabID: string, e: Entry): void {
     }
     const str = e.inputBuf;
     e.inputBuf = "";
-    const bytes = new TextEncoder().encode(str);
-    // Plan P005: keystrokes ride the terminal WebSocket (a plain macrotask
-    // that stays responsive even under output floods); before the socket is
-    // up, fall back to the Wails service call.
-    if (!sendInput(tabID, bytes)) {
-        void TerminalService.Write(tabID, bytesToB64(bytes)).catch(() => {
-            // Write failures (e.g. tab already closed server-side) are
-            // surfaced through terminal:status; nothing actionable here.
-        });
-    }
+    sendBytes(tabID, new TextEncoder().encode(str));
 }
 
 /** Guarded read of the renderer's CSS cell metrics (private API; the pinned
@@ -457,6 +462,39 @@ export const TermPool = {
         term.onData((data) => {
             entry.inputBuf += data;
             flushInput(tabID, entry);
+        });
+
+        // Custom key handling — terminal-native semantics for two keys that
+        // xterm's defaults get wrong in a selection-capable webview:
+        //
+        // Ctrl+C: xterm copies the selection instead of sending ETX when any
+        // text is selected, so the interrupt silently never fires (and this
+        // app's drag-select makes selections common). Always emit ETX so the
+        // remote tty (ISIG/VINTR) discards the input line and prints a fresh
+        // prompt. Copy is not lost: drag-selection already auto-copies (plan
+        // P003).
+        //
+        // Shift+Backspace: xterm maps it to a single-character erase byte.
+        // Emit ^W (VWERASE 0x17) instead — the remote line editor deletes the
+        // previous word (canonical-mode werase with IEXTEN, bash readline,
+        // zsh, fish, and vim insert mode all honor it).
+        //
+        // Returning false stops xterm from processing the event, so onData
+        // never fires again for these keys (no double-send).
+        term.attachCustomKeyEventHandler((e) => {
+            if (e.type !== "keydown") {
+                return true;
+            }
+            const ctrl = e.ctrlKey || e.metaKey;
+            if (ctrl && !e.altKey && e.key.toLowerCase() === "c") {
+                sendBytes(tabID, new TextEncoder().encode("\x03"));
+                return false;
+            }
+            if (e.shiftKey && !ctrl && !e.altKey && e.key === "Backspace") {
+                sendBytes(tabID, new TextEncoder().encode("\x17"));
+                return false;
+            }
+            return true;
         });
 
         // ---- Mouse copy/paste (plan P003 T3/T4) ---------------------------

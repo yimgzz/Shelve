@@ -185,7 +185,9 @@ Notes:
   a confirm dialog showing the affected count (A8).
 - **UI language is English only.** Shortcuts: Ctrl+K/L search, Ctrl+T connect,
   Ctrl+W close tab, Ctrl+Tab cycle, Ctrl+, settings, F2/Delete rename/delete,
-  Esc close modal, Ctrl+Shift+E toggle SFTP browser.
+  Esc close modal, Ctrl+Shift+E toggle SFTP browser. Terminal keys: Ctrl+C
+  always sends the interrupt (ETX, even with a selection) — the line resets to
+  a fresh prompt; Shift+Backspace deletes the previous word (^W).
 - **Integration tests** use build tag `integration` and spin up `docker/sshd`
   via testcontainers. Run with `make test-integration`.
 

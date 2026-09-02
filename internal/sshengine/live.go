@@ -651,7 +651,8 @@ func (m *Manager) teardown(l *liveConn) {
 }
 
 // ptyModes is the standard OpenSSH default mode set for an interactive
-// shell.
+// shell. VWERASE is set explicitly (^W) so the frontend's Shift+Backspace
+// word-erase sequence is deterministic regardless of the remote OS default.
 func ptyModes() ssh.TerminalModes {
 	return ssh.TerminalModes{
 		ssh.VEOF:    0x04,
@@ -659,6 +660,7 @@ func ptyModes() ssh.TerminalModes {
 		ssh.VQUIT:   0x1c,
 		ssh.VERASE:  0x7f,
 		ssh.VKILL:   0x15,
+		ssh.VWERASE: 0x17,
 		ssh.VSUSP:   0x1a,
 		ssh.ICANON:  1,
 		ssh.ISIG:    1,

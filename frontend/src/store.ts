@@ -449,6 +449,101 @@ class Store {
         this.set({ tabs: remaining, activeTabID: nextActive, forwards, sftpTransfers, monitor });
     }
 
+    /**
+     * Close every tab except tabID (tab context menu "Close Others").
+     * Keeps tabID as the active tab.
+     */
+    async closeOtherTabs(tabID: string): Promise<void> {
+        const { tabs } = this.state;
+        const toClose = tabs.filter((t) => t.id !== tabID).map((t) => t.id);
+        if (toClose.length === 0) {
+            return;
+        }
+        await this.dropTabs(toClose, tabID);
+    }
+
+    /** Close every open tab (tab context menu "Close All Tabs"). */
+    async closeAllTabs(): Promise<void> {
+        const { tabs } = this.state;
+        if (tabs.length === 0) {
+            return;
+        }
+        await this.dropTabs(tabs.map((t) => t.id), null);
+    }
+
+    /**
+     * Close every tab to the right of tabID (tab context menu "Close Tabs
+     * to the Right"). The anchor tab stays; if the previously active tab
+     * was closed, tabID becomes active.
+     */
+    async closeTabsToRight(tabID: string): Promise<void> {
+        const { tabs } = this.state;
+        const idx = tabs.findIndex((t) => t.id === tabID);
+        if (idx === -1 || idx === tabs.length - 1) {
+            return;
+        }
+        await this.dropTabs(tabs.slice(idx + 1).map((t) => t.id), tabID);
+    }
+
+    /**
+     * Shared batch close: disconnect each non-closed tab (a failure never
+     * aborts the rest — per-tab error toast, mirroring closeTab), drop the
+     * tabs plus their per-tab caches, then pick the next active tab.
+     * `anchorID` is the tab that survives (close-others / close-right) or
+     * null for close-all.
+     */
+    private async dropTabs(ids: string[], anchorID: string | null): Promise<void> {
+        const { tabs, activeTabID } = this.state;
+        for (const id of ids) {
+            const tab = tabs.find((t) => t.id === id);
+            if (tab && tab.state !== "closed") {
+                try {
+                    await TerminalService.Disconnect(id);
+                } catch (err) {
+                    toast("error", String(err));
+                }
+            }
+        }
+        const closing = new Set(ids);
+        const remaining = tabs.filter((t) => !closing.has(t.id));
+        // Next active: close-all → none; a surviving active tab stays put;
+        // otherwise fall back to the anchor tab.
+        let nextActive: string | null = null;
+        if (anchorID !== null) {
+            const activeSurvives = remaining.some((t) => t.id === activeTabID);
+            nextActive = activeSurvives && activeTabID ? activeTabID : anchorID;
+        }
+        const forwards = { ...this.state.forwards };
+        const sftpTransfers = { ...this.state.sftpTransfers };
+        const monitor = { ...this.state.monitor };
+        for (const id of ids) {
+            delete forwards[id];
+            delete sftpTransfers[id];
+            delete monitor[id];
+        }
+        this.set({ tabs: remaining, activeTabID: nextActive, forwards, sftpTransfers, monitor });
+    }
+
+    /**
+     * Reorder the tab strip (pure frontend state — tabs are ephemeral and
+     * never persisted, master plan A3). `toIndex` is clamped to range.
+     */
+    moveTab(tabID: string, toIndex: number): void {
+        const { tabs } = this.state;
+        const from = tabs.findIndex((t) => t.id === tabID);
+        if (from === -1) {
+            return;
+        }
+        const clamped = Math.max(0, Math.min(tabs.length - 1, toIndex));
+        if (from === clamped) {
+            return;
+        }
+        const next = tabs.slice();
+        const [tab] = next.splice(from, 1);
+        next.splice(clamped, 0, tab);
+        this.set({ tabs: next });
+    }
+
     /** Cache an ssh:forward lifecycle event for a tab (latest state per spec). */
     setForward(tabID: string, fwd: ForwardDTO): void {
         const current = this.state.forwards[tabID] || [];

@@ -90,6 +90,12 @@ export function renderTreeBody(host: HTMLElement): void {
     if (unsub) {
         unsub();
     }
+    // Mount-level listener (empty-area creation menu) attaches once per host
+    // even if renderTreeBody is re-invoked on the same element.
+    if (!host.dataset.treeMount) {
+        host.dataset.treeMount = "1";
+        host.addEventListener("contextmenu", onTreeEmptyContext);
+    }
     // The tree renders exactly three store fields (tree, searchQ,
     // selectedID). Filter out updates to unrelated state — e.g. the 2 s
     // monitor:metrics snapshots (plan P004), tab status, sftp progress —
@@ -549,6 +555,32 @@ function subtreeCounts(node: NodeDTO): { sessions: number; folders: number } {
 // Used by folder context menu path display (kept minimal for now).
 function parentPathOf(_node: NodeDTO): string {
     return "";
+}
+
+// ------------------------------------------------ empty-area tree menu ---
+
+/**
+ * Right-click on the bare tree container or the "No sessions yet" card
+ * opens a creation menu (English labels). Rows and inline editors keep
+ * their own handlers; the menu is hidden while search results replace the
+ * tree view.
+ */
+function onTreeEmptyContext(e: MouseEvent): void {
+    const target = e.target as HTMLElement | null;
+    if (!target || typeof target.closest !== "function") {
+        return;
+    }
+    if (target !== bodyHost && !target.closest(".tree-empty")) {
+        return;
+    }
+    if (store.getState().searchQ.trim()) {
+        return;
+    }
+    e.preventDefault();
+    openContextMenu(e.clientX, e.clientY, [
+        { label: "New Session", action: () => openNewSession("") },
+        { label: "New Folder", action: () => openNewFolderAt("") },
+    ]);
 }
 
 // ------------------------------------------------------------- results ---

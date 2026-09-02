@@ -442,6 +442,10 @@
     cursor: default;
     white-space: nowrap;
     color: var(--text);
+    /* Double-click must not select the session/folder name text; inline
+       rename inputs are <input> elements and keep native selection. */
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 .tree-row:hover {
@@ -525,6 +529,7 @@
 }
 
 .tab {
+    position: relative; /* anchor for the drop-before/drop-after bars */
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -572,6 +577,30 @@
 
 .tab-close:hover {
     color: var(--error);
+}
+
+/* Tab drag-reorder visuals (pointer-based DnD, components/tabs.ts). */
+.tab.dragging {
+    opacity: 0.45;
+}
+
+.tab.drop-before::before,
+.tab.drop-after::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--accent);
+}
+
+.tab.drop-before::before {
+    left: -1px;
+}
+
+.tab.drop-after::after {
+    right: -1px;
 }
 
 /* ---------- Terminal panes (Phase 4c) ---------- */

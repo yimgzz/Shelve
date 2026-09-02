@@ -60,6 +60,13 @@ type Session struct {
 	// validated snapshot that takes over when the reference is cleared
 	// (e.g. the credential is deleted — store soft-nulls the reference).
 	CredentialID string `json:"credentialId,omitempty"`
+	// JumpHostRef optionally references a saved JumpHost (plan P006).
+	// While set, the saved host's hop replaces the entire inline
+	// JumpHosts chain at connect/test time (single source of truth); the
+	// inline rows are kept as a validated snapshot that takes over when
+	// the reference is cleared (e.g. the saved host is deleted — store
+	// soft-nulls the reference).
+	JumpHostRef string `json:"jumpHostRef,omitempty"`
 }
 
 // Credential is a named, reusable auth bundle (plan P003 §4.1): either a
@@ -73,15 +80,29 @@ type Credential struct {
 	Auth Auth   `json:"auth"`           // password XOR key path
 }
 
+// SavedJumpHost is a named, reusable single-hop jump host (plan P006):
+// host + port + login + password-or-key-path, stored inside the encrypted
+// vault and referenced by sessions via Session.JumpHostRef. The same
+// password-XOR-key rule as sessions applies (validated by Validate).
+type SavedJumpHost struct {
+	ID   string `json:"id"`   // ULID (model.NewID)
+	Name string `json:"name"` // display name; required
+	Host string `json:"host"` // hostname / IPv4 / IPv6; required
+	Port int    `json:"port"` // 1–65535 (22 default)
+	User string `json:"user"` // login; required
+	Auth Auth   `json:"auth"` // password XOR key path
+}
+
 // Payload is the plaintext document encrypted inside vault.json
 // (master plan §4). Root holds the ordered top-level node IDs; every
 // folder's Children holds its ordered child IDs (folders and sessions),
 // which is the single source of truth for sibling order (master plan A10).
 type Payload struct {
-	Root        []string     `json:"root"`
-	Folders     []Folder     `json:"folders"`
-	Sessions    []Session    `json:"sessions"`
-	Credentials []Credential `json:"credentials"`
+	Root           []string        `json:"root"`
+	Folders        []Folder        `json:"folders"`
+	Sessions       []Session       `json:"sessions"`
+	Credentials    []Credential    `json:"credentials"`
+	SavedJumpHosts []SavedJumpHost `json:"savedJumpHosts"`
 }
 
 // NewID returns a new ULID string (master plan A10 session IDs).

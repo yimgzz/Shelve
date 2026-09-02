@@ -50,6 +50,21 @@ func GenerateFixture(sessionCount int) Payload {
 	newCred("backup-svc", "backup",
 		Auth{Type: AuthPassword, Password: "fixture-cred-pw-backup"})
 
+	// A few saved jump hosts (plan P006 §9): one password and one key
+	// variant. Sessions in the loop below reference them and keep matching
+	// inline snapshots so the seeded vault exercises the saved-jump-host
+	// dropdown and manager UI out of the box.
+	var savedJumpHosts []SavedJumpHost
+	newSavedJump := func(name, host string, port int, user string, auth Auth) string {
+		jh := SavedJumpHost{ID: NewID(), Name: name, Host: host, Port: port, User: user, Auth: auth}
+		savedJumpHosts = append(savedJumpHosts, jh)
+		return jh.ID
+	}
+	savedJumpPasswordID := newSavedJump("bastion-prod", "jump-saved-01.example.com", 22, "tunnel",
+		Auth{Type: AuthPassword, Password: "fixture-saved-jump-pw-01"})
+	savedJumpKeyID := newSavedJump("bastion-backup", "192.168.9.5", 2222, "tunnel",
+		Auth{Type: AuthKey, KeyPath: "/home/user/.ssh/jump-saved"})
+
 	sessions := make([]Session, 0, sessionCount)
 	for j := 0; j < sessionCount; j++ {
 		s := Session{
@@ -111,6 +126,29 @@ func GenerateFixture(sessionCount int) Payload {
 			}
 		}
 
+		// Every 25th session references a saved jump host (plan P006): the
+		// inline chain holds the saved host's hop as its snapshot so the
+		// session also works after the saved host is deleted. Runs after
+		// the j%20 chain above, deliberately overriding it where both fire.
+		switch j % 25 {
+		case 10:
+			s.JumpHostRef = savedJumpPasswordID
+			s.JumpHosts = []JumpHost{
+				{
+					Host: "jump-saved-01.example.com", Port: 22, User: "tunnel",
+					Auth: Auth{Type: AuthPassword, Password: "fixture-saved-jump-pw-01"},
+				},
+			}
+		case 15:
+			s.JumpHostRef = savedJumpKeyID
+			s.JumpHosts = []JumpHost{
+				{
+					Host: "192.168.9.5", Port: 2222, User: "tunnel",
+					Auth: Auth{Type: AuthKey, KeyPath: "/home/user/.ssh/jump-saved"},
+				},
+			}
+		}
+
 		// Placement: every 30th session sits at the root level, the rest
 		// rotate across the 20 subfolders.
 		var parent string
@@ -130,9 +168,10 @@ func GenerateFixture(sessionCount int) Payload {
 		folders[i].Children = append([]string(nil), order[folders[i].ID]...)
 	}
 	return Payload{
-		Root:        root,
-		Folders:     folders,
-		Sessions:    sessions,
-		Credentials: credentials,
+		Root:           root,
+		Folders:        folders,
+		Sessions:       sessions,
+		Credentials:    credentials,
+		SavedJumpHosts: savedJumpHosts,
 	}
 }

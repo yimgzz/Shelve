@@ -352,3 +352,87 @@ func TestCredentialValidationRules(t *testing.T) {
 		}
 	})
 }
+
+// TestSavedJumpHostValidationRules covers the plan P006 invariants:
+// name/host/port/user required and the same password-XOR-key rule as
+// sessions/jump hosts, with fields reported under the savedJumpHost prefix.
+func TestSavedJumpHostValidationRules(t *testing.T) {
+	valid := func() SavedJumpHost {
+		return SavedJumpHost{
+			Name: "bastion-prod",
+			Host: "jump.example.com",
+			Port: 22,
+			User: "tunnel",
+			Auth: Auth{Type: AuthPassword, Password: "jump-pw"},
+		}
+	}
+
+	t.Run("valid password saved jump host", func(t *testing.T) {
+		j := valid()
+		if err := j.Validate(); err != nil {
+			t.Fatalf("unexpected: %v", err)
+		}
+	})
+
+	t.Run("valid key saved jump host", func(t *testing.T) {
+		j := valid()
+		j.Auth = Auth{Type: AuthKey, KeyPath: "/home/u/.ssh/jump1"}
+		if err := j.Validate(); err != nil {
+			t.Fatalf("unexpected: %v", err)
+		}
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		j := valid()
+		j.Name = "  "
+		err := j.Validate()
+		if err == nil || !strings.Contains(err.Error(), "savedJumpHost.name: must not be empty") {
+			t.Fatalf("want name error, got %v", err)
+		}
+	})
+
+	t.Run("bad host", func(t *testing.T) {
+		j := valid()
+		j.Host = "not a host!"
+		err := j.Validate()
+		if err == nil || !strings.Contains(err.Error(), "savedJumpHost.host: must be a valid hostname") {
+			t.Fatalf("want host error, got %v", err)
+		}
+	})
+
+	t.Run("bad port", func(t *testing.T) {
+		j := valid()
+		j.Port = 65536
+		err := j.Validate()
+		if err == nil || !strings.Contains(err.Error(), "savedJumpHost.port: must be in range 1-65535") {
+			t.Fatalf("want port error, got %v", err)
+		}
+	})
+
+	t.Run("empty user", func(t *testing.T) {
+		j := valid()
+		j.User = ""
+		err := j.Validate()
+		if err == nil || !strings.Contains(err.Error(), "savedJumpHost.user: must not be empty") {
+			t.Fatalf("want user error, got %v", err)
+		}
+	})
+
+	t.Run("auth xor: neither set", func(t *testing.T) {
+		j := valid()
+		j.Auth = Auth{Type: AuthPassword}
+		err := j.Validate()
+		if err == nil || !strings.Contains(err.Error(), "savedJumpHost.auth: exactly one of password or keyPath must be set") {
+			t.Fatalf("want XOR error, got %v", err)
+		}
+	})
+
+	t.Run("auth xor: both set", func(t *testing.T) {
+		j := valid()
+		j.Auth = Auth{Type: AuthPassword, Password: "pw", KeyPath: "/k"}
+		err := j.Validate()
+		if err == nil || !strings.Contains(err.Error(), "savedJumpHost.auth: exactly one of password or keyPath may be set") {
+			t.Fatalf("want XOR error, got %v", err)
+		}
+	})
+}

@@ -30,8 +30,8 @@ type JumpHostDTO struct {
 }
 
 // SessionDTO is a session read view: no password material. CredentialID
-// exposes only the reference to a named credential (plan P003 §4.3);
-// never the underlying secret.
+// and JumpHostRef expose only references to saved entities (plan P003 /
+// plan P006); never the underlying secrets.
 type SessionDTO struct {
 	ID              string         `json:"id"`
 	FolderID        string         `json:"folderId"`
@@ -46,12 +46,14 @@ type SessionDTO struct {
 	ExtraArgs       string         `json:"extraArgs"`
 	SftpInitialPath string         `json:"sftpInitialPath,omitempty"`
 	CredentialID    string         `json:"credentialId,omitempty"`
+	JumpHostRef     string         `json:"jumpHostRef,omitempty"`
 }
 
 // SessionInput carries a session draft from the frontend. It may include
 // passwords; they only ever reach the vault inside the encrypted payload.
 // CredentialID references a named credential whose User+Auth are resolved
-// at connect/test time (plan P003).
+// at connect/test time (plan P003); JumpHostRef references a saved jump
+// host whose hop replaces the inline chain (plan P006).
 type SessionInput struct {
 	ID              string          `json:"id,omitempty"`
 	FolderID        string          `json:"folderId"`
@@ -66,6 +68,7 @@ type SessionInput struct {
 	ExtraArgs       string          `json:"extraArgs"`
 	SftpInitialPath string          `json:"sftpInitialPath,omitempty"`
 	CredentialID    string          `json:"credentialId,omitempty"`
+	JumpHostRef     string          `json:"jumpHostRef,omitempty"`
 }
 
 // JumpHostInput is the write view of a jump host.
@@ -87,6 +90,45 @@ type CredentialDTO struct {
 	AuthType    model.AuthType `json:"authType"`
 	HasPassword bool           `json:"hasPassword"`
 	KeyPath     string         `json:"keyPath,omitempty"`
+}
+
+// SavedJumpHostDTO is a saved jump host read view (plan P006):
+// secret-free — passwords collapse to HasPassword, exactly like
+// sessions/jump hosts.
+type SavedJumpHostDTO struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Host        string         `json:"host"`
+	Port        int            `json:"port"`
+	User        string         `json:"user"`
+	AuthType    model.AuthType `json:"authType"`
+	HasPassword bool           `json:"hasPassword"`
+	KeyPath     string         `json:"keyPath,omitempty"`
+}
+
+// SavedJumpHostInput carries a saved jump host draft from the frontend.
+// The password, when present, goes straight into the encrypted vault and
+// is never echoed back (§8).
+type SavedJumpHostInput struct {
+	ID       string         `json:"id,omitempty"`
+	Name     string         `json:"name"`
+	Host     string         `json:"host"`
+	Port     int            `json:"port"`
+	User     string         `json:"user"`
+	AuthType model.AuthType `json:"authType"`
+	Password string         `json:"password,omitempty"`
+	KeyPath  string         `json:"keyPath,omitempty"`
+}
+
+func (in SavedJumpHostInput) toModel() model.SavedJumpHost {
+	return model.SavedJumpHost{
+		ID:   in.ID,
+		Name: in.Name,
+		Host: in.Host,
+		Port: in.Port,
+		User: in.User,
+		Auth: model.Auth{Type: in.AuthType, Password: in.Password, KeyPath: in.KeyPath},
+	}
 }
 
 // CredentialInput carries a credential draft from the frontend. The
@@ -123,6 +165,21 @@ func ToCredentialDTO(c model.Credential) CredentialDTO {
 	}
 }
 
+// ToSavedJumpHostDTO converts a model saved jump host to its secret-free
+// read view (plan P006).
+func ToSavedJumpHostDTO(jh model.SavedJumpHost) SavedJumpHostDTO {
+	return SavedJumpHostDTO{
+		ID:          jh.ID,
+		Name:        jh.Name,
+		Host:        jh.Host,
+		Port:        jh.Port,
+		User:        jh.User,
+		AuthType:    jh.Auth.Type,
+		HasPassword: jh.Auth.Password != "",
+		KeyPath:     jh.Auth.KeyPath,
+	}
+}
+
 func (in SessionInput) toModel() model.Session {
 	sess := model.Session{
 		ID:              in.ID,
@@ -135,6 +192,7 @@ func (in SessionInput) toModel() model.Session {
 		ExtraArgs:       in.ExtraArgs,
 		SftpInitialPath: in.SftpInitialPath,
 		CredentialID:    in.CredentialID,
+		JumpHostRef:     in.JumpHostRef,
 	}
 	sess.JumpHosts = make([]model.JumpHost, 0, len(in.JumpHosts))
 	for _, j := range in.JumpHosts {
@@ -174,6 +232,7 @@ func ToSessionDTO(sess model.Session) SessionDTO {
 		ExtraArgs:       sess.ExtraArgs,
 		SftpInitialPath: sess.SftpInitialPath,
 		CredentialID:    sess.CredentialID,
+		JumpHostRef:     sess.JumpHostRef,
 	}
 	dto.JumpHosts = make([]JumpHostDTO, 0, len(sess.JumpHosts))
 	for _, j := range sess.JumpHosts {

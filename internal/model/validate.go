@@ -156,6 +156,32 @@ func (c *Credential) Validate() error {
 	return joinErrs(errs...)
 }
 
+// Validate checks SavedJumpHost invariants (plan P006): a display name,
+// host, port, login, and exactly one auth method (password XOR key path —
+// the same rule as sessions/jump hosts).
+func (s *SavedJumpHost) Validate() error {
+	errs := s.validateFields("savedJumpHost")
+	return joinErrs(errs...)
+}
+
+func (s *SavedJumpHost) validateFields(prefix string) []error {
+	var errs []error
+	if !validNonEmpty(s.Name) {
+		errs = append(errs, fieldErr(prefix+".name", "must not be empty"))
+	}
+	if !validHost(s.Host) {
+		errs = append(errs, fieldErr(prefix+".host", "must be a valid hostname, IPv4 or IPv6 address"))
+	}
+	if !validPort(s.Port) {
+		errs = append(errs, fieldErr(prefix+".port", "must be in range %d-%d", MinPort, MaxPort))
+	}
+	if !validNonEmpty(s.User) {
+		errs = append(errs, fieldErr(prefix+".user", "must not be empty"))
+	}
+	errs = append(errs, checkAuth(prefix, s.Auth)...)
+	return errs
+}
+
 // Validate checks Session invariants (master plan §4): name, host, port,
 // user, auth XOR, each jump host, and ExtraArgs (strict parser, §2 D5).
 // All violations are joined into one error. The optional CredentialID

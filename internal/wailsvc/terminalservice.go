@@ -37,6 +37,9 @@ func (s *TerminalService) Connect(sessionID string) (string, error) {
 	// Plan P003 §4.1: a referenced credential is the single source of
 	// truth for User+Auth at connect time.
 	sess = resolveSessionCredential(s.store, sess)
+	// Plan P006: a referenced saved jump host replaces the whole inline
+	// chain at connect time.
+	sess = resolveSessionJumpHost(s.store, sess)
 	return s.mgr.Connect(&sess)
 }
 

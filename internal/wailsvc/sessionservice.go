@@ -115,6 +115,9 @@ func (s *SessionService) CreateSession(input SessionInput) (string, error) {
 	if err := s.applyCredentialSnapshot(&sess); err != nil {
 		return "", err
 	}
+	if err := s.applyJumpHostSnapshot(&sess); err != nil {
+		return "", err
+	}
 	return s.store.CreateSession(input.FolderID, sess)
 }
 
@@ -168,6 +171,11 @@ func (s *SessionService) UpdateSession(input SessionInput) error {
 	if err := s.applyCredentialSnapshot(&sess); err != nil {
 		return err
 	}
+	// A referenced saved jump host is authoritative while set (plan P006):
+	// its hop becomes the inline snapshot, replacing the merged chain.
+	if err := s.applyJumpHostSnapshot(&sess); err != nil {
+		return err
+	}
 	return s.store.UpdateSession(sess)
 }
 
@@ -212,6 +220,9 @@ func (s *SessionService) TestConnection(in SessionInput) error {
 		return err
 	}
 	sess = resolveSessionCredential(s.store, sess)
+	// A referenced saved jump host replaces the inline chain — the test
+	// dials with the same hops a connect would use (plan P006).
+	sess = resolveSessionJumpHost(s.store, sess)
 	if err := sess.Validate(); err != nil {
 		return err
 	}

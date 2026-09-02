@@ -123,8 +123,9 @@ async function mount(vaultState: VaultState): Promise<void> {
             console.error("Failed to load session tree:", err);
         }
         // Saved named credentials for the session editor dropdown and the
-        // credential manager (plan P003).
+        // credential manager (plan P003); saved jump hosts likewise (plan P006).
         void store.refreshCredentials();
+        void store.refreshSavedJumpHosts();
         renderShell(root);
     } else {
         shellMounted = false;
@@ -163,6 +164,7 @@ function handleEvent(name: string, payload: unknown): void {
                     selectedID: null,
                     searchQ: "",
                     credentials: [],
+                    savedJumpHosts: [],
                     pendingSessions: {},
                     forwards: {},
                     sftpTransfers: {},

@@ -24,6 +24,8 @@ var (
 	ErrMoveCycle = errors.New("store: cannot move a folder into its own descendant")
 	// ErrCredentialNotFound: the credential ID does not exist (plan P003).
 	ErrCredentialNotFound = errors.New("store: credential not found")
+	// ErrSavedJumpHostNotFound: the saved jump host ID does not exist (plan P006).
+	ErrSavedJumpHostNotFound = errors.New("store: saved jump host not found")
 )
 
 // SaveFunc persists an encoded model.Payload (wired to vault.Save by the
@@ -39,11 +41,12 @@ const saveDebounce = 300 * time.Millisecond
 // state; every mutation schedules a debounced (300 ms) save through the
 // SaveFunc callback.
 type Store struct {
-	mu          sync.RWMutex
-	folders     map[string]model.Folder
-	sessions    map[string]model.Session
-	credentials map[string]model.Credential
-	order       map[string][]string // parentID ("" = root) → ordered child node IDs
+	mu             sync.RWMutex
+	folders        map[string]model.Folder
+	sessions       map[string]model.Session
+	credentials    map[string]model.Credential
+	savedJumpHosts map[string]model.SavedJumpHost
+	order          map[string][]string // parentID ("" = root) → ordered child node IDs
 
 	timerMu sync.Mutex
 	timer   *time.Timer
@@ -55,11 +58,12 @@ type Store struct {
 // useful in tests).
 func New(save SaveFunc) *Store {
 	return &Store{
-		folders:     map[string]model.Folder{},
-		sessions:    map[string]model.Session{},
-		credentials: map[string]model.Credential{},
-		order:       map[string][]string{},
-		save:        save,
+		folders:        map[string]model.Folder{},
+		sessions:       map[string]model.Session{},
+		credentials:    map[string]model.Credential{},
+		savedJumpHosts: map[string]model.SavedJumpHost{},
+		order:          map[string][]string{},
+		save:           save,
 	}
 }
 
@@ -92,11 +96,18 @@ func (s *Store) encodeLocked() ([]byte, error) {
 	}
 	sort.Slice(credentials, func(i, j int) bool { return credentials[i].ID < credentials[j].ID })
 
+	savedJumpHosts := make([]model.SavedJumpHost, 0, len(s.savedJumpHosts))
+	for _, jh := range s.savedJumpHosts {
+		savedJumpHosts = append(savedJumpHosts, jh)
+	}
+	sort.Slice(savedJumpHosts, func(i, j int) bool { return savedJumpHosts[i].ID < savedJumpHosts[j].ID })
+
 	return json.Marshal(model.Payload{
-		Root:        append([]string(nil), s.order[""]...),
-		Folders:     nodes,
-		Sessions:    sessions,
-		Credentials: credentials,
+		Root:           append([]string(nil), s.order[""]...),
+		Folders:        nodes,
+		Sessions:       sessions,
+		Credentials:    credentials,
+		SavedJumpHosts: savedJumpHosts,
 	})
 }
 
@@ -152,6 +163,7 @@ func (s *Store) Load(payload []byte) error {
 	s.folders = map[string]model.Folder{}
 	s.sessions = map[string]model.Session{}
 	s.credentials = map[string]model.Credential{}
+	s.savedJumpHosts = map[string]model.SavedJumpHost{}
 	order := map[string][]string{}
 
 	for _, f := range p.Folders {
@@ -163,6 +175,9 @@ func (s *Store) Load(payload []byte) error {
 	for _, cred := range p.Credentials {
 		s.credentials[cred.ID] = cred
 	}
+	for _, jh := range p.SavedJumpHosts {
+		s.savedJumpHosts[jh.ID] = jh
+	}
 	// Defensive (plan P003 §4.1): a session whose CredentialID dangles —
 	// e.g. the credential was removed outside the store — is downgraded to
 	// its inline snapshot instead of failing at connect time.
@@ -172,6 +187,18 @@ func (s *Store) Load(payload []byte) error {
 		}
 		if _, ok := s.credentials[sess.CredentialID]; !ok {
 			sess.CredentialID = ""
+			s.sessions[id] = sess
+		}
+	}
+	// Defensive (plan P006): a session whose JumpHostRef dangles — e.g. the
+	// saved jump host was removed outside the store — is downgraded to its
+	// inline snapshot instead of failing at connect time.
+	for id, sess := range s.sessions {
+		if sess.JumpHostRef == "" {
+			continue
+		}
+		if _, ok := s.savedJumpHosts[sess.JumpHostRef]; !ok {
+			sess.JumpHostRef = ""
 			s.sessions[id] = sess
 		}
 	}
@@ -315,6 +342,9 @@ func (s *Store) CreateSession(folderID string, session model.Session) (string, e
 	if err := s.checkCredentialRefLocked(sess.CredentialID); err != nil {
 		return "", err
 	}
+	if err := s.checkJumpHostRefLocked(sess.JumpHostRef); err != nil {
+		return "", err
+	}
 	s.sessions[sess.ID] = sess
 	s.order[folderID] = append(s.order[folderID], sess.ID)
 	s.scheduleSave()
@@ -340,6 +370,9 @@ func (s *Store) UpdateSession(session model.Session) error {
 		return err
 	}
 	if err := s.checkCredentialRefLocked(sess.CredentialID); err != nil {
+		return err
+	}
+	if err := s.checkJumpHostRefLocked(sess.JumpHostRef); err != nil {
 		return err
 	}
 	s.sessions[sess.ID] = sess
@@ -484,6 +517,111 @@ func (s *Store) CredentialUsage(id string) int {
 	return n
 }
 
+// ------------------------------------------------------ saved jump hosts ---
+
+// CreateSavedJumpHost adds a named saved jump host (plan P006) and
+// returns its ID. Fully validated (name, host, port, user, auth XOR).
+func (s *Store) CreateSavedJumpHost(jh model.SavedJumpHost) (string, error) {
+	jh.ID = model.NewID()
+	if err := jh.Validate(); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.savedJumpHosts[jh.ID] = jh
+	s.scheduleSave()
+	return jh.ID, nil
+}
+
+// UpdateSavedJumpHost replaces a saved jump host's editable fields. A
+// non-empty ID is required. Referencing sessions keep their inline
+// snapshot; the saved host itself remains authoritative at connect time
+// (plan P006).
+func (s *Store) UpdateSavedJumpHost(jh model.SavedJumpHost) error {
+	if jh.ID == "" {
+		return fmt.Errorf("%w: empty ID", ErrSavedJumpHostNotFound)
+	}
+	if err := jh.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.savedJumpHosts[jh.ID]; !ok {
+		return fmt.Errorf("%w: %q", ErrSavedJumpHostNotFound, jh.ID)
+	}
+	s.savedJumpHosts[jh.ID] = jh
+	s.scheduleSave()
+	return nil
+}
+
+// DeleteSavedJumpHost removes a saved jump host and soft-nulls
+// JumpHostRef on every session referencing it (plan P006): those
+// sessions keep connecting with their inline snapshot. Returns the
+// number of sessions whose reference was cleared (for the A8-style
+// confirm dialog).
+func (s *Store) DeleteSavedJumpHost(id string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.savedJumpHosts[id]; !ok {
+		return 0, fmt.Errorf("%w: %q", ErrSavedJumpHostNotFound, id)
+	}
+	delete(s.savedJumpHosts, id)
+	affected := 0
+	for sessID, sess := range s.sessions {
+		if sess.JumpHostRef != id {
+			continue
+		}
+		sess.JumpHostRef = ""
+		s.sessions[sessID] = sess
+		affected++
+	}
+	s.scheduleSave()
+	return affected, nil
+}
+
+// ListSavedJumpHosts returns a copy of every saved jump host, sorted by
+// display name for a stable dropdown/manager order.
+func (s *Store) ListSavedJumpHosts() []model.SavedJumpHost {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]model.SavedJumpHost, 0, len(s.savedJumpHosts))
+	for _, jh := range s.savedJumpHosts {
+		out = append(out, jh)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// SavedJumpHost returns a copy of the saved jump host with the given ID.
+func (s *Store) SavedJumpHost(id string) (model.SavedJumpHost, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	jh, ok := s.savedJumpHosts[id]
+	if !ok {
+		return model.SavedJumpHost{}, fmt.Errorf("%w: %q", ErrSavedJumpHostNotFound, id)
+	}
+	return jh, nil
+}
+
+// SavedJumpHostUsage returns how many sessions currently reference the
+// saved jump host (for the A8-style delete-confirm dialog, plan P006).
+func (s *Store) SavedJumpHostUsage(id string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for _, sess := range s.sessions {
+		if sess.JumpHostRef == id {
+			n++
+		}
+	}
+	return n
+}
+
 // checkCredentialRefLocked enforces the plan P003 §4.1 invariant that a
 // session's CredentialID, when set, references an existing credential.
 // Requires s.mu.
@@ -493,6 +631,19 @@ func (s *Store) checkCredentialRefLocked(id string) error {
 	}
 	if _, ok := s.credentials[id]; !ok {
 		return fmt.Errorf("session.credentialId: references unknown credential %q", id)
+	}
+	return nil
+}
+
+// checkJumpHostRefLocked enforces the plan P006 invariant that a
+// session's JumpHostRef, when set, references an existing saved jump
+// host. Requires s.mu.
+func (s *Store) checkJumpHostRefLocked(id string) error {
+	if id == "" {
+		return nil
+	}
+	if _, ok := s.savedJumpHosts[id]; !ok {
+		return fmt.Errorf("session.jumpHostRef: references unknown saved jump host %q", id)
 	}
 	return nil
 }

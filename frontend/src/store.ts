@@ -18,7 +18,7 @@
 // closeTab): those bridge the Wails service bindings and the reactive
 // state in one place so components stay presentation-only.
 
-import { CredentialService, SessionService, TerminalService } from "../bindings/shelve/internal/wailsvc";
+import { CredentialService, JumpHostService, SessionService, TerminalService } from "../bindings/shelve/internal/wailsvc";
 import { toast } from "./components/toasts";
 
 export type VaultState = "create" | "locked" | "unlocked";
@@ -92,6 +92,13 @@ export interface SessionDTO {
      * time; the inline fields remain the fallback snapshot.
      */
     credentialId?: string;
+    /**
+     * Optional reference to a saved jump host (plan P006). While set, the
+     * backend replaces the whole inline jump chain with the saved host's
+     * hop at connect/test time; the inline rows remain the fallback
+     * snapshot.
+     */
+    jumpHostRef?: string;
 }
 
 /** Saved-credential read view (secret-free, plan P003 §4.3). */
@@ -108,6 +115,30 @@ export interface CredentialDTO {
 export interface CredentialInput {
     id?: string;
     name: string;
+    user: string;
+    authType: number;
+    password?: string;
+    keyPath?: string;
+}
+
+/** Saved-jump-host read view (secret-free, plan P006). */
+export interface SavedJumpHostDTO {
+    id: string;
+    name: string;
+    host: string;
+    port: number;
+    user: string;
+    authType: number;
+    hasPassword: boolean;
+    keyPath?: string;
+}
+
+/** Saved-jump-host write draft (password only flows INTO the vault). */
+export interface SavedJumpHostInput {
+    id?: string;
+    name: string;
+    host: string;
+    port: number;
     user: string;
     authType: number;
     password?: string;
@@ -205,6 +236,12 @@ export interface StoreState {
      */
     credentials: CredentialDTO[];
     /**
+     * Saved jump hosts (plan P006): secret-free DTOs used by the session
+     * editor's dropdown and the jump host manager. Refreshed on unlock
+     * and after every saved-jump-host mutation.
+     */
+    savedJumpHosts: SavedJumpHostDTO[];
+    /**
      * tabID → ordered list of transfer snapshots (sftp:progress events,
      * Phase 5c). The SFTP panel footer derives its progress line from this
      * cache. Never persisted.
@@ -257,6 +294,7 @@ export const initialState: StoreState = {
     activeTabID: null,
     leftPanelWidth: DEFAULT_LEFT_WIDTH,
     credentials: [],
+    savedJumpHosts: [],
     pendingSessions: {},
     forwards: {},
     sftpTransfers: {},
@@ -310,6 +348,19 @@ class Store {
         try {
             const credentials = (await CredentialService.List()) as unknown as CredentialDTO[];
             this.set({ credentials });
+        } catch (err) {
+            toast("error", String(err));
+        }
+    }
+
+    /**
+     * Re-fetch the saved jump hosts (plan P006). Called on unlock, when
+     * the session editor opens, and after saved-jump-host mutations.
+     */
+    async refreshSavedJumpHosts(): Promise<void> {
+        try {
+            const savedJumpHosts = (await JumpHostService.List()) as unknown as SavedJumpHostDTO[];
+            this.set({ savedJumpHosts });
         } catch (err) {
             toast("error", String(err));
         }

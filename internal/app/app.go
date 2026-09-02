@@ -43,6 +43,7 @@ type App struct {
 	vaultService      *wailsvc.VaultService
 	sessionService    *wailsvc.SessionService
 	credentialService *wailsvc.CredentialService
+	jumpHostService   *wailsvc.JumpHostService
 	terminalService   *wailsvc.TerminalService
 	sftpService       *wailsvc.SftpService
 	monitorService    *wailsvc.MonitorService
@@ -136,6 +137,7 @@ func New() (*App, error) {
 		vaultService:      wailsvc.NewVaultService(v, st, engine, sftpMgr, emit),
 		sessionService:    wailsvc.NewSessionService(st, v, engine, emit),
 		credentialService: wailsvc.NewCredentialService(st, v),
+		jumpHostService:   wailsvc.NewJumpHostService(st, v),
 		terminalService:   wailsvc.NewTerminalService(st, v, engine),
 		sftpService:       wailsvc.NewSftpService(v, sftpMgr),
 		monitorService:    wailsvc.NewMonitorService(v, monMgr),
@@ -160,6 +162,11 @@ func (a *App) SessionService() *wailsvc.SessionService {
 // CredentialService returns the Wails-facing credential service.
 func (a *App) CredentialService() *wailsvc.CredentialService {
 	return a.credentialService
+}
+
+// JumpHostService returns the Wails-facing saved-jump-host service.
+func (a *App) JumpHostService() *wailsvc.JumpHostService {
+	return a.jumpHostService
 }
 
 // TerminalService returns the Wails-facing terminal-tab service.

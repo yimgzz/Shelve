@@ -621,12 +621,13 @@ func countTreeNodes(nodes []store.TreeNode) int {
 	return n
 }
 
-// The vault file on disk must not carry plaintext secrets either.
+// The vault file on disk must not carry plaintext secrets either —
+// including saved jump host passwords (plan P006).
 func TestVaultFileOnDiskLeaksNothing(t *testing.T) {
 	isolatedXDG(t)
 	path := config.File(config.VaultFileName)
 	v := vault.New()
-	payload := []byte(`{"root":[],"folders":[],"sessions":[{"id":"s1","folderId":"","name":"leak-check","host":"h","port":22,"user":"u","auth":{"type":0,"password":"` + guardPassword + `"}}]}`)
+	payload := []byte(`{"root":[],"folders":[],"sessions":[{"id":"s1","folderId":"","name":"leak-check","host":"h","port":22,"user":"u","auth":{"type":0,"password":"` + guardPassword + `"}}],"savedJumpHosts":[{"id":"jh1","name":"leak-jh","host":"j.h","port":22,"user":"t","auth":{"type":0,"password":"` + guardPassword + `"}}]}`)
 	if err := v.Create(path, "master-pw-01", payload); err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +635,7 @@ func TestVaultFileOnDiskLeaksNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{guardPassword, "master-pw-01", "leak-check"} {
+	for _, secret := range []string{guardPassword, "master-pw-01", "leak-check", "leak-jh"} {
 		if strings.Contains(string(raw), secret) {
 			t.Fatalf("vault.json leaks %q", secret)
 		}

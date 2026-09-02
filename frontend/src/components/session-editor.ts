@@ -10,9 +10,10 @@
 
 import { AppService, SessionService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog, type DialogHandle } from "../ui/dialog";
-import { store, type SessionDTO, type JumpHostDTO, type CredentialDTO } from "../store";
+import { store, type SessionDTO, type JumpHostDTO, type CredentialDTO, type SavedJumpHostDTO } from "../store";
 import { toast } from "./toasts";
 import { openCredentialManager } from "./credential-dialog";
+import { openJumpHostManager } from "./jump-host-dialog";
 
 // model.AuthType (internal/model/model.go): AuthPassword=0, AuthKey=1.
 const AUTH_PASSWORD = 0;
@@ -56,6 +57,12 @@ export interface SessionInput {
     sftpInitialPath: string;
     /** Optional reference to a saved credential ("" = none). Plan P003. */
     credentialId: string;
+    /**
+     * Optional reference to a saved jump host ("" = none). While set, the
+     * backend replaces the whole inline chain with the saved host's hop at
+     * connect/test time (plan P006).
+     */
+    jumpHostRef: string;
 }
 
 const EXTRA_ARGS_HELP =
@@ -318,13 +325,28 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
     const jumpTitle = document.createElement("div");
     jumpTitle.className = "section-label";
     jumpTitle.textContent = "Jump hosts";
+    // Saved jump host picker (plan P006): picking one makes it the
+    // session's only hop (authoritative at connect time); "None" restores
+    // the editable inline chain.
+    const pickRow = document.createElement("div");
+    pickRow.className = "cred-pick-row";
+    const jhSelect = document.createElement("select");
+    jhSelect.className = "input";
+    const manageJhBtn = document.createElement("button");
+    manageJhBtn.type = "button";
+    manageJhBtn.className = "btn small";
+    manageJhBtn.textContent = "Manage…";
+    pickRow.append(jhSelect, manageJhBtn);
+    const jhHint = document.createElement("div");
+    jhHint.className = "hint";
+    jhHint.style.display = "none";
     const jumpRows = document.createElement("div");
     jumpRows.className = "jump-rows";
     const addJump = document.createElement("button");
     addJump.type = "button";
     addJump.className = "btn small";
     addJump.textContent = "+ Add jump host";
-    jumpSection.append(jumpTitle, jumpRows, addJump);
+    jumpSection.append(jumpTitle, pickRow, jhHint, jumpRows, addJump);
 
     interface JumpHandles {
         el: HTMLElement;
@@ -417,6 +439,81 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         makeJumpRow(j);
     }
     addJump.addEventListener("click", () => makeJumpRow());
+
+    // ---- Saved jump host selection (plan P006) ----
+    let jumpHostRefId = editing && initial!.jumpHostRef ? initial!.jumpHostRef : "";
+
+    function fillJumpHostOptions(selectedID: string): void {
+        jhSelect.replaceChildren();
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = "None (inline jump hosts)";
+        jhSelect.appendChild(none);
+        for (const jh of store.getState().savedJumpHosts) {
+            const opt = document.createElement("option");
+            opt.value = jh.id;
+            opt.textContent = jh.name;
+            jhSelect.appendChild(opt);
+        }
+        jhSelect.value = selectedID;
+    }
+
+    function clearJumpRows(): void {
+        for (const h of [...jumpHandles]) {
+            h.el.remove();
+        }
+        jumpHandles.length = 0;
+    }
+
+    /** Apply a picked saved jump host (replaces the inline chain) or clear it. */
+    function applySavedJumpHost(jh: SavedJumpHostDTO | null): void {
+        if (!jh) {
+            jumpHostRefId = "";
+            jhHint.style.display = "none";
+            addJump.style.display = "";
+            return;
+        }
+        jumpHostRefId = jh.id;
+        clearJumpRows();
+        makeJumpRow({
+            host: jh.host,
+            port: jh.port,
+            user: jh.user,
+            authType: jh.authType,
+            hasPassword: jh.hasPassword,
+            keyPath: jh.keyPath,
+        });
+        const row = jumpHandles[0];
+        if (row && !row.keyRadio.checked && jh.hasPassword) {
+            row.pw.placeholder = "from saved jump host (masked)";
+        }
+        addJump.style.display = "none";
+        jhHint.style.display = "";
+        jhHint.textContent = `"${jh.name}" replaces the inline chain at connect time. Choose "None" to edit hops manually.`;
+    }
+
+    jhSelect.addEventListener("change", () => {
+        const id = jhSelect.value;
+        const jh = id ? store.getState().savedJumpHosts.find((x) => x.id === id) || null : null;
+        applySavedJumpHost(jh);
+    });
+
+    manageJhBtn.addEventListener("click", async () => {
+        const picked = await openJumpHostManager({ pick: true });
+        await store.refreshSavedJumpHosts();
+        fillJumpHostOptions(picked ? picked.id : jumpHostRefId);
+        if (picked) {
+            applySavedJumpHost(picked);
+        }
+    });
+
+    fillJumpHostOptions(jumpHostRefId);
+    if (jumpHostRefId) {
+        const jh = store.getState().savedJumpHosts.find((x) => x.id === jumpHostRefId);
+        if (jh) {
+            applySavedJumpHost(jh);
+        }
+    }
 
     // ---- Extra Args ----
     const extraArgs = document.createElement("input");
@@ -514,6 +611,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
             extraArgs: extraArgs.value.trim(),
             sftpInitialPath: sftpPath.value.trim(),
             credentialId: credentialId || "",
+            jumpHostRef: jumpHostRefId || "",
         };
         const localErr: Array<[HTMLElement, string]> = [];
         if (!input.name) {

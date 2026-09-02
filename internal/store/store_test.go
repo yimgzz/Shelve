@@ -815,3 +815,221 @@ func TestCredentialReferenceSemantics(t *testing.T) {
 		t.Fatalf("inline snapshot lost after Load: %+v", sessAfter)
 	}
 }
+
+func testSavedJumpHost(name string) model.SavedJumpHost {
+	return model.SavedJumpHost{
+		Name: name,
+		Host: "jump.example.com",
+		Port: 22,
+		User: "tunnel",
+		Auth: model.Auth{Type: model.AuthPassword, Password: "jump-secret-" + name},
+	}
+}
+
+// TestSavedJumpHostCRUD covers plan P006: create/list/update/delete of
+// named saved jump hosts, each mutation triggering the same persistence
+// path.
+func TestSavedJumpHostCRUD(t *testing.T) {
+	s := New(nil)
+
+	jid, err := s.CreateSavedJumpHost(testSavedJumpHost("bastion-prod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jid2, err := s.CreateSavedJumpHost(testSavedJumpHost("bastion-backup"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jid == jid2 {
+		t.Fatal("duplicate saved jump host IDs")
+	}
+
+	// Validation gates.
+	if _, err := s.CreateSavedJumpHost(model.SavedJumpHost{}); err == nil {
+		t.Fatal("empty saved jump host accepted")
+	}
+	if _, err := s.CreateSavedJumpHost(model.SavedJumpHost{
+		Name: "x", Host: "j.example.com", Port: 22, User: "u",
+		Auth: model.Auth{Type: model.AuthKey, KeyPath: "/k"},
+	}); err != nil {
+		t.Fatalf("valid key saved jump host rejected: %v", err)
+	}
+
+	list := s.ListSavedJumpHosts()
+	if len(list) != 3 {
+		t.Fatalf("list len = %d, want 3", len(list))
+	}
+	if list[0].Name > list[1].Name {
+		t.Fatalf("list not sorted by name: %+v", list)
+	}
+
+	got, err := s.SavedJumpHost(jid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "bastion-prod" || got.Auth.Password != "jump-secret-bastion-prod" {
+		t.Fatalf("saved jump host = %+v", got)
+	}
+
+	updated := got
+	updated.Name = "bastion-prod-v2"
+	if err := s.UpdateSavedJumpHost(updated); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.SavedJumpHost(jid)
+	if got.Name != "bastion-prod-v2" {
+		t.Fatalf("update not applied: %+v", got)
+	}
+	if err := s.UpdateSavedJumpHost(model.SavedJumpHost{ID: "nope", Name: "x",
+		Host: "j.example.com", Port: 22, User: "u",
+		Auth: model.Auth{Type: model.AuthPassword, Password: "p"}}); !errors.Is(err, ErrSavedJumpHostNotFound) {
+		t.Fatalf("update unknown saved jump host: %v", err)
+	}
+	if err := s.UpdateSavedJumpHost(model.SavedJumpHost{Name: "no-id",
+		Host: "j.example.com", Port: 22, User: "u",
+		Auth: model.Auth{Type: model.AuthPassword, Password: "p"}}); !errors.Is(err, ErrSavedJumpHostNotFound) {
+		t.Fatalf("update without ID: %v", err)
+	}
+
+	if _, err := s.DeleteSavedJumpHost(jid2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SavedJumpHost(jid2); !errors.Is(err, ErrSavedJumpHostNotFound) {
+		t.Fatalf("deleted saved jump host still found: %v", err)
+	}
+}
+
+// TestSavedJumpHostReferenceSemantics covers plan P006:
+//   - CreateSession/UpdateSession reject a dangling JumpHostRef;
+//   - DeleteSavedJumpHost soft-nulls JumpHostRef on referencing sessions
+//     (the inline snapshot remains, so they keep connecting);
+//   - Load clears references to saved jump hosts that vanished externally;
+//   - Encode/Load round-trips the savedJumpHosts slice.
+func TestSavedJumpHostReferenceSemantics(t *testing.T) {
+	s := New(nil)
+	jid, err := s.CreateSavedJumpHost(testSavedJumpHost("bastion-dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFolder("", "F")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A session referencing the saved jump host keeps a valid inline
+	// snapshot of its hop chain.
+	sess := testSession("dev-box")
+	sess.JumpHosts = []model.JumpHost{
+		{Host: "jump.example.com", Port: 22, User: "tunnel",
+			Auth: model.Auth{Type: model.AuthPassword, Password: "jump-secret-bastion-dev"}},
+	}
+	sess.JumpHostRef = jid
+	sid, err := s.CreateSession(f, sess)
+	if err != nil {
+		t.Fatalf("session with valid saved jump host ref rejected: %v", err)
+	}
+
+	// Dangling reference rejected.
+	bad := testSession("bad-ref")
+	bad.JumpHostRef = "does-not-exist"
+	if _, err := s.CreateSession(f, bad); err == nil {
+		t.Fatal("session with unknown saved jump host ref accepted")
+	}
+
+	// UpdateSession enforces the same rule.
+	sess2 := sess
+	sess2.Name = "dev-box-2"
+	sess2.JumpHostRef = "does-not-exist"
+	if err := s.UpdateSession(sess2); err == nil {
+		t.Fatal("update with unknown saved jump host ref accepted")
+	}
+
+	// Duplicate keeps the reference and the snapshot chain.
+	dupID, err := s.DuplicateSession(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dup, _ := s.Session(dupID)
+	if dup.JumpHostRef != jid {
+		t.Fatalf("duplicate jumpHostRef = %q, want %q", dup.JumpHostRef, jid)
+	}
+	if len(dup.JumpHosts) != 1 {
+		t.Fatalf("duplicate inline jump chain lost: %+v", dup.JumpHosts)
+	}
+
+	// Usage reports both referencing sessions.
+	if n := s.SavedJumpHostUsage(jid); n != 2 {
+		t.Fatalf("saved jump host usage = %d, want 2", n)
+	}
+
+	// Deleting the saved jump host nulls the reference on both sessions
+	// and reports the affected count; the inline snapshots survive.
+	affected, err := s.DeleteSavedJumpHost(jid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected != 2 {
+		t.Fatalf("affected sessions = %d, want 2", affected)
+	}
+	for _, id := range []string{sid, dupID} {
+		got, _ := s.Session(id)
+		if got.JumpHostRef != "" {
+			t.Fatalf("session %s jumpHostRef = %q after delete, want cleared", id, got.JumpHostRef)
+		}
+		if len(got.JumpHosts) != 1 || got.JumpHosts[0].Host != "jump.example.com" {
+			t.Fatalf("session %s inline jump snapshot lost: %+v", id, got.JumpHosts)
+		}
+	}
+
+	// Round trip through Encode/Load preserves saved jump hosts; Load
+	// clears a reference that points at a host removed outside the store.
+	jid3, err := s.CreateSavedJumpHost(testSavedJumpHost("bastion-third"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess3 := testSession("ref-third")
+	sess3.JumpHostRef = jid3
+	s3id, err := s.CreateSession(f, sess3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := s.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p model.Payload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.SavedJumpHosts) != 1 { // only "bastion-third" survives
+		t.Fatalf("payload savedJumpHosts = %d, want 1", len(p.SavedJumpHosts))
+	}
+	found := false
+	for _, jh := range p.SavedJumpHosts {
+		if jh.ID == jid3 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("saved jump host %q missing from encoded payload", jid3)
+	}
+
+	// Simulate an external removal: strip the savedJumpHosts then Load.
+	var stripped model.Payload
+	if err := json.Unmarshal(raw, &stripped); err != nil {
+		t.Fatal(err)
+	}
+	stripped.SavedJumpHosts = nil
+	strippedRaw, _ := json.Marshal(stripped)
+	s2 := New(nil)
+	if err := s2.Load(strippedRaw); err != nil {
+		t.Fatal(err)
+	}
+	sessAfter, err := s2.Session(s3id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessAfter.JumpHostRef != "" {
+		t.Fatalf("dangling jumpHostRef = %q after Load, want cleared", sessAfter.JumpHostRef)
+	}
+}

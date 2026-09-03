@@ -6,7 +6,7 @@
 // buttons ([Retry] → Reconnect, [Close tab]).
 
 import { store } from "../store";
-import type { Tab, TerminalSettings } from "../store";
+import type { Tab, TabState, TerminalSettings } from "../store";
 import { TermPool } from "../terminal/xterm";
 import { TerminalService } from "../../bindings/shelve/internal/wailsvc";
 
@@ -14,6 +14,7 @@ let paneHost: HTMLElement | null = null;
 let paneEl: HTMLElement | null = null;
 let unsub: (() => void) | null = null;
 let lastActive: string | null = null;
+let lastActiveState: TabState | null = null;
 /**
  * Reference identity of the last reconcile inputs (tabs / activeTabID /
  * settings.terminal). Guards reconcile against unrelated store churn
@@ -201,12 +202,25 @@ function reconcile(): void {
         renderOverlay(p.overlay, tab);
     }
 
-    // Focus/fit the newly-activated tab (only when the activation changed).
+    // Focus/fit the newly-activated tab — and re-focus when the active tab
+    // becomes "ready". The session-open path activates while the tab is
+    // still "connecting"; host-key / key-passphrase prompts (vault:hostkey-
+    // prompt, vault:key-prompt) steal focus during that window and only
+    // restore it to their own previously-focused element, never the
+    // terminal. Re-activating on the connecting→ready transition repairs it
+    // so the user can type immediately.
     const active = tabs.find((t) => t.id === activeTabID);
-    if (active && active.id !== lastActive && active.state !== "error" && active.state !== "closed") {
+    const becameReady = active !== undefined && active.state === "ready" && lastActiveState !== "ready";
+    if (
+        active &&
+        (active.id !== lastActive || becameReady) &&
+        active.state !== "error" &&
+        active.state !== "closed"
+    ) {
         TermPool.activate(active.id);
     }
     lastActive = active ? active.id : null;
+    lastActiveState = active ? active.state : null;
 }
 
 /**

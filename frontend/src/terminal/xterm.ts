@@ -225,10 +225,23 @@ function recoverRenderer(e: Entry): void {
 
         const xel = e.term.element as HTMLElement | null;
         if (xel) {
+            // Focus-preserving visibility nudge: hiding the element makes its
+            // helper textarea unfocusable — a focus() call while hidden is a
+            // silent no-op, and an already-focused terminal gets blurred.
+            // Capture the focus owner up front and restore it once the element
+            // is visible again on the next frame.
+            const wasFocused = xel.contains(document.activeElement);
             xel.style.visibility = "hidden";
             void xel.offsetHeight; // force a synchronous reflow
             requestAnimationFrame(() => {
                 xel.style.visibility = "";
+                if (wasFocused) {
+                    try {
+                        e.term.focus();
+                    } catch {
+                        /* ignore */
+                    }
+                }
             });
         }
     } catch {
@@ -591,6 +604,13 @@ export const TermPool = {
             return;
         }
         doFit(tabID, e);
+        // Focus FIRST while the pane is visible: recoverRenderer()'s recovery
+        // nudge below hides the xterm element until the next frame, and
+        // focusing an element inside a visibility:hidden subtree is a silent
+        // no-op — the helper textarea never receives keydowns, so typing
+        // would require a click. recoverRenderer() preserves this focus
+        // across its visibility toggle.
+        e.term.focus();
         // WebKitGTK keeps compositing the pane's pre-hide surface after a tab
         // switch (display:none → flex): xterm's renderer does not repaint the
         // re-shown terminal on its own (the stale canvas layer shows the
@@ -603,9 +623,18 @@ export const TermPool = {
         requestAnimationFrame(() => {
             if (pool.get(tabID) === e) {
                 recoverRenderer(e);
+                // The nudge above hid the element again; re-assert focus on
+                // the NEXT frame, after its deferred visibility restore, so
+                // the textarea is focusable. This also covers WebKitGTK
+                // dropping a same-frame focus() right after the
+                // display:none→flex toggle (deferred layout).
+                requestAnimationFrame(() => {
+                    if (pool.get(tabID) === e) {
+                        e.term.focus();
+                    }
+                });
             }
         });
-        e.term.focus();
     },
 
     /** Tear down a single tab's terminal instance. */

@@ -17,6 +17,10 @@
 //   - Mouse (plan P003): a left-drag selection copies to the system
 //     clipboard when the gesture completes; right-click pastes via
 //     term.paste() (same onData → Write path, bracketed paste honored).
+//   - Keyboard (plan P008): Ctrl+Shift+V (physical) pastes the system
+//     clipboard via the same term.paste() path; all terminal control keys
+//     (Ctrl+C/Z/A…, Ctrl+[ \ ], Shift+Backspace) are keyed to the physical
+//     code, so they send identical bytes on any keyboard layout.
 //   - destroy(tabID) on tab close, destroyAll() on vault lock. All addons
 //     are disposed with the terminal instance.
 
@@ -30,6 +34,7 @@ import { TerminalService } from "../../bindings/shelve/internal/wailsvc";
 import type { TerminalSettings } from "../store";
 import { currentThemeTokens } from "../ui/theme";
 import { copyText, readText } from "../ui/clipboard";
+import { controlCharForCode, isCtrlShiftV } from "../ui/keys";
 import { bytesToB64 } from "../ui/b64";
 import { sendInput } from "./ws";
 
@@ -485,15 +490,35 @@ export const TermPool = {
             flushInput(tabID, entry);
         });
 
-        // Custom key handling — terminal-native semantics for two keys that
-        // xterm's defaults get wrong in a selection-capable webview:
+        // Custom key handling — plan P008 (layout-independent hotkeys).
         //
-        // Ctrl+C: xterm copies the selection instead of sending ETX when any
-        // text is selected, so the interrupt silently never fires (and this
-        // app's drag-select makes selections common). Always emit ETX so the
-        // remote tty (ISIG/VINTR) discards the input line and prints a fresh
-        // prompt. Copy is not lost: drag-selection already auto-copies (plan
-        // P003).
+        // Physical-key rule (D1): every command chord is identified by
+        // KeyboardEvent.code (the US physical position), which WebKitGTK
+        // keeps stable under any keyboard layout. xterm's own Ctrl path
+        // reads the layout-mapped keyCode — 0 on Cyrillic layouts — so it is
+        // unusable there; we intercept the chords, send the bytes ourselves,
+        // and return false so xterm neither double-sends nor no-ops. Plain
+        // text (layout-aware — keypress/composition path), arrows, Enter,
+        // Tab, Shift+Tab, and the F-keys pass through untouched.
+        //
+        // Chords sent (bytes per ui/keys, xterm-5.5 English parity, D4):
+        //
+        // Ctrl+letter (Ctrl+Shift+C too — Shift ignored, D3): the control
+        // byte, including Ctrl+C. xterm copies the selection on Ctrl+C with
+        // text selected, so the interrupt silently never fires (drag-select
+        // makes selections common); always emitting ETX here lets the remote
+        // tty (ISIG/VINTR) discard the input line and print a fresh prompt.
+        // Copy is not lost: drag-selection already auto-copies (P003).
+        //
+        // Symbol control combos: Ctrl+Space, Ctrl+2 (with Shift → ^@),
+        // Ctrl+3…7, Ctrl+8, Ctrl+[ \ ], Ctrl+/ (with Shift) — exact parity
+        // with what US users get on xterm 5.5, including the quirk combos.
+        //
+        // Ctrl+Shift+V (physical): paste the system clipboard via
+        // term.paste() — the same onData → Write path as right-click (P003),
+        // bracketed-paste handling honored. Gated on the state overlay being
+        // hidden (state "ready"), exactly like the right-click handler; an
+        // empty clipboard is a no-op. Plain Ctrl+V stays 0x16 (D3).
         //
         // Shift+Backspace: xterm maps it to a single-character erase byte.
         // Emit ^W (VWERASE 0x17) instead — the remote line editor deletes the
@@ -506,12 +531,32 @@ export const TermPool = {
             if (e.type !== "keydown") {
                 return true;
             }
-            const ctrl = e.ctrlKey || e.metaKey;
-            if (ctrl && !e.altKey && e.key.toLowerCase() === "c") {
-                sendBytes(tabID, new TextEncoder().encode("\x03"));
+            if (isCtrlShiftV(e)) {
+                // preventDefault: WebKit's native paste accelerator could
+                // otherwise fire a DOM `paste` event → double paste.
+                e.preventDefault();
+                e.stopPropagation();
+                const overlay = parent.closest(".term-pane")?.querySelector<HTMLElement>(".term-overlay");
+                if (overlay && overlay.style.display !== "none") {
+                    return false; // not "ready" — same gate as right-click
+                }
+                void readText().then((text) => {
+                    if (text) {
+                        entry.term.paste(text);
+                    }
+                });
                 return false;
             }
-            if (e.shiftKey && !ctrl && !e.altKey && e.key === "Backspace") {
+            const cc = controlCharForCode(e);
+            if (cc !== null) {
+                e.preventDefault();
+                e.stopPropagation();
+                sendBytes(tabID, new TextEncoder().encode(cc));
+                return false;
+            }
+            // e.code is layout-invariant (Backspace is Backspace on every
+            // layout); same semantics as the pre-P008 e.key check.
+            if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Backspace") {
                 sendBytes(tabID, new TextEncoder().encode("\x17"));
                 return false;
             }

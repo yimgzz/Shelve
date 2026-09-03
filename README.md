@@ -198,10 +198,15 @@ non-loopback interfaces), **uptime**, and **disk** usage of the main partition
 | Ctrl+, | Open Settings |
 | F2 / Delete | Rename / delete the selected tree node |
 | Esc | Close the topmost modal / clear search |
+| Ctrl+Shift+V | Paste the system clipboard into the active terminal (bracketed-paste safe) |
 | Ctrl+Shift+E | Toggle SFTP browser (mirrors the Settings checkbox) |
 
 Shortcuts are suppressed while you are typing in a form field (except Esc,
 which the dialogs/search handle themselves).
+
+All shortcuts and terminal control keys are keyed to the **physical key
+position** (US layout) via `KeyboardEvent.code`, so they fire identically
+under any active keyboard layout; plain text input remains layout-aware.
 
 ## First run & master password
 

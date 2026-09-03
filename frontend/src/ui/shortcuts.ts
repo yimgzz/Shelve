@@ -2,6 +2,10 @@
 // master plan §6 Shortcuts). One document-level keydown listener installed
 // at boot. Registers the FULL master-plan table.
 //
+// All chords are matched on KeyboardEvent.code (the physical US position),
+// which is stable under any keyboard layout — `key`/`keyCode` are
+// layout-mapped and break off English layouts (plan P008, D1/D5).
+//
 // Typing rule: while any form field (input/textarea/select/contenteditable)
 // has focus, ALL shortcuts are suppressed (the router returns early). Esc is
 // intentionally NOT handled here — the modal (dialog.ts), search box and
@@ -106,66 +110,68 @@ export function initShortcuts(): void {
         const shift = e.shiftKey;
         const alt = e.altKey;
         const noMods = !ctrl && !shift && !alt;
-        const key = e.key.toLowerCase();
+        // Physical US position — layout-stable (plan P008).
+        const code = e.code;
 
         // Ctrl+K / Ctrl+L → focus search.
-        if (ctrl && !shift && !alt && (key === "k" || key === "l")) {
+        if (ctrl && !shift && !alt && (code === "KeyK" || code === "KeyL")) {
             e.preventDefault();
             focusSearch();
             return;
         }
 
         // Ctrl+T → connect selected / new-session draft.
-        if (ctrl && !shift && !alt && key === "t") {
+        if (ctrl && !shift && !alt && code === "KeyT") {
             e.preventDefault();
             connectOrCreate();
             return;
         }
 
         // Ctrl+W → close active tab.
-        if (ctrl && !shift && !alt && key === "w") {
+        if (ctrl && !shift && !alt && code === "KeyW") {
             e.preventDefault();
             closeActiveTab();
             return;
         }
 
         // Ctrl+, → settings dialog.
-        if (ctrl && !shift && !alt && e.key === ",") {
+        if (ctrl && !shift && !alt && code === "Comma") {
             e.preventDefault();
             openSettingsDialog();
             return;
         }
 
         // Ctrl+Tab / Ctrl+Shift+Tab → cycle tabs.
-        if (ctrl && e.key === "Tab") {
+        if (ctrl && code === "Tab") {
             e.preventDefault();
             cycleTab(shift ? -1 : 1);
             return;
         }
 
-        // Ctrl+1…9 → activate nth tab.
-        if (ctrl && !shift && !alt && /^[1-9]$/.test(e.key)) {
+        // Ctrl+1…9 → activate nth tab (main row or numpad, as before).
+        const digit = /^Digit([1-9])$/.exec(code) ?? /^Numpad([1-9])$/.exec(code);
+        if (ctrl && !shift && !alt && digit) {
             e.preventDefault();
-            activateNth(Number(e.key));
+            activateNth(Number(digit[1]));
             return;
         }
 
         // F2 → rename selected tree node.
-        if (noMods && e.key === "F2") {
+        if (noMods && code === "F2") {
             e.preventDefault();
             renameSelectedNode();
             return;
         }
 
         // Delete → delete selected tree node (A8 confirm inside).
-        if (noMods && e.key === "Delete") {
+        if (noMods && code === "Delete") {
             e.preventDefault();
             deleteSelectedNode();
             return;
         }
 
         // Ctrl+Shift+E → toggle SFTP browser.
-        if (ctrl && shift && !alt && key === "e") {
+        if (ctrl && shift && !alt && code === "KeyE") {
             e.preventDefault();
             void toggleSftp();
         }

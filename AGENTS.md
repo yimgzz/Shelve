@@ -185,9 +185,13 @@ Notes:
   a confirm dialog showing the affected count (A8).
 - **UI language is English only.** Shortcuts: Ctrl+K/L search, Ctrl+T connect,
   Ctrl+W close tab, Ctrl+Tab cycle, Ctrl+, settings, F2/Delete rename/delete,
-  Esc close modal, Ctrl+Shift+E toggle SFTP browser. Terminal keys: Ctrl+C
-  always sends the interrupt (ETX, even with a selection) — the line resets to
-  a fresh prompt; Shift+Backspace deletes the previous word (^W).
+  Esc close modal, Ctrl+Shift+E toggle SFTP browser. All shortcuts and
+  terminal control keys are keyed to the physical key position (US layout) via
+  `KeyboardEvent.code`, so they fire identically under any keyboard layout;
+  plain text input remains layout-aware. Terminal keys: Ctrl+C always sends
+  the interrupt (ETX, even with a selection) — the line resets to a fresh
+  prompt; Shift+Backspace deletes the previous word (^W); Ctrl+Shift+V pastes
+  the system clipboard into the active terminal.
 - **Integration tests** use build tag `integration` and spin up `docker/sshd`
   via testcontainers. Run with `make test-integration`.
 

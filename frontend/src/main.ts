@@ -65,7 +65,6 @@ function toSettings(raw: Record<string, unknown>): Settings {
         },
         textEditorCommand: String(raw.textEditorCommand ?? "xdg-open"),
         sftpInitialPath: String(raw.sftpInitialPath ?? "~"),
-        sftpOpenCommand: String(raw.sftpOpenCommand ?? "xdg-open"),
         window: {
             width: Number(win.width ?? 1280),
             height: Number(win.height ?? 800),

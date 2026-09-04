@@ -49,9 +49,6 @@ func TestSftpServiceGating(t *testing.T) {
 	if _, err := svc.PickLocalFiles("t", false); !errors.Is(err, vault.ErrLocked) {
 		t.Fatalf("PickLocalFiles while locked = %v, want ErrLocked", err)
 	}
-	if _, err := svc.OpenRemoteFile("t", "/x"); !errors.Is(err, vault.ErrLocked) {
-		t.Fatalf("OpenRemoteFile while locked = %v, want ErrLocked", err)
-	}
 	opErrs := []error{
 		svc.Upload("t", nil, "/"),
 		svc.EditRemoteText("t", "/x"),
@@ -85,9 +82,6 @@ func TestSftpServiceGating(t *testing.T) {
 	}
 	if err := svc.EditRemoteText("t", "/x"); !errors.Is(err, sftp.ErrNoProvider) {
 		t.Fatalf("EditRemoteText = %v, want ErrNoProvider", err)
-	}
-	if _, err := svc.OpenRemoteFile("t", "/x"); !errors.Is(err, sftp.ErrNoProvider) {
-		t.Fatalf("OpenRemoteFile = %v, want ErrNoProvider", err)
 	}
 
 	// Dialog-free fallback: the picker is unsupported in this build.

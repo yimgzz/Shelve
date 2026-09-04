@@ -8,13 +8,13 @@
 // Header: [×] close + back button + editable path bar (Enter to
 // navigate, Esc/blur reverts), [Upload] [New folder] [Refresh]. List rows:
 // icon / name / size / modified.
-// Double-click: dir → navigate, file → OpenRemoteFile (local default app).
-// Context menu: Open / Edit as text / Download… / Upload to here… / New
-// folder… / Rename… / Delete…. "Edit as text" (EditRemoteText) downloads
-// the file (any name; the backend rejects >2 MiB and binary content) to
-// tmp/, opens the configured editor and re-uploads it on save-detection —
-// the backend is silent except for "Saved to …" / error toasts, so the
-// panel keeps no per-file "editing" state.
+// Double-click: dir → navigate, file → EditRemoteText (Edit as text).
+// Context menu: Edit as text / Download… / Upload to here… / New folder… /
+// Rename… / Delete…. "Edit as text" (EditRemoteText) downloads the file
+// (any name; the backend rejects >2 MiB and binary content) to tmp/, opens
+// the configured editor and re-uploads it on save-detection — the backend
+// is silent except for "Saved to …" / error toasts, so the panel keeps no
+// per-file "editing" state.
 // Footer carries the transfer progress line fed by the store's sftp:progress
 // cache.
 
@@ -406,9 +406,10 @@ function openEntry(entry: SftpEntryDTO): void {
         void loadList();
         return;
     }
-    // Non-directory double-click opens the file with the local default app
-    // (plan P002 §4.2); "Edit as text" stays a context-menu action.
-    void openRemote(entry);
+    // Non-directory double-click runs "Edit as text" (the P002 local-app
+    // open action was superseded and removed); the backend enforces the
+    // 2 MiB cap and toasts the error for oversized/binary files.
+    void startEdit(entry);
 }
 
 /**
@@ -422,15 +423,6 @@ async function startEdit(entry: SftpEntryDTO): Promise<void> {
     const full = joinRemote(curPath, entry.name);
     try {
         await SftpService.EditRemoteText(tabID, full);
-    } catch (err) {
-        toast("error", String(err));
-    }
-}
-
-/** Open a remote file with the local default app via OpenRemoteFile. */
-async function openRemote(entry: SftpEntryDTO): Promise<void> {
-    try {
-        await SftpService.OpenRemoteFile(tabID, joinRemote(curPath, entry.name));
     } catch (err) {
         toast("error", String(err));
     }
@@ -704,7 +696,6 @@ function updateFooter(): void {
 function openPanelContext(x: number, y: number, entry: SftpEntryDTO): void {
     const items: MenuItem[] = [];
     items.push(
-        { label: "Open", action: () => openEntry(entry) },
         // Any file is editable (dotfiles, no extension, binary extensions);
         // only directories are excluded. The backend still enforces the
         // 2 MiB cap and toasts the error if the file is over it.

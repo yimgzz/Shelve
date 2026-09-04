@@ -50,8 +50,6 @@ export interface Settings {
     textEditorCommand: string;
     /** Global SFTP browser start path ("~" default). Plan P002. */
     sftpInitialPath: string;
-    /** Local handler command for the SFTP "Open" action (xdg-open default). Plan P002. */
-    sftpOpenCommand: string;
     window: WindowSettings;
 }
 
@@ -289,7 +287,6 @@ export const initialState: StoreState = {
         terminal: { fontFamily: "monospace", fontSize: 13, scrollback: 10000 },
         textEditorCommand: "xdg-open",
         sftpInitialPath: "~",
-        sftpOpenCommand: "xdg-open",
         window: { width: 1280, height: 800, leftWidth: DEFAULT_LEFT_WIDTH, sftpWidth: DEFAULT_SFTP_WIDTH },
     },
     vaultState: "locked",

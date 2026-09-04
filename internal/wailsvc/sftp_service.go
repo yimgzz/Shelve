@@ -130,21 +130,6 @@ func (s *SftpService) EditRemoteText(tabID, remotePath string) error {
 	return s.mgr.EditRemoteText(tabID, remotePath, settings.TextEditorCommand)
 }
 
-// OpenRemoteFile downloads a remote file to a local temp path and launches
-// the local system default handler on it (no file bytes over IPC, plan P002).
-// The open command comes from settings (config.Load); it is run verbatim with
-// the temp path appended last. Returns the temp path for the toast.
-func (s *SftpService) OpenRemoteFile(tabID, remotePath string) (string, error) {
-	if err := s.requireUnlocked(); err != nil {
-		return "", err
-	}
-	settings, err := config.Load()
-	if err != nil {
-		return "", err
-	}
-	return s.mgr.OpenRemoteFile(tabID, remotePath, settings.SftpOpenCommand)
-}
-
 // CancelEdit aborts an in-flight EditRemoteText.
 func (s *SftpService) CancelEdit(tabID string) error {
 	if err := s.requireUnlocked(); err != nil {

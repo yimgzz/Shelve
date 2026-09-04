@@ -3,6 +3,12 @@
 > Status: Draft for review
 > Scope: SFTP start-path configuration + open-on-double-click
 > Owner: Architect (this document) → implemented in Code mode
+>
+> Superseded (2026-09-04): the Open-on-double-click part
+> (`OpenRemoteFile`, `sftpOpenCommand` setting, 'Open' menu item) was
+> removed; file double-click now runs 'Edit as text'. See
+> `plans/1788531512181-sftp-remove-open-command.md`. The configurable
+> start-path part remains in force.
 
 ## 1. Goal
 

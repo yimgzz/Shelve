@@ -253,7 +253,6 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	s.SftpBrowserEnabled = true
 	s.MonitoringEnabled = false
 	s.SftpInitialPath = "/srv/data"
-	s.SftpOpenCommand = "xdg-open --raw"
 	s.Terminal.FontSize = 14
 	s.Window.Width = 1440
 	s.Window.Height = 900
@@ -404,7 +403,7 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 	for k := range m {
 		switch k {
 		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "monitoringEnabled",
-			"terminal", "textEditorCommand", "sftpInitialPath", "sftpOpenCommand", "window":
+			"terminal", "textEditorCommand", "sftpInitialPath", "window":
 		default:
 			t.Fatalf("unexpected settings key %q", k)
 		}
@@ -415,11 +414,11 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 // defaults and empty values normalize correctly (plan P002 §4.1).
 func TestSftpDefaultsAndNormalize(t *testing.T) {
 	d := DefaultSettings()
-	if d.SftpInitialPath != "~" || d.SftpOpenCommand != "xdg-open" {
-		t.Fatalf("defaults = initial %q open %q, want ~ / xdg-open", d.SftpInitialPath, d.SftpOpenCommand)
+	if d.SftpInitialPath != "~" {
+		t.Fatalf("default sftpInitialPath = %q, want ~", d.SftpInitialPath)
 	}
 	isolatedXDG(t)
-	raw := `{"sftpInitialPath":"","sftpOpenCommand":""}`
+	raw := `{"sftpInitialPath":""}`
 	if err := os.MkdirAll(Path(), DirPerm); err != nil {
 		t.Fatal(err)
 	}
@@ -430,8 +429,8 @@ func TestSftpDefaultsAndNormalize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got.SftpInitialPath != "~" || got.SftpOpenCommand != "xdg-open" {
-		t.Fatalf("normalized = initial %q open %q, want ~ / xdg-open", got.SftpInitialPath, got.SftpOpenCommand)
+	if got.SftpInitialPath != "~" {
+		t.Fatalf("normalized sftpInitialPath = %q, want ~", got.SftpInitialPath)
 	}
 }
 

@@ -155,10 +155,10 @@ browser".
   current directory; `Esc` (or clicking away without Enter) reverts the
   field. The `←` button goes up one level.
 - **Buttons & rows:** [Upload] / [New folder] / [Refresh]; double-click a
-  folder to open it, a text-like file to edit it in your system editor, or
-  anything else to download it; right-click rows for Edit / Download / Upload
-  to here / New folder / Rename / Delete. The footer shows live transfer
-  progress.
+  folder to open it, or a file to edit it as text in your system editor (the
+  backend refuses files >2 MiB or with binary content — use *Download…* for
+  those); right-click rows for Edit as text / Download / Upload to here / New
+  folder / Rename / Delete. The footer shows live transfer progress.
 - **Sessions ↔ SFTP:** a **[Sessions]** button in the panel header switches
   the left panel back to the session tree; the toolbar's **[SFTP]** button
   returns to the browser. Connecting a session, or activating a ready tab,

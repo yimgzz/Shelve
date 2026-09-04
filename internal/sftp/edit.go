@@ -48,7 +48,7 @@ var (
 	ErrTooLarge = errors.New("sftp: file too large to edit")
 	// ErrBinary: the remote file's head window contains a NUL byte, so the
 	// content probes as binary and is refused for text editing.
-	ErrBinary = errors.New("sftp: file looks binary; use Open or Download instead")
+	ErrBinary = errors.New("sftp: file looks binary; use Download instead")
 	// ErrAlreadyEditing: a second edit on the same tab is refused.
 	ErrAlreadyEditing = errors.New("sftp: already editing on this tab")
 )

@@ -253,18 +253,6 @@ export function openSettingsDialog(): void {
         }),
     );
 
-    const openCmd = document.createElement("input");
-    openCmd.type = "text";
-    openCmd.className = "input mono";
-    openCmd.autocomplete = "off";
-    openCmd.spellcheck = false;
-    openCmd.value = current.sftpOpenCommand;
-    files.appendChild(
-        settingField("Open command", openCmd, {
-            hint: "Used to open remote files with your local apps (SFTP double-click).",
-        }),
-    );
-
     body.appendChild(files);
 
     // ---------------------------------------------------------- Footer ---
@@ -315,7 +303,6 @@ export function openSettingsDialog(): void {
                 },
                 textEditorCommand: editor.value.trim() || "xdg-open",
                 sftpInitialPath: sftpPath.value.trim() || "~",
-                sftpOpenCommand: openCmd.value.trim() || "xdg-open",
                 window: { ...current.window },
             };
             store.set({ settings: full });

@@ -1,9 +1,12 @@
 /* Shelve — reset + layout grid (master plan §6 Layout).
-   body is a full-viewport grid: left panel | 4px splitter | right pane,
-   with a 30px status-band row at the bottom (hosts the plan-P004 system
-   monitor bar). The left panel and splitter span both rows so the bottom
-   strip under the tree shares the same --bg-panel color as the status band
-   (no bare --bg gap in the corner). */
+   body is a full-viewport grid:
+     left | 4px split | terminal(1fr) | 4px sftp-split | sftp column
+   plus a 30px status-band row at the bottom (hosts the plan-P004 system
+   monitor bar) that spans the terminal only. The left panel, both splitters
+   and the SFTP side column span both rows, so the bottom strip under the
+   tree/SFTP sides shares --bg-panel with the status band (no bare --bg gap
+   in a corner). The SFTP column and its splitter track collapse to 0 px
+   (--sftp-w / --sftp-gap) and display:none when the panel is hidden. */
 
 * {
     box-sizing: border-box;
@@ -17,11 +20,12 @@ body {
 
 body {
     display: grid;
-    grid-template-columns: var(--left-w, 320px) 4px 1fr;
+    grid-template-columns: var(--left-w, 320px) 4px minmax(0, 1fr)
+        var(--sftp-gap, 0px) var(--sftp-w, 0px);
     grid-template-rows: 1fr 30px;
     grid-template-areas:
-        "left split right"
-        "left split status";
+        "left split right ssplit sftp"
+        "left split status ssplit sftp";
     height: 100vh;
     overflow: hidden;
     background: var(--bg);
@@ -64,6 +68,23 @@ body {
 .splitter:hover,
 .splitter.dragging {
     background: var(--accent);
+}
+
+/* SFTP right-side column: the splitter track and the panel column. Both
+   tracks are driven by --sftp-gap / --sftp-w (0 px when the panel is hidden)
+   so the grid collapses fully without a stray gap. */
+.sftp-splitter {
+    grid-area: ssplit;
+}
+
+.sftp-side {
+    grid-area: sftp;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    overflow: hidden;
 }
 
 .right-pane {

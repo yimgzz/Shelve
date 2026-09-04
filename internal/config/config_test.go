@@ -258,6 +258,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	s.Window.Width = 1440
 	s.Window.Height = 900
 	s.Window.LeftWidth = 380
+	s.Window.SftpWidth = 420
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -300,7 +301,7 @@ func TestLoadJSONMatchesMasterSchema(t *testing.T) {
 
 func TestLoadNormalizesUnknownThemeAndZeros(t *testing.T) {
 	isolatedXDG(t)
-	raw := `{"theme":"neon","terminal":{"fontSize":0,"scrollback":0},"window":{"width":0,"height":0,"leftWidth":0}}`
+	raw := `{"theme":"neon","terminal":{"fontSize":0,"scrollback":0},"window":{"width":0,"height":0,"leftWidth":0,"sftpWidth":0}}`
 	if err := os.MkdirAll(Path(), DirPerm); err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +318,7 @@ func TestLoadNormalizesUnknownThemeAndZeros(t *testing.T) {
 	d := DefaultSettings()
 	if got.Terminal.FontSize != d.Terminal.FontSize || got.Terminal.Scrollback != d.Terminal.Scrollback ||
 		got.Window.Width != d.Window.Width || got.Window.Height != d.Window.Height ||
-		got.Window.LeftWidth != d.Window.LeftWidth {
+		got.Window.LeftWidth != d.Window.LeftWidth || got.Window.SftpWidth != d.Window.SftpWidth {
 		t.Fatalf("zeros not normalized: %+v", got)
 	}
 }
@@ -339,6 +340,26 @@ func TestLoadDefaultsLeftWidthZeroToDefault(t *testing.T) {
 	}
 	if got.Window.LeftWidth != 320 {
 		t.Fatalf("leftWidth = %d, want default 320", got.Window.LeftWidth)
+	}
+}
+
+// TestLoadDefaultsSftpWidthZeroToDefault covers the SFTP right-panel rule: a
+// missing/zero window.sftpWidth is treated as the 320 px default.
+func TestLoadDefaultsSftpWidthZeroToDefault(t *testing.T) {
+	isolatedXDG(t)
+	raw := `{"window":{"width":1000,"height":700}}` // sftpWidth omitted → 0
+	if err := os.MkdirAll(Path(), DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(File(SettingsFileName), []byte(raw), FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Window.SftpWidth != 320 {
+		t.Fatalf("sftpWidth = %d, want default 320", got.Window.SftpWidth)
 	}
 }
 

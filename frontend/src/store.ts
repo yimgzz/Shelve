@@ -28,6 +28,8 @@ export interface WindowSettings {
     width: number;
     height: number;
     leftWidth: number;
+    /** Persisted SFTP right-panel width (0/absent → normalized to 320). */
+    sftpWidth: number;
 }
 
 export interface TerminalSettings {
@@ -218,11 +220,14 @@ export interface StoreState {
     settings: Settings;
     vaultState: VaultState;
     /**
-     * Left-panel mode (phase 5d D5d-3): "tree" shows the session list,
-     * "sftp" the SFTP browser. Defaults to "tree"; the store auto-switches
-     * to "sftp" when a ready tab becomes active (D5d-1).
+     * SFTP right-panel open state (ephemeral, like tabs — A3). Defaults to
+     * true; the store auto-opens it when a ready tab becomes active while
+     * the setting is on. The session tree is always visible; this flag only
+     * controls the right-hand SFTP column.
      */
-    leftMode: "tree" | "sftp";
+    sftpPanelOpen: boolean;
+    /** Current SFTP right-panel width in px (mirrors window.sftpWidth live). */
+    sftpPanelWidth: number;
     tree: NodeDTO[];
     selectedID: string | null;
     searchQ: string;
@@ -267,6 +272,7 @@ export interface StoreState {
 }
 
 export const DEFAULT_LEFT_WIDTH = 320;
+export const DEFAULT_SFTP_WIDTH = 320;
 
 export const initialState: StoreState = {
     settings: {
@@ -283,10 +289,11 @@ export const initialState: StoreState = {
         textEditorCommand: "xdg-open",
         sftpInitialPath: "~",
         sftpOpenCommand: "xdg-open",
-        window: { width: 1280, height: 800, leftWidth: DEFAULT_LEFT_WIDTH },
+        window: { width: 1280, height: 800, leftWidth: DEFAULT_LEFT_WIDTH, sftpWidth: DEFAULT_SFTP_WIDTH },
     },
     vaultState: "locked",
-    leftMode: "tree",
+    sftpPanelOpen: true,
+    sftpPanelWidth: DEFAULT_SFTP_WIDTH,
     tree: [],
     selectedID: null,
     searchQ: "",
@@ -409,9 +416,9 @@ class Store {
         const { tabs, settings } = this.state;
         const tab = tabs.find((t) => t.id === tabID);
         const patch: Partial<StoreState> = { activeTabID: tabID };
-        // Auto-switch to the SFTP panel when activating a ready tab (D5d-1).
+        // Auto-open the SFTP right panel when activating a ready tab.
         if (tab && tab.state === "ready" && settings.sftpBrowserEnabled) {
-            patch.leftMode = "sftp";
+            patch.sftpPanelOpen = true;
         }
         this.set(patch);
     }
@@ -616,8 +623,8 @@ class Store {
      * Update one tab's status (from a status event or a Connect error).
      * Creates the tab on demand from the pending-session cache when a
      * `terminal:status` event beats the optimistic-tab reconciliation
-     * (Phase 4b task 4). Auto-switches the left panel to the SFTP browser
-     * when the active tab turns ready (phase 5d D5d-1).
+     * (Phase 4b task 4). Auto-opens the SFTP right panel when the active tab
+     * turns ready and the setting is on.
      */
     setTabState(tabID: string, state: TabState, message?: string): void {
         const { tabs, activeTabID, settings, pendingSessions } = this.state;
@@ -637,7 +644,7 @@ class Store {
             ];
         }
         if (state === "ready" && tabID === activeTabID && settings.sftpBrowserEnabled) {
-            patch.leftMode = "sftp";
+            patch.sftpPanelOpen = true;
         }
         this.set(patch);
     }
@@ -650,13 +657,13 @@ export function hasReadyActiveTab(state: StoreState): boolean {
 }
 
 /**
- * Single source of truth for whether the SFTP panel replaces the tree
- * (master plan §6, phases 5c/5d): the setting must be on AND leftMode must
- * be "sftp" AND the active tab must be ready. Otherwise the tree shows
- * (with a hint when the setting is on but no active ready tab exists).
+ * Single source of truth for whether the SFTP right panel is visible
+ * (master plan §6): the setting must be on AND the panel must be open AND
+ * the active tab must be ready. The session tree is always visible; this
+ * only governs the right-hand column (the left-panel hint rules are separate).
  */
 export function sftpPanelVisible(state: StoreState): boolean {
-    if (!state.settings.sftpBrowserEnabled || state.leftMode !== "sftp") {
+    if (!state.settings.sftpBrowserEnabled || !state.sftpPanelOpen) {
         return false;
     }
     return hasReadyActiveTab(state);

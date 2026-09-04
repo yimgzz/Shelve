@@ -897,8 +897,10 @@
 }
 
 /* ---------- SFTP panel (Phase 5c) ---------- */
-/* Hosts share the left panel's flex column; the shell toggles display via
-   store.sftpPanelVisible (panel replaces the tree when enabled + active). */
+/* The host fills the right-side SFTP column (sftp-side); the shell toggles
+   the column's display via store.sftpPanelVisible (panel shows when the
+   setting is on, the panel is open, and the active tab is ready). All
+   .sftp-* rules below are position-independent. */
 .sftp-host {
     flex: 1;
     min-height: 0;

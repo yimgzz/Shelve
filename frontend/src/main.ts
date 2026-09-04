@@ -70,6 +70,7 @@ function toSettings(raw: Record<string, unknown>): Settings {
             width: Number(win.width ?? 1280),
             height: Number(win.height ?? 800),
             leftWidth: Number(win.leftWidth ?? 320) || 320,
+            sftpWidth: Number(win.sftpWidth ?? 320) || 320,
         },
     };
 }
@@ -264,10 +265,10 @@ function handleEvent(name: string, payload: unknown): void {
 /**
  * Apply a terminal:status event to a tab. Delegates to store.setTabState,
  * which updates the tab (creating it on demand from the recorded pending
- * session when the event beats the optimistic-tab reconciliation, Phase 4b
- * task 4) and runs the phase-5d left-panel auto-switch hook on "ready" —
- * the hook logic lives in the store (D5d-1).
- */
+  * session when the event beats the optimistic-tab reconciliation, Phase 4b
+  * task 4) and auto-opens the SFTP right panel on "ready" — the hook logic
+  * lives in the store (D5d-1).
+  */
 function updateTabState(tabID: string, state: TabState, message: string): void {
     store.setTabState(tabID, state, message);
 }

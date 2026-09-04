@@ -1,9 +1,11 @@
-// components/sftp-panel.ts — left-panel SFTP browser (Phases 5c/5d; master
-// plan §6 SFTP panel). Replaces the session tree when settings.sftpBrowserEnabled
-// is on AND leftMode is "sftp" AND the active tab is ready (the decision
-// lives in store.ts via sftpPanelVisible; the shell toggles display).
+// components/sftp-panel.ts — SFTP browser in the right-hand column (Phases
+// 5c/5d; master plan §6 SFTP panel). Shown in a right-side panel beside the
+// terminal when settings.sftpBrowserEnabled is on AND the panel is open AND
+// the active tab is ready (the decision lives in store.ts via
+// sftpPanelVisible; the shell toggles the column's display). The session
+// tree is always visible on the left.
 //
-// Header: [Sessions] toggle + back button + editable path bar (Enter to
+// Header: [×] close + back button + editable path bar (Enter to
 // navigate, Esc/blur reverts), [Upload] [New folder] [Refresh]. List rows:
 // icon / name / size / modified.
 // Double-click opens (dir → navigate, text-like → EditRemoteText, else →
@@ -190,13 +192,16 @@ function mkBtn(label: string, onClick: () => void): HTMLButtonElement {
 function buildStatic(target: HTMLElement): void {
     const header = document.createElement("div");
     header.className = "sftp-header";
-    // [Sessions] (phase 5d D5d-1): switch the left panel back to the tree.
-    const sessionsBtn = document.createElement("button");
-    sessionsBtn.type = "button";
-    sessionsBtn.className = "btn small";
-    sessionsBtn.textContent = "Sessions";
-    sessionsBtn.title = "Show the session list";
-    sessionsBtn.addEventListener("click", () => store.set({ leftMode: "tree" }));
+    // [×]: close the SFTP right panel. The session tree on the left is always
+    // visible; reopen it via the left toolbar's [SFTP] button or by switching
+    // to another ready tab (auto-open, store.ts).
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn small icon-btn";
+    closeBtn.textContent = "×";
+    closeBtn.title = "Close SFTP browser";
+    closeBtn.setAttribute("aria-label", "Close");
+    closeBtn.addEventListener("click", () => store.set({ sftpPanelOpen: false }));
     backBtn = document.createElement("button");
     backBtn.type = "button";
     backBtn.className = "btn small icon-btn";
@@ -239,7 +244,7 @@ function buildStatic(target: HTMLElement): void {
             pathInput.value = curPath;
         }
     });
-    header.append(sessionsBtn, backBtn, pathInput);
+    header.append(closeBtn, backBtn, pathInput);
 
     const toolbar = document.createElement("div");
     toolbar.className = "toolbar sftp-toolbar";

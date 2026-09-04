@@ -22,10 +22,12 @@ type TerminalSettings struct {
 
 // WindowSettings holds the remembered main-window geometry (master plan A7).
 // LeftWidth is the persisted left-panel width; 0 = not set → treated as 320.
+// SftpWidth is the persisted SFTP right-panel width; 0 = not set → 320.
 type WindowSettings struct {
 	Width     int `json:"width"`
 	Height    int `json:"height"`
 	LeftWidth int `json:"leftWidth"`
+	SftpWidth int `json:"sftpWidth"`
 }
 
 // Settings is the on-disk shape of settings.json (master plan §4).
@@ -66,6 +68,7 @@ func DefaultSettings() Settings {
 			Width:     1280,
 			Height:    800,
 			LeftWidth: 320,
+			SftpWidth: 320,
 		},
 	}
 }
@@ -155,5 +158,8 @@ func (s *Settings) normalize() {
 	}
 	if s.Window.LeftWidth <= 0 {
 		s.Window.LeftWidth = 320
+	}
+	if s.Window.SftpWidth <= 0 {
+		s.Window.SftpWidth = 320
 	}
 }

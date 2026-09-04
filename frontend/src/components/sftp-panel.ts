@@ -8,11 +8,14 @@
 // Header: [×] close + back button + editable path bar (Enter to
 // navigate, Esc/blur reverts), [Upload] [New folder] [Refresh]. List rows:
 // icon / name / size / modified.
-// Double-click opens (dir → navigate, text-like → EditRemoteText, else →
-// DownloadThenSave). Context menu: Open / Edit as text / Download… / Upload
-// to here… / New folder… / Rename… / Delete… (+ Cancel edit while editing).
+// Double-click: dir → navigate, file → OpenRemoteFile (local default app).
+// Context menu: Open / Edit as text / Download… / Upload to here… / New
+// folder… / Rename… / Delete…. "Edit as text" (EditRemoteText) downloads a
+// text-like file to tmp/, opens the configured editor and re-uploads it on
+// save-detection — the backend is silent except for "Saved to …" / error
+// toasts, so the panel keeps no per-file "editing" state.
 // Footer carries the transfer progress line fed by the store's sftp:progress
-// cache and the "Editing <path> …" status line.
+// cache.
 
 import { SftpService } from "../../bindings/shelve/internal/wailsvc";
 import { store, type SftpEntryDTO } from "../store";
@@ -36,12 +39,10 @@ let errorMsg: string | null = null;
 let selected: string | null = null;
 let inlineCreate = false;
 let inlineRename: { name: string } | null = null;
-let editingPath: string | null = null; // full remote path being edited
 
 let backBtn: HTMLButtonElement | null = null;
 let pathInput: HTMLInputElement | null = null;
 let listEl: HTMLElement | null = null;
-let statusEl: HTMLElement | null = null;
 let progressEl: HTMLElement | null = null;
 
 const modFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
@@ -124,14 +125,12 @@ export function renderSftpPanel(target: HTMLElement): void {
     selected = null;
     inlineCreate = false;
     inlineRename = null;
-    editingPath = null;
     if (tabID) {
         void loadList();
     } else {
         entries = null;
     }
     updateFooter();
-    updateStatus();
     renderPathBar();
     renderList();
 }
@@ -145,14 +144,13 @@ function refresh(): void {
     const t = tabs.find((x) => x.id === activeTabID);
     const ready = t && t.state === "ready" ? activeTabID! : "";
     if (ready !== tabID) {
-        // Active tab changed → reset navigation and any live edit.
+        // Active tab changed → reset navigation.
         tabID = ready;
         curPath = initialPath();
         lastGoodPath = curPath;
         selected = null;
         inlineCreate = false;
         inlineRename = null;
-        editingPath = null;
         if (ready) {
             void loadList();
         } else {
@@ -264,9 +262,7 @@ function buildStatic(target: HTMLElement): void {
     footer.className = "sftp-footer";
     progressEl = document.createElement("div");
     progressEl.className = "sftp-progress";
-    statusEl = document.createElement("div");
-    statusEl.className = "sftp-status";
-    footer.append(progressEl, statusEl);
+    footer.append(progressEl);
 
     target.append(header, toolbar, listEl, footer);
 }
@@ -359,9 +355,6 @@ function makeRow(entry: SftpEntryDTO): HTMLElement {
     const row = document.createElement("div");
     row.className = "sftp-row";
     row.dataset.name = entry.name;
-    if (editingPath === full) {
-        row.classList.add("editing");
-    }
 
     const icon = document.createElement("span");
     icon.className = "sftp-icon";
@@ -386,14 +379,6 @@ function makeRow(entry: SftpEntryDTO): HTMLElement {
         }
     }
     mod.textContent = modText;
-
-    if (editingPath === full) {
-        const tag = document.createElement("span");
-        tag.className = "sftp-editing-tag";
-        tag.textContent = "editing…";
-        tag.title = "Open in your text editor; auto-saves when it stops writing for 3 s.";
-        name.append(" ", tag);
-    }
 
     row.append(icon, name, size, mod);
     row.classList.toggle("selected", selected === entry.name);
@@ -425,24 +410,17 @@ function openEntry(entry: SftpEntryDTO): void {
     void openRemote(entry);
 }
 
+/**
+ * "Edit as text" (context menu): download to a tmp/ copy, open the
+ * configured editor, and let the backend re-upload on save-detection. The
+ * backend is the only owner of the edit lifecycle — it toasts "Saved to …"
+ * on upload and "Failed to save …" on error, and keeps no UI-visible state;
+ * the panel has nothing to track (a later listing picks up the new mtime).
+ */
 async function startEdit(entry: SftpEntryDTO): Promise<void> {
     const full = joinRemote(curPath, entry.name);
     try {
         await SftpService.EditRemoteText(tabID, full);
-        editingPath = full;
-        renderList();
-        updateStatus();
-    } catch (err) {
-        toast("error", String(err));
-    }
-}
-
-async function cancelEdit(): Promise<void> {
-    try {
-        await SftpService.CancelEdit(tabID);
-        editingPath = null;
-        renderList();
-        updateStatus();
     } catch (err) {
         toast("error", String(err));
     }
@@ -720,24 +698,10 @@ function updateFooter(): void {
     progressEl.textContent = line;
 }
 
-function updateStatus(): void {
-    if (!statusEl) {
-        return;
-    }
-    statusEl.textContent = editingPath
-        ? `Editing ${editingPath} — auto-saves when your editor stops writing for 3 s`
-        : "";
-}
-
 // ------------------------------------------------------------- context menu ---
 
 function openPanelContext(x: number, y: number, entry: SftpEntryDTO): void {
-    const full = joinRemote(curPath, entry.name);
-    const editingThis = editingPath === full;
     const items: MenuItem[] = [];
-    if (editingThis) {
-        items.push({ label: "Cancel edit", action: () => void cancelEdit() });
-    }
     items.push(
         { label: "Open", action: () => openEntry(entry) },
         { label: "Edit as text", disabled: !entry.textLike, action: () => void startEdit(entry) },

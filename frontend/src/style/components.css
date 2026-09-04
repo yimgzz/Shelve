@@ -974,10 +974,6 @@
     background: var(--bg-active);
 }
 
-.sftp-row.editing {
-    background: color-mix(in srgb, var(--warn) 12%, transparent);
-}
-
 .sftp-row .sftp-icon {
     flex: none;
     width: 18px;
@@ -990,13 +986,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.sftp-row .sftp-editing-tag {
-    flex: none;
-    font-size: 11px;
-    color: var(--warn);
-    margin-left: 4px;
 }
 
 .sftp-row .sftp-size {

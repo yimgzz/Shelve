@@ -156,8 +156,8 @@ func TestEditCancelNoUploadTempGone(t *testing.T) {
 	waitFor(t, 5*time.Second, "editor process group dead", func() bool { return groupGone(es.pgid) })
 }
 
-func TestEditNonZeroExitKeepsTempWithErrorToast(t *testing.T) {
-	m, emit := newTestManagerFast(t)
+func TestEditNonZeroExitKeepsTemp(t *testing.T) {
+	m, _ := newTestManagerFast(t)
 	tab := "tab1"
 	c, err := m.ClientFor(tab)
 	if err != nil {
@@ -172,16 +172,54 @@ func TestEditNonZeroExitKeepsTempWithErrorToast(t *testing.T) {
 	es := getEdit(m, tab)
 	waitFor(t, 2*time.Second, "edit registered", func() bool { return getEdit(m, tab) != nil })
 
-	// Editor exits non-zero before any save → error toast + temp kept.
+	// Editor exits non-zero before any save → the edit record is removed
+	// (process exited) and the temp copy is kept (no user-facing message:
+	// with launcher editors like xdg-open, an exit-time signal would be
+	// wrong, so the edit flow is silent except for save/failure toasts).
 	waitFor(t, 5*time.Second, "edit record removed", func() bool { return getEdit(m, tab) == nil })
 	if _, err := os.Stat(es.tempPath); err != nil {
 		t.Fatalf("temp should be KEPT on non-zero exit: %v", err)
 	}
-	if n := emit.errorToasts(); n == 0 {
-		t.Fatal("expected an error toast for non-zero editor exit")
-	}
 }
 
+// TestEditUntouchedExitKeepsTempAndStaysWatchable covers the launcher case
+// (xdg-open): the launched command exits zero immediately while the file is
+// still untouched. The edit record is removed with the process, but the
+// watcher must keep running — it is only the watcher that can save the
+// changes once the (detached) real editor writes them and stops.
+func TestEditUntouchedExitKeepsTempAndStaysWatchable(t *testing.T) {
+	m, _ := newTestManagerFast(t)
+	tab := "tab1"
+	c, err := m.ClientFor(tab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putFile(t, c, "/clean.txt", []byte("orig"))
+
+	// A "launcher" that exits zero immediately without touching the file
+	// (xdg-open semantics).
+	editor := writeScript(t, "launcher.sh", `exit 0`)
+	if err := m.EditRemoteText(tab, "/clean.txt", editor); err != nil {
+		t.Fatalf("EditRemoteText: %v", err)
+	}
+	es := getEdit(m, tab)
+	waitFor(t, 2*time.Second, "edit registered", func() bool { return getEdit(m, tab) != nil })
+
+	// The launcher's exit must not end the watch: write the temp copy now,
+	// and the (still running) watcher must pick it up on stability and
+	// re-upload.
+	waitFor(t, 5*time.Second, "temp present after launcher exit", func() bool {
+		_, err := os.Stat(es.tempPath)
+		return err == nil
+	})
+	if err := os.WriteFile(es.tempPath, []byte("edited by the real editor\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "remote updated by watcher after launcher exit",
+		func() bool {
+			return strings.Contains(string(readRemoteAll(t, m, tab, "/clean.txt")), "edited by the real editor")
+		})
+}
 func TestEditProbesTooLargeAndNotText(t *testing.T) {
 	m, _ := newTestManagerFast(t)
 	tab := "tab1"

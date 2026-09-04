@@ -10,6 +10,15 @@ package sftp
 // temp path appended last. This is intentional — the user explicitly chose the
 // command — so the variable-command execution flagged by gosec (G204) is
 // expected and documented here.
+//
+// The mtime watcher is the ONLY save trigger. The editor process's exit is
+// deliberately NOT treated as a terminal signal: non-blocking launchers (the
+// default xdg-open) exit within milliseconds while the real editor, a
+// detached child, is still running, so an exit-based "session over" decision
+// would stop watching before the user's first save. The watcher therefore
+// runs until a single successful save, CancelEdit, or Cleanup; a file opened
+// and closed without changes keeps its temp copy (swept by the tmp lifecycle)
+// and produces no user-facing messages.
 
 import (
 	"errors"
@@ -192,7 +201,11 @@ func (m *Manager) EditRemoteText(tabID, remotePath, editorCmd string) error {
 // editWatcher polls the temp file's mtime every editPoll; once it has been
 // modified and then stable for editStability, it saves (atomically re-upload
 // + rename) and stops after that single successful save (documented). On a
-// save failure it keeps watching so a later stability window can retry.
+// save failure it keeps watching so a later stability window can retry. The
+// watcher does not react to the editor process exiting (see the package
+// comment on non-blocking launchers): for launcher editors the real writing
+// process outlives the launched command, so only save/cancel/cleanup end the
+// watch.
 func (m *Manager) editWatcher(es *editState, c *sftp.Client) {
 	poll := m.editPoll
 	if poll <= 0 {
@@ -290,12 +303,16 @@ func (m *Manager) overwriteRename(c *sftp.Client, from, to string) error {
 	return nil
 }
 
-// editWaiter blocks on the editor process and performs terminal cleanup. If a
-// save already happened (or the edit was canceled), it only removes the log.
-// Otherwise, with no save: a zero/killed exit keeps the temp copy with an info
-// toast; a non-zero exit keeps the temp copy with an error toast.
+// editWaiter blocks on the editor process and, once it exits, drops the edit
+// record and removes the editor log. It emits nothing on purpose (see the
+// package comment): with a launcher like xdg-open the process exits within
+// milliseconds while the real editor is still open, so an exit-time message
+// would fire on every open and a save could no longer be reached. User
+// feedback is the "Saved to …" toast from editSave (and error toasts from the
+// watcher); with no save the temp copy is kept silently and swept by the tmp
+// lifecycle.
 func (m *Manager) editWaiter(es *editState) {
-	werr := es.cmd.Wait()
+	_ = es.cmd.Wait()
 
 	m.editsMu.Lock()
 	if cur, ok := m.edits[es.tabID]; ok && cur == es {
@@ -303,32 +320,6 @@ func (m *Manager) editWaiter(es *editState) {
 	}
 	m.editsMu.Unlock()
 
-	es.mu.Lock()
-	saved := es.saved
-	canceled := es.canceled
-	es.mu.Unlock()
-
-	if canceled {
-		_ = os.Remove(es.logPath)
-		return
-	}
-	if saved {
-		_ = os.Remove(es.logPath)
-		return
-	}
-
-	killed := false
-	if pe, ok := werr.(*exec.ExitError); ok && pe.ExitCode() < 0 {
-		killed = true
-	}
-	switch {
-	case werr == nil || killed:
-		// Zero exit or killed by signal → keep temp + info toast.
-		m.emitToast("info", "Editor closed; unsaved changes kept at "+es.tempPath)
-	default:
-		// Non-zero exit, no save → keep temp + error toast.
-		m.emitToast("error", "Editor exited with an error; unsaved changes kept at "+es.tempPath)
-	}
 	_ = os.Remove(es.logPath)
 }
 

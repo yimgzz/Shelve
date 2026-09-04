@@ -180,6 +180,7 @@ export interface SftpEntryDTO {
     size: number;
     /** RFC3339 string (Go time.Time over the wire). */
     modTime: string;
+    /** Display hint for the row icon (📄 vs 📦); does not gate editing. */
     textLike: boolean;
 }
 

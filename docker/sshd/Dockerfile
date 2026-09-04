@@ -4,9 +4,9 @@
 # $HOME tree for the SFTP integration suite. The container also ships a
 # "fake editor" script (dsm-fake-editor) that appends a line to its last
 # argument, letting tests exercise the EditRemoteText save-detection path
-# without a GUI editor. Fixture sizes: big.txt (3 MiB, text extension but
-# over the 2 MiB TextLike cap -> ErrTooLarge), data.bin (binary ext ->
-# ErrNotText), a.txt / subdir/b.md (editable text), subdir (non-empty for
+# without a GUI editor. Fixture sizes: big.txt (3 MiB, over the 2 MiB edit
+# cap -> ErrTooLarge), data.bin (starts with NUL bytes -> ErrBinary content
+# probe), a.txt / subdir/b.md (editable text), subdir (non-empty for
 # ErrDirNotEmpty).
 #
 # NOTE: this image is for TEST ONLY and intentionally embeds a well-known

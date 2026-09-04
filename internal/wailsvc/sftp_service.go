@@ -115,10 +115,10 @@ func (s *SftpService) DownloadThenSave(tabID, remotePath string) (string, error)
 	return s.mgr.DownloadThenSave(tabID, remotePath)
 }
 
-// EditRemoteText downloads a text-like file to tmp/, opens the configured
-// system editor, and starts the save-detection loop. The editor command
-// comes from settings (config.Load); it is run verbatim with the temp path
-// appended last.
+// EditRemoteText downloads the file (any name, ≤ 2 MiB, content probing as
+// text) to tmp/, opens the configured system editor, and starts the
+// save-detection loop. The editor command comes from settings (config.Load);
+// it is run verbatim with the temp path appended last.
 func (s *SftpService) EditRemoteText(tabID, remotePath string) error {
 	if err := s.requireUnlocked(); err != nil {
 		return err

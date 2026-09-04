@@ -255,8 +255,9 @@ func toNodeDTOs(nodes []store.TreeNode) []NodeDTO {
 }
 
 // SftpEntryDTO is one SFTP listing row for the frontend (master plan §5).
-// TextLike mirrors the sftp package's classification (edit if text-like,
-// ≤ 2 MiB).
+// TextLike mirrors the sftp package's display-only classification (icon
+// hint); EditRemoteText accepts any file ≤ 2 MiB unless its content probes
+// as binary (ErrBinary).
 type SftpEntryDTO struct {
 	Name     string    `json:"name"`
 	IsDir    bool      `json:"isDir"`

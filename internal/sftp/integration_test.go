@@ -316,11 +316,31 @@ func TestIntegrationRenameAndEdit(t *testing.T) {
 		t.Fatalf("big.txt edit err = %v, want ErrTooLarge", err)
 	}
 
-	// Binary extension → ErrNotText.
+	// Content probe, not extension: data.bin starts with NUL bytes →
+	// ErrBinary, refused before the full download.
 	err = m.EditRemoteText(tab, "~/data.bin", editor)
-	if !errors.Is(err, ErrNotText) {
-		t.Fatalf("data.bin edit err = %v, want ErrNotText", err)
+	if !errors.Is(err, ErrBinary) {
+		t.Fatalf("data.bin edit err = %v, want ErrBinary", err)
 	}
+
+	// Extension no longer gates editing: seed an extensionless file in the
+	// remote home and round-trip an edit through the fake editor.
+	nf, err := root.Create(homeOf(t, m, tab) + "/noext")
+	if err != nil {
+		t.Fatalf("Create ~/noext: %v", err)
+	}
+	if _, err := nf.Write([]byte("no-extension file\n")); err != nil {
+		_ = nf.Close()
+		t.Fatalf("Write ~/noext: %v", err)
+	}
+	if err := nf.Close(); err != nil {
+		t.Fatalf("Close ~/noext: %v", err)
+	}
+	if err := m.EditRemoteText(tab, "~/noext", editor); err != nil {
+		t.Fatalf("EditRemoteText ~/noext: %v", err)
+	}
+	waitForEditSave(t, m, tab, "~/noext")
+	waitForNoEditTemps(t, m)
 }
 
 // homeOf resolves the tab's remote home (absolute path).

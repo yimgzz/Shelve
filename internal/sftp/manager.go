@@ -51,8 +51,10 @@ var (
 )
 
 // Entry is one listing row (master plan §5). IsDir/Size/ModTime mirror the
-// remote stat; TextLike flags files that are safe to open in the text editor
-// (known text extension AND ≤ MaxTextSize bytes).
+// remote stat; TextLike is a display-only heuristic (📄 vs 📦 icon in the
+// listing: known text extension AND ≤ MaxTextSize bytes). It does not gate
+// editing — EditRemoteText accepts any file ≤ MaxTextSize whose content
+// probes as text (head-window NUL check, ErrBinary).
 type Entry struct {
 	Name     string
 	IsDir    bool
@@ -357,10 +359,12 @@ func (m *Manager) Remove(tabID, userPath string) error {
 	return nil
 }
 
-// TextLike classifies a remote file as text-editable: it must have a
-// whitelisted extension (case-insensitive, lowercased) and a size in
-// [0, MaxTextSize]. A file with no extension is never TextLike (master
-// plan phase 5a task 3). A pure function; safe to call concurrently.
+// TextLike classifies a remote file as text-like for the LISTING icon: it
+// must have a whitelisted extension (case-insensitive, lowercased) and a
+// size in [0, MaxTextSize]. A file with no extension is never TextLike.
+// Display-only — it does not gate EditRemoteText (any extension is editable
+// if the size cap and the head-window binary content probe pass). A pure
+// function; safe to call concurrently.
 func (m *Manager) TextLike(name string, size int64) bool {
 	if size < 0 || size > MaxTextSize {
 		return false

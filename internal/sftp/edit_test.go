@@ -8,6 +8,7 @@ package sftp
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -220,7 +221,7 @@ func TestEditUntouchedExitKeepsTempAndStaysWatchable(t *testing.T) {
 			return strings.Contains(string(readRemoteAll(t, m, tab, "/clean.txt")), "edited by the real editor")
 		})
 }
-func TestEditProbesTooLargeAndNotText(t *testing.T) {
+func TestEditProbeTooLarge(t *testing.T) {
 	m, _ := newTestManagerFast(t)
 	tab := "tab1"
 	c, err := m.ClientFor(tab)
@@ -228,16 +229,91 @@ func TestEditProbesTooLargeAndNotText(t *testing.T) {
 		t.Fatal(err)
 	}
 	putFile(t, c, "/big.txt", make([]byte, MaxTextSize+1))
-	putFile(t, c, "/photo.png", []byte("img"))
 
 	editor := writeScript(t, "noop.sh", `exit 0`)
 
 	if err := m.EditRemoteText(tab, "/big.txt", editor); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("oversized edit err = %v, want ErrTooLarge", err)
 	}
-	if err := m.EditRemoteText(tab, "/photo.png", editor); !errors.Is(err, ErrNotText) {
-		t.Fatalf("non-text edit err = %v, want ErrNotText", err)
+}
+
+// TestEditFilesWithoutTextExtension covers the relaxed probe: files with a
+// non-whitelisted/no extension (dotfiles like .bash_history, extensionless
+// files like authorized_keys) are editable, and the save round trip works.
+// Legacy non-UTF-8 encodings (CP1251 high bytes) must pass the content
+// probe too — only NUL bytes are rejected. Each tab gets its own mem-server
+// filesystem.
+func TestEditFilesWithoutTextExtension(t *testing.T) {
+	m, _ := newTestManagerFast(t)
+	cases := []struct {
+		tab    string
+		remote string
+		seed   string
+	}{
+		{"t-noext", "/authorized_keys", "ssh-ed25519 AAAAC3Nza test@host\n"},
+		{"t-dotfile", "/.bash_history", "ls\ncd src\n"},
+		{"t-legacy", "/notes.txt", "\xD0\xE8\xF0\xE8\xE2\xF2\r\n"}, // CP1251 "Привет", invalid UTF-8
 	}
+	editor := writeScript(t, "append.sh", `printf 'appended\n' >> "$1"; exit 0`)
+	for _, tc := range cases {
+		c, err := m.ClientFor(tc.tab)
+		if err != nil {
+			t.Fatal(err)
+		}
+		putFile(t, c, tc.remote, []byte(tc.seed))
+		if err := m.EditRemoteText(tc.tab, tc.remote, editor); err != nil {
+			t.Fatalf("EditRemoteText %s: %v", tc.remote, err)
+		}
+		waitFor(t, 5*time.Second, "remote content updated for "+tc.remote,
+			func() bool {
+				return strings.Contains(string(readRemoteAll(t, m, tc.tab, tc.remote)), "appended\n")
+			})
+	}
+}
+
+// TestEditBinaryContentRejected covers the head-window content probe: a NUL
+// byte in the first sniffSize bytes refuses the edit with ErrBinary BEFORE
+// any download or local staging (tmpDir stays empty), regardless of
+// extension (a text file that turns binary mid-way is still caught, and so
+// is a binary with a no/whitelisted extension).
+func TestEditBinaryContentRejected(t *testing.T) {
+	m, _ := newTestManagerFast(t)
+	cases := []struct {
+		tab    string
+		remote string
+		data   []byte
+	}{
+		{"t-binpng", "/photo.png", append([]byte{0x89, 'P', 'N', 'G'}, 0x00, 0x01)},
+		{"t-binnul", "/app.txt", []byte("some text line\n\x00then binary\n")}, // NUL mid-head
+		{"t-binnoext", "/coredump", []byte{0x7f, 'E', 'L', 'F', 0x01, 0x02, 0x03, 0x00}},
+	}
+	editor := writeScript(t, "noop.sh", `exit 0`)
+	for _, tc := range cases {
+		c, err := m.ClientFor(tc.tab)
+		if err != nil {
+			t.Fatal(err)
+		}
+		putFile(t, c, tc.remote, tc.data)
+		if err := m.EditRemoteText(tc.tab, tc.remote, editor); !errors.Is(err, ErrBinary) {
+			t.Fatalf("EditRemoteText %s err = %v, want ErrBinary", tc.remote, err)
+		}
+		// No temp copy/log may be staged when the probe refuses.
+		dirents, err := os.ReadDir(m.tmpDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(dirents) != 0 {
+			t.Fatalf("refused edit left temp files: %v", namesEntries(dirents))
+		}
+	}
+}
+
+func namesEntries(es []fs.DirEntry) []string {
+	out := make([]string, 0, len(es))
+	for _, e := range es {
+		out = append(out, e.Name())
+	}
+	return out
 }
 
 func TestCleanupKillsEditorsAndEmptiesTmp(t *testing.T) {

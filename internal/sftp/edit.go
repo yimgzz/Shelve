@@ -1,17 +1,22 @@
 package sftp
 
-// Phase 5b remote text-file editing (master plan §2 D4): download a
-// text-like file (≤ 2 MiB, whitelisted extension) to tmp/, launch the
-// configured system editor on a copy, watch for a stable mtime, and on
-// stability re-upload atomically (temp + rename). One edit per tab; CancelEdit
-// and Cleanup own the process-group lifecycle so editors are never orphaned.
+// Phase 5b remote text-file editing (master plan §2 D4): download any remote
+// file (≤ MaxTextSize = 2 MiB) to tmp/, launch the configured system editor
+// on a copy, watch for a stable mtime/size, and on stability re-upload
+// atomically (temp + rename). Any file can be opened regardless of
+// extension; before
+// the full download only the first sniffSize bytes are read, and a file
+// containing a NUL byte in that window (the file(1) text/binary heuristic)
+// is refused with ErrBinary without downloading or staging anything. One
+// edit per tab; CancelEdit and Cleanup own the process-group lifecycle so
+// editors are never orphaned.
 //
 // The editor command from settings is run verbatim (strings.Fields) with the
 // temp path appended last. This is intentional — the user explicitly chose the
 // command — so the variable-command execution flagged by gosec (G204) is
 // expected and documented here.
 //
-// The mtime watcher is the ONLY save trigger. The editor process's exit is
+// The stat (mtime/size) watcher is the ONLY save trigger. The editor process's exit is
 // deliberately NOT treated as a terminal signal: non-blocking launchers (the
 // default xdg-open) exit within milliseconds while the real editor, a
 // detached child, is still running, so an exit-based "session over" decision
@@ -21,6 +26,7 @@ package sftp
 // and produces no user-facing messages.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -40,8 +46,9 @@ import (
 var (
 	// ErrTooLarge: the remote file exceeds MaxTextSize (2 MiB).
 	ErrTooLarge = errors.New("sftp: file too large to edit")
-	// ErrNotText: the remote file is not TextLike (extension/size probe).
-	ErrNotText = errors.New("sftp: file is not text")
+	// ErrBinary: the remote file's head window contains a NUL byte, so the
+	// content probes as binary and is refused for text editing.
+	ErrBinary = errors.New("sftp: file looks binary; use Open or Download instead")
 	// ErrAlreadyEditing: a second edit on the same tab is refused.
 	ErrAlreadyEditing = errors.New("sftp: already editing on this tab")
 )
@@ -49,6 +56,11 @@ var (
 // killEscalateTimeout is how long we wait after SIGTERM before SIGKILLing a
 // live editor process group (master plan phase 5b task 2 CancelEdit/Cleanup).
 const killEscalateTimeout = 3 * time.Second
+
+// sniffSize is the number of leading bytes probed to classify content as
+// text vs binary before the full download (8 KiB — the classic window used
+// by file(1): a NUL byte in the head means binary).
+const sniffSize = 8 << 10
 
 // editState tracks one in-flight EditRemoteText. cmd/pgid identify the editor
 // process group; tempPath is the local editable copy; saved/canceled describe
@@ -66,6 +78,7 @@ type editState struct {
 	cancel     chan struct{}
 	dirty      bool
 	lastMtime  time.Time
+	lastSize   int64
 	lastChange time.Time
 }
 
@@ -79,11 +92,13 @@ func (es *editState) stop() {
 	}
 }
 
-// EditRemoteText downloads a text-like remote file to tmp/edit-<ULID>.<ext>
-// (0600), launches the configured editor command with the temp path appended
-// last, and starts the save-detection watcher. It returns once the editor is
-// started; the watcher/waiter goroutines run the state machine. One edit per
-// tab: a concurrent/second attempt returns ErrAlreadyEditing.
+// EditRemoteText downloads a remote file (any name, ≤ MaxTextSize, content
+// probing as text) to tmp/edit-<ULID>.<ext> (0600), launches the configured
+// editor command with the temp path appended last, and starts the
+// save-detection watcher. It returns once the editor is started; the
+// watcher/waiter goroutines run the state machine. Rejections, in order:
+// ErrAlreadyEditing, ErrTooLarge (stat), ErrBinary (head-window content
+// probe — no download happens in that case).
 func (m *Manager) EditRemoteText(tabID, remotePath, editorCmd string) error {
 	m.editsMu.Lock()
 	if _, ok := m.edits[tabID]; ok {
@@ -110,8 +125,8 @@ func (m *Manager) EditRemoteText(tabID, remotePath, editorCmd string) error {
 	if st.Size() > MaxTextSize {
 		return fmt.Errorf("%w: %s (%d bytes)", ErrTooLarge, abs, st.Size())
 	}
-	if !m.TextLike(path.Base(abs), st.Size()) {
-		return fmt.Errorf("%w: %s", ErrNotText, abs)
+	if err := m.sniffText(c, abs); err != nil {
+		return err
 	}
 
 	if err := m.ensureTmp(); err != nil {
@@ -141,7 +156,7 @@ func (m *Manager) EditRemoteText(tabID, remotePath, editorCmd string) error {
 	_ = rf.Close()
 	_ = tf.Close()
 
-	// Capture the pristine download mtime BEFORE the editor runs so the
+	// Capture the pristine download mtime/size BEFORE the editor runs so the
 	// watcher treats any later change as a user edit (task 2 save detection).
 	dlStat, err := os.Stat(tempPath)
 	if err != nil {
@@ -149,6 +164,7 @@ func (m *Manager) EditRemoteText(tabID, remotePath, editorCmd string) error {
 		return err
 	}
 	baselineMtime := dlStat.ModTime()
+	baselineSize := dlStat.Size()
 
 	// Editor stdout/stderr → a 0600 log under tmp/.
 	lf, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -188,6 +204,7 @@ func (m *Manager) EditRemoteText(tabID, remotePath, editorCmd string) error {
 		pgid:      cmd.Process.Pid, // Setpgid ⇒ child pgid == child PID
 		cancel:    make(chan struct{}),
 		lastMtime: baselineMtime,
+		lastSize:  baselineSize,
 	}
 	m.editsMu.Lock()
 	m.edits[tabID] = es
@@ -198,10 +215,37 @@ func (m *Manager) EditRemoteText(tabID, remotePath, editorCmd string) error {
 	return nil
 }
 
-// editWatcher polls the temp file's mtime every editPoll; once it has been
-// modified and then stable for editStability, it saves (atomically re-upload
-// + rename) and stops after that single successful save (documented). On a
-// save failure it keeps watching so a later stability window can retry. The
+// sniffText reads only the first sniffSize bytes of abs over SFTP and
+// returns ErrBinary when the window contains a NUL byte — the classic
+// text/binary heuristic (file(1) treats a NUL in the head 8 KiB as binary).
+// Non-UTF-8 (e.g. CP1251/Latin-1) text passes: only NUL bytes are rejected,
+// so legacy-encoded files stay editable. An empty file probes as text. The
+// probe reads a small window, not the whole file, and nothing local is
+// staged on refusal.
+func (m *Manager) sniffText(c *sftp.Client, abs string) error {
+	rf, err := c.Open(abs)
+	if err != nil {
+		return fmt.Errorf("sftp: open %s: %w", abs, err)
+	}
+	defer rf.Close()
+	buf := make([]byte, sniffSize)
+	n, err := io.ReadFull(rf, buf)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("sftp: read %s: %w", abs, err)
+	}
+	if bytes.IndexByte(buf[:n], 0) >= 0 {
+		return fmt.Errorf("%w: %s", ErrBinary, abs)
+	}
+	return nil
+}
+
+// editWatcher polls the temp file's stat (mtime AND size) every editPoll;
+// once it has been modified and then stable for editStability, it saves
+// (atomically re-upload + rename) and stops after that single successful
+// save (documented). A change counts as either an mtime or a size delta:
+// the size also catches saves on filesystems with coarse mtime granularity
+// (a write inside the same mtime quantum as the download). On a save
+// failure it keeps watching so a later stability window can retry. The
 // watcher does not react to the editor process exiting (see the package
 // comment on non-blocking launchers): for launcher editors the real writing
 // process outlives the launched command, so only save/cancel/cleanup end the
@@ -226,13 +270,16 @@ func (m *Manager) editWatcher(es *editState, c *sftp.Client) {
 			continue // temp removed (cleanup); keep polling until cancel
 		}
 		mt := st.ModTime()
+		sz := st.Size()
 		es.mu.Lock()
 		if es.lastMtime.IsZero() {
 			// First observation: record the baseline; not yet dirty (a file
 			// that is merely opened and closed without edits must not save).
 			es.lastMtime = mt
-		} else if !mt.Equal(es.lastMtime) {
+			es.lastSize = sz
+		} else if !mt.Equal(es.lastMtime) || sz != es.lastSize {
 			es.lastMtime = mt
+			es.lastSize = sz
 			es.lastChange = time.Now()
 			es.dirty = true
 		}

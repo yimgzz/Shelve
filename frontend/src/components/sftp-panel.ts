@@ -10,10 +10,11 @@
 // icon / name / size / modified.
 // Double-click: dir → navigate, file → OpenRemoteFile (local default app).
 // Context menu: Open / Edit as text / Download… / Upload to here… / New
-// folder… / Rename… / Delete…. "Edit as text" (EditRemoteText) downloads a
-// text-like file to tmp/, opens the configured editor and re-uploads it on
-// save-detection — the backend is silent except for "Saved to …" / error
-// toasts, so the panel keeps no per-file "editing" state.
+// folder… / Rename… / Delete…. "Edit as text" (EditRemoteText) downloads
+// the file (any name; the backend rejects >2 MiB and binary content) to
+// tmp/, opens the configured editor and re-uploads it on save-detection —
+// the backend is silent except for "Saved to …" / error toasts, so the
+// panel keeps no per-file "editing" state.
 // Footer carries the transfer progress line fed by the store's sftp:progress
 // cache.
 
@@ -704,7 +705,10 @@ function openPanelContext(x: number, y: number, entry: SftpEntryDTO): void {
     const items: MenuItem[] = [];
     items.push(
         { label: "Open", action: () => openEntry(entry) },
-        { label: "Edit as text", disabled: !entry.textLike, action: () => void startEdit(entry) },
+        // Any file is editable (dotfiles, no extension, binary extensions);
+        // only directories are excluded. The backend still enforces the
+        // 2 MiB cap and toasts the error if the file is over it.
+        { label: "Edit as text", disabled: entry.isDir, action: () => void startEdit(entry) },
         { label: "Download…", action: () => void downloadSave(entry) },
         { label: "Upload to here…", action: () => void doUpload() },
         {

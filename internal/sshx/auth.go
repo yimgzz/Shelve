@@ -61,6 +61,34 @@ func AuthMethods(auth model.Auth, keyPassphrase *string) ([]ssh.AuthMethod, erro
 	}
 }
 
+// BastionAuthMethods builds the SSH auth-method list for a bastion hop
+// (plan P009 §2.3): publickey when the stored credential is an SSH key
+// (same ErrKeyPassphraseRequired prompt path as AuthMethods) plus
+// keyboard-interactive, which is always offered as the bastion's
+// interactive auth. Plain password is NOT offered: a stored password is
+// used by the engine to prefill the keyboard-interactive rounds (plan
+// P009 §2.4), not as a standalone "password" method.
+//
+// challenge is the engine-supplied per-connection callback; the engine
+// resolves it through the vault:kbdint-prompt modal flow. Blocking from
+// the handshake goroutine is the established pattern (host-key callback).
+func BastionAuthMethods(auth model.Auth, keyPassphrase *string, challenge ssh.KeyboardInteractiveChallenge) ([]ssh.AuthMethod, error) {
+	methods := make([]ssh.AuthMethod, 0, 2)
+	switch auth.Type {
+	case model.AuthKey:
+		signer, err := parseKeyFile(auth.KeyPath, keyPassphrase)
+		if err != nil {
+			return nil, err
+		}
+		methods = append(methods, ssh.PublicKeys(signer))
+	case model.AuthPassword:
+		// No standalone password method (see doc); the engine prefills
+		// the keyboard-interactive rounds from auth.Password.
+	}
+	methods = append(methods, ssh.KeyboardInteractive(challenge))
+	return methods, nil
+}
+
 // parseKeyFile reads and parses the private-key file at keyPath
 // (read-only, master plan §8.6) into an ssh signer, with the typed
 // errors the prompt flow relies on:

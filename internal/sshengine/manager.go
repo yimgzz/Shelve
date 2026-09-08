@@ -35,6 +35,7 @@ const (
 	EventTerminalExit       = "terminal:exit"
 	EventVaultHostkeyPrompt = "vault:hostkey-prompt"
 	EventVaultKeyPrompt     = "vault:key-prompt"
+	EventVaultKbdintPrompt  = "vault:kbdint-prompt"
 	EventForward            = "ssh:forward"
 	EventAppToast           = "app:toast"
 )
@@ -98,6 +99,20 @@ type HostKeyPromptPayload struct {
 type KeyPromptPayload struct {
 	ConnID  string `json:"connID"`
 	KeyPath string `json:"keyPath"`
+}
+
+// KbdintPromptPayload is the payload of EventVaultKbdintPrompt: one
+// keyboard-interactive round on a bastion hop (plan P009). Name and
+// Instruction are non-sensitive server text. Prefill is the single §8
+// exception (plan P009 §2.4): the bastion hop's stored password, offered
+// only to prefill the masked inputs, never persisted, logged, or cached.
+type KbdintPromptPayload struct {
+	ConnID      string   `json:"connID"`
+	Name        string   `json:"name,omitempty"`
+	Instruction string   `json:"instruction,omitempty"`
+	Questions   []string `json:"questions"`
+	Echo        []bool   `json:"echo"`
+	Prefill     string   `json:"prefill,omitempty"`
 }
 
 // ForwardPayload is the payload of EventForward: the lifecycle of one
@@ -480,18 +495,28 @@ type promptKind int
 const (
 	promptHostKey promptKind = iota
 	promptKeyPassphrase
+	promptKbdint
 )
+
+// kbdintResolution is the resolution of one keyboard-interactive round
+// (plan P009): the user's answers, or an abort flag.
+type kbdintResolution struct {
+	answers []string
+	aborted bool
+}
 
 // promptSlot is one in-flight prompt, keyed by connID: at most one
 // pending prompt per connID (master plan phase 3c).
 type promptSlot struct {
 	kind  promptKind
-	timer *time.Timer // host-key timeout; nil for key-passphrase prompts
+	timer *time.Timer // host-key timeout; nil for other prompt kinds
 	// The resolver sends on exactly one channel (buffered 1: the
 	// resolver never blocks). The host-key channel is consumed by the
-	// sshx host-key callback; the key-passphrase channel by the dial.
-	chBool chan bool
-	chStr  chan string
+	// sshx host-key callback; the key-passphrase channel by the dial; the
+	// kbdint channel by the keyboard-interactive challenge.
+	chBool    chan bool
+	chStr     chan string
+	chAnswers chan kbdintResolution
 }
 
 func (m *Manager) beginHostKeyPrompt(connID, host string, port int, keyType, keyB64, fingerprint string) chan bool {
@@ -541,6 +566,29 @@ func (m *Manager) beginKeyPrompt(connID, keyPath string) (chan string, *promptSl
 	return ch, slot
 }
 
+// beginKbdintPrompt registers one keyboard-interactive round for a bastion
+// hop (plan P009) and emits vault:kbdint-prompt. Unlike the host-key prompt
+// it carries no slot timer: the per-round PromptTimeout and ctx cancellation
+// are enforced by the challenge's select (the round is transient, and the
+// slot is discarded on every non-submit exit). One in-flight round per
+// connID; rounds are sequential.
+func (m *Manager) beginKbdintPrompt(connID, name, instruction string, questions []string, echos []bool, prefill string) (chan kbdintResolution, *promptSlot) {
+	m.mu.Lock()
+	ch := make(chan kbdintResolution, 1)
+	slot := &promptSlot{kind: promptKbdint, chAnswers: ch}
+	m.prompts[connID] = slot
+	m.mu.Unlock()
+	m.emit.Emit(EventVaultKbdintPrompt, KbdintPromptPayload{
+		ConnID:      connID,
+		Name:        name,
+		Instruction: instruction,
+		Questions:   questions,
+		Echo:        echos,
+		Prefill:     prefill,
+	})
+	return ch, slot
+}
+
 // resolvePrompt resolves the pending prompt of kind `want` for connID,
 // identity-checked so a stale resolver (timer firing after the user
 // already decided, a re-applied prompt) is a no-op: it removes the
@@ -581,14 +629,31 @@ func (m *Manager) SubmitKeyPassphrase(connID, passphrase string) error {
 	return m.resolvePrompt(connID, promptKeyPassphrase, func(s *promptSlot) { s.chStr <- passphrase })
 }
 
-// dropHostKeyPrompt removes a host-key slot a finished chain left
-// behind. Every prompt resolution (Approve/Reject/timeout/abort)
-// already removes its slot, so this is a defensive invariant: after a
-// chain ends, no prompt slot may remain for its connID.
-func (m *Manager) dropHostKeyPrompt(connID string) {
+// SubmitKbdintResponse resolves the pending keyboard-interactive round for
+// connID with the entered answers (one per question; x/crypto enforces the
+// count). The answers are handed to the handshake and never logged.
+func (m *Manager) SubmitKbdintResponse(connID string, answers []string) error {
+	return m.resolvePrompt(connID, promptKbdint, func(s *promptSlot) {
+		s.chAnswers <- kbdintResolution{answers: answers}
+	})
+}
+
+// CancelKbdint cancels the pending keyboard-interactive round for connID
+// (the challenge aborts the handshake; the dial surfaces the failure).
+func (m *Manager) CancelKbdint(connID string) error {
+	return m.resolvePrompt(connID, promptKbdint, func(s *promptSlot) {
+		s.chAnswers <- kbdintResolution{aborted: true}
+	})
+}
+
+// dropConnPrompt removes any prompt slot a finished chain (host-key OR
+// kbdint, plan P009) left behind. Every prompt resolution
+// (Approve/Reject/Submit/Cancel/timeout/abort) already removes its slot,
+// so this is a defensive invariant: after a chain ends, no prompt slot
+// may remain for its connID.
+func (m *Manager) dropConnPrompt(connID string) {
 	m.mu.Lock()
-	slot, ok := m.prompts[connID]
-	if ok && slot.kind == promptHostKey {
+	if slot, ok := m.prompts[connID]; ok {
 		delete(m.prompts, connID)
 		if slot.timer != nil {
 			slot.timer.Stop()
@@ -623,6 +688,12 @@ func (m *Manager) abortConnPrompt(l *liveConn) {
 	if slot.chBool != nil {
 		select {
 		case slot.chBool <- false:
+		default:
+		}
+	}
+	if slot.chAnswers != nil {
+		select {
+		case slot.chAnswers <- kbdintResolution{aborted: true}:
 		default:
 		}
 	}

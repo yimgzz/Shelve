@@ -31,6 +31,10 @@ type JumpHost struct {
 	Port int    `json:"port"`
 	User string `json:"user"`
 	Auth Auth   `json:"auth"`
+	// Bastion marks this hop as a bastion-style jump host (plan P009):
+	// the target is embedded in the SSH username as user@target, and the
+	// hop is the last handshake of the chain. See plan P009.
+	Bastion bool `json:"bastion,omitempty"`
 }
 
 // Folder is a node in the session tree. Children (subfolders and sessions)
@@ -91,6 +95,8 @@ type SavedJumpHost struct {
 	Port int    `json:"port"` // 1–65535 (22 default)
 	User string `json:"user"` // login; required
 	Auth Auth   `json:"auth"` // password XOR key path
+	// Bastion mirrors JumpHost.Bastion (plan P009, saved-jump-host parity).
+	Bastion bool `json:"bastion,omitempty"`
 }
 
 // Payload is the plaintext document encrypted inside vault.json

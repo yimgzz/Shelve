@@ -83,6 +83,13 @@ type hop struct {
 	port     int
 	auth     model.Auth
 	isTarget bool
+	// bastion marks a bastion-style jump host (plan P009): it is the last
+	// handshake of the chain and its user carries the embedded target.
+	bastion bool
+	// skipDial marks the target hop when a bastion hop is present (plan
+	// P009): the target is reached through the bastion relay and is never
+	// dialed as its own hop.
+	skipDial bool
 }
 
 // liveConn is one tab's full connection state. One run goroutine per
@@ -147,6 +154,12 @@ func (l *liveConn) dial() error {
 
 	for i := range hops {
 		h := &hops[i]
+		if h.skipDial {
+			// Bastion target (plan P009): reached through the bastion
+			// relay, never dialed. Stopping here makes the bastion the
+			// final client; a skipped hop never produces a hopErrorAt.
+			break
+		}
 		addr := net.JoinHostPort(h.host, strconv.Itoa(h.port))
 
 		methods, err := l.m.authenticateHop(l.ctx, l.connID, h)
@@ -190,6 +203,9 @@ func (l *liveConn) dial() error {
 	}
 
 	last := len(hops) - 1
+	for last >= 0 && hops[last].skipDial {
+		last--
+	}
 	targetHop := &hops[last]
 	target := l.clientsAt(last)
 	if target == nil {
@@ -282,10 +298,20 @@ func buildSessionChain(sess model.Session) ([]hop, time.Duration, *args.Parsed, 
 		return nil, 0, nil, err
 	}
 	hops := make([]hop, 0, len(sess.JumpHosts)+2)
+	bastionPresent := false
 	for _, j := range sess.JumpHosts {
-		hops = append(hops, hop{
+		h := hop{
 			user: j.User, host: j.Host, port: orDefaultPort(j.Port), auth: j.Auth,
-		})
+			bastion: j.Bastion,
+		}
+		if j.Bastion {
+			bastionPresent = true
+			// Effective username: user@target embedded in the bastion
+			// handshake (plan P009 §2.1). sess.Host is already validated
+			// as a hostname/IPv4, so no brackets are possible.
+			h.user = j.User + "@" + sess.Host
+		}
+		hops = append(hops, h)
 	}
 	if pj := parsed.ProxyJump; pj != nil {
 		user := pj.User
@@ -294,10 +320,17 @@ func buildSessionChain(sess model.Session) ([]hop, time.Duration, *args.Parsed, 
 		}
 		hops = append(hops, hop{user: user, host: pj.Host, port: orDefaultPort(pj.Port), auth: sess.Auth})
 	}
-	hops = append(hops, hop{
+	target := hop{
 		user: sess.User, host: sess.Host, port: orDefaultPort(sess.Port),
 		auth: sess.Auth, isTarget: true,
-	})
+	}
+	// Defensive re-check (model validation is the primary gate): with a
+	// bastion hop the target is reached through the bastion relay and is
+	// never dialed as its own hop (plan P009 §4).
+	if bastionPresent {
+		target.skipDial = true
+	}
+	hops = append(hops, target)
 
 	timeout := defaultDialTimeout
 	if ct := parsed.Options.ConnectTimeout; ct != nil && *ct > 0 {
@@ -362,7 +395,19 @@ func hopErrorAt(h *hop, idx, total int, err error) error {
 // passphrase is cached only after the retry succeeds, so a wrong
 // passphrase can never shadow a later corrected prompt.
 func (m *Manager) authenticateHop(ctx context.Context, connID string, h *hop) ([]ssh.AuthMethod, error) {
-	methods, err := sshx.AuthMethods(h.auth, m.passphraseFor(h.auth))
+	// build assembles this hop's auth methods for a given key passphrase.
+	// Bastion hops offer publickey (when key-auth) plus keyboard-interactive
+	// (plan P009); non-bastion hops keep the existing methods. The passphrase
+	// re-run after a vault:key-prompt rebuilds the same way, so a bastion key
+	// hop re-attaches the challenge with a fresh round counter.
+	build := func(passphrase *string) ([]ssh.AuthMethod, error) {
+		if h.bastion {
+			return sshx.BastionAuthMethods(h.auth, passphrase,
+				m.bastionChallenge(ctx, connID, kbdintPrefill(h.auth)))
+		}
+		return sshx.AuthMethods(h.auth, passphrase)
+	}
+	methods, err := build(m.passphraseFor(h.auth))
 	var need *sshx.ErrKeyPassphraseRequired
 	if !errors.As(err, &need) {
 		return methods, err
@@ -375,7 +420,7 @@ func (m *Manager) authenticateHop(ctx context.Context, connID string, h *hop) ([
 	}()
 	select {
 	case pw := <-ch:
-		retried, err := sshx.AuthMethods(h.auth, &pw)
+		retried, err := build(&pw)
 		if errors.Is(err, sshx.ErrKeyPassphraseWrong) {
 			return nil, sshx.ErrKeyPassphraseWrong
 		}
@@ -389,6 +434,16 @@ func (m *Manager) authenticateHop(ctx context.Context, connID string, h *hop) ([
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// kbdintPrefill returns the keyboard-interactive prefill value for a bastion
+// hop (plan P009 §2.4): the stored password when the hop is password-auth
+// (used to prefill every password-style round), else "".
+func kbdintPrefill(auth model.Auth) string {
+	if auth.Type == model.AuthPassword {
+		return auth.Password
+	}
+	return ""
 }
 
 // storeConn records a raw chain conn for teardown and reports whether
@@ -435,7 +490,7 @@ func (l *liveConn) fail(err error) {
 	l.message = err.Error()
 	aborted := l.disconnected
 	l.m.mu.Unlock()
-	l.m.dropHostKeyPrompt(l.connID)
+	l.m.dropConnPrompt(l.connID)
 	if !aborted {
 		l.m.emitStatus(l.tabID, StateError, err.Error())
 	}

@@ -139,11 +139,18 @@ func (c *CapturingEmitter) WaitEvent(t *testing.T, name string, timeout time.Dur
 // ---------------------------------------------------------------------
 
 // testSSHOpts configures the rig's auth surface: an optional password
-// ("" disables password auth) and the set of authorized public keys.
+// ("" disables password auth), the set of authorized public keys, and —
+// for plan P009 bastion tests — an optional keyboard-interactive callback.
 type testSSHOpts struct {
 	user           string
 	password       string
 	authorizedKeys []ssh.PublicKey
+	// kbdint, if non-nil, configures keyboard-interactive auth. It is
+	// invoked ONCE per keyboard-interactive method attempt; multi-round
+	// flows (the bastion's two rounds) are driven by calling
+	// client.Challenge multiple times inside it, ending with the
+	// zero-question completion round (RFC 4256 §3.3).
+	kbdint func(ssh.ConnMetadata, ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error)
 }
 
 // testSSHServer is an in-process ssh.ServerConn-based SSH server on a
@@ -189,6 +196,7 @@ func newTestSSHServer(t *testing.T, opts testSSHOpts) *testSSHServer {
 			}
 			return nil, fmt.Errorf("unknown public key")
 		},
+		KeyboardInteractiveCallback: opts.kbdint,
 	}
 	cfg.AddHostKey(hostSigner)
 

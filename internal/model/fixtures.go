@@ -163,6 +163,39 @@ func GenerateFixture(sessionCount int) Payload {
 		sessions = append(sessions, s)
 	}
 
+	// Plan P009: one bastion saved jump host plus one bastion session that
+	// references it (P006 path) with the saved hop as its inline snapshot.
+	// Exercises the bastion checkbox / validation / prefill UI paths; the
+	// fictional target is not dial-able in tests.
+	bastionSaved := SavedJumpHost{
+		ID:      NewID(),
+		Name:    "bastion-mode",
+		Host:    "bastion-01.corp.example.com",
+		Port:    22,
+		User:    "relay",
+		Bastion: true,
+		Auth:    Auth{Type: AuthPassword, Password: "fixture-bastion-pw"},
+	}
+	savedJumpHosts = append(savedJumpHosts, bastionSaved)
+	bastionSession := Session{
+		ID:          NewID(),
+		Name:        "Bastion Session",
+		User:        "user",
+		Port:        22, // bastion target requires 22 (v1)
+		Host:        "bastion-target-01.corp.example.com",
+		Auth:        Auth{}, // target auth optional in bastion mode
+		JumpHostRef: bastionSaved.ID,
+		JumpHosts: []JumpHost{
+			{
+				Host: "bastion-01.corp.example.com", Port: 22, User: "relay", Bastion: true,
+				Auth: Auth{Type: AuthPassword, Password: "fixture-bastion-pw"},
+			},
+		},
+	}
+	root = append(root, bastionSession.ID)
+	order[""] = append(order[""], bastionSession.ID)
+	sessions = append(sessions, bastionSession)
+
 	// Keep Folder.Children consistent with the built order lists.
 	for i := range folders {
 		folders[i].Children = append([]string(nil), order[folders[i].ID]...)

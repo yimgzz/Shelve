@@ -426,10 +426,10 @@ func TestStore300SessionsFixturePerf(t *testing.T) {
 	t0 := time.Now()
 	tree := s.Tree()
 	n := countNodes(tree)
-	if n != 330 { // 300 sessions + 30 folders
-		t.Fatalf("fixture node count = %d, want 330", n)
+	if n != 331 { // 300 sessions + 1 bastion fixture (plan P009) + 30 folders
+		t.Fatalf("fixture node count = %d, want 331", n)
 	}
-	// A batch of search-free ops on the 330-node tree.
+	// A batch of search-free ops on the 331-node tree.
 	firstFolder := tree[0]
 	leaf := firstFolder
 	for len(leaf.Children) > 0 {
@@ -472,7 +472,7 @@ func TestStore300SessionsFullPayloadRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(encoded, &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Sessions) != 300 || len(got.Folders) != 30 {
+	if len(got.Sessions) != 301 || len(got.Folders) != 30 { // 300 + 1 bastion fixture
 		t.Fatalf("payload after round trip: %d sessions / %d folders", len(got.Sessions), len(got.Folders))
 	}
 	// Plan P003: the named credentials slice survives encode/load, and

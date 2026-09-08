@@ -38,18 +38,20 @@ func (m *Manager) TestConnection(sess *model.Session) error {
 		for i := len(clients) - 1; i >= 0; i-- {
 			clients[i].Close()
 		}
-		m.dropHostKeyPrompt(connID)
+		m.dropConnPrompt(connID)
 	}()
 	return err
 }
 
 // dialHopChain dials every hop of sess (structured jumps + ProxyJump +
-// target) with the same auth / host-key / key-passphrase paths as Connect,
-// but opens NO pty/shell/forwards. Hops after the first are tunneled
-// through the previous hop's SSH client as direct-tcpip channels. It
-// returns all dialed clients in hop order (last = final hop); on error
-// the partially-dialed clients are closed before returning. connID keys
-// any host-key / key-passphrase prompts.
+// target) with the same auth / host-key / key-passphrase / kbdint paths as
+// Connect, but opens NO pty/shell/forwards. Hops after the first are
+// tunneled through the previous hop's SSH client as direct-tcpip channels.
+// With a bastion hop the target is mark skipDial and the bastion is the
+// final dialed client (plan P009), so success == bastion relay reachable.
+// It returns all dialed clients in hop order (last = final dialed hop); on
+// error the partially-dialed clients are closed before returning. connID
+// keys any host-key / key-passphrase / kbdint prompts.
 func (m *Manager) dialHopChain(ctx context.Context, connID string, sess model.Session) ([]*ssh.Client, error) {
 	hops, timeout, _, err := buildSessionChain(sess)
 	if err != nil {
@@ -63,6 +65,11 @@ func (m *Manager) dialHopChain(ctx context.Context, connID string, sess model.Se
 	}
 	for i := range hops {
 		h := &hops[i]
+		if h.skipDial {
+			// Bastion target (plan P009): reached through the bastion
+			// relay, never dialed. The bastion client is the final one.
+			break
+		}
 		addr := net.JoinHostPort(h.host, strconv.Itoa(h.port))
 
 		methods, err := m.authenticateHop(ctx, connID, h)
@@ -125,7 +132,7 @@ func (m *Manager) DialMonitorClient(tabID string) ([]*ssh.Client, error) {
 	connID := tabID + "-monitor"
 	clients, err := m.dialHopChain(context.Background(), connID, sess)
 	if err != nil {
-		m.dropHostKeyPrompt(connID)
+		m.dropConnPrompt(connID)
 		return nil, err
 	}
 	return clients, nil

@@ -125,7 +125,10 @@ Notes:
 - Service methods are async JS Promises. DTOs live in `internal/wailsvc/dto.go`;
   never expose internal structs.
 - **No plaintext credentials over IPC.** Passwords/key material never leave the
-  vault in `Tree()` (only `HasPassword`/`AuthType` are exposed).
+  vault in `Tree()` (only `HasPassword`/`AuthType` are exposed). The single
+  documented exception (plan P009): a bastion hop's stored password crosses IPC
+  only inside `vault:kbdint-prompt.payload.prefill`, solely to prefill the masked
+  keyboard-interactive inputs — never persisted, logged, or cached.
 - **No large file bytes over IPC (A5).** Uploads/downloads pass *paths*; Go
   streams the bytes. Only terminal I/O and small events cross the Wails IPC.
 - Wait for `events.Common.WindowRuntimeReady` before emitting anything
@@ -138,6 +141,7 @@ Notes:
 | `vault:state-changed` | `{unlocked: bool}` | vault/app lifecycle |
 | `vault:hostkey-prompt` | `{connID, host, port, keyType, keyB64, fingerprint}` | sshx host-key cb |
 | `vault:key-prompt` | `{connID, keyPath}` | encrypted private key |
+| `vault:kbdint-prompt` | `{connID, name?, instruction?, questions: [string], echo: [bool], prefill?}` (one event per bastion kbdint round; **plan P009**) | sshengine bastion hop; `prefill` = the single §5.11 IPC exception (masked inputs only) |
 | `terminal:status` | `{tabID, state, message?}` | sshengine |
 | `terminal:data` | `{tabID, data b64}` (batched ≤50 ms / ≤64 KB; **plan P005:** production output rides the `/terminal` WebSocket on a dedicated `127.0.0.1` loopback listener as raw binary — the webview's `wails://` scheme cannot carry WebSockets, so the frontend discovers the port via `GET /termws-port`; this event stays as the headless/fallback path) | sshengine |
 | `terminal:exit` | `{tabID, exitStatus?}` | sshengine |
@@ -165,6 +169,10 @@ Notes:
    webview only via `GET /termws-port`, Origin-checked against the `wails://`
    page origin). No telemetry, no update checks, no crash reporting.
 10. Corrupt/undecryptable vault → refuse to unlock, never auto-overwrite.
+11. Single scoped IPC exception (plan P009): a bastion hop's stored password may
+    cross IPC in `vault:kbdint-prompt.payload.prefill` only, to prefill masked
+    keyboard-interactive inputs; it is never persisted, logged, or cached, and
+    `Tree()`/DTOs still expose no plaintext.
 
 ## 6. Conventions
 
@@ -179,6 +187,11 @@ Notes:
 - **Session card:** exactly one auth method (password XOR key path); Jump Hosts
   are structured fields; Extra Args uses a strict parser (`internal/sshx/args`).
   Key passphrases are prompted once per connection, cached only in memory.
+- **Bastion jump mode (P009):** a jump host flagged `Bastion` embeds the target
+  in the SSH username (`user@target`) and is authed keyboard-interactively
+  (multi-round, pre-filled from the stored password); after auth the bastion
+  relays the session channel. Target login == bastion login; target port 22 and
+  hostname/IPv4 only, no ProxyJump, in v1.
 - **Search:** matches Name, Host, User (case-insensitive substring); folder path
   shown in results (A9). Session ID is a ULID (A10).
 - **Destructive tree ops** (delete folder with children, delete session) require

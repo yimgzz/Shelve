@@ -793,6 +793,18 @@
     min-width: 120px;
 }
 
+/* Plan P009: bastion checkbox row inside a jump-host row (full width). */
+.jump-bastion {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+}
+
 .editor-status {
     font-size: 12px;
     color: var(--text-dim);

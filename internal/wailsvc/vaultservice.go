@@ -155,6 +155,25 @@ func (s *VaultService) SubmitKeyPassphrase(connID, passphrase string) error {
 	return s.engine.SubmitKeyPassphrase(connID, passphrase)
 }
 
+// SubmitKbdintResponse submits the entered answers for the pending
+// keyboard-interactive round on a bastion hop (plan P009). Answers are one
+// per question, handed to the handshake and never logged.
+func (s *VaultService) SubmitKbdintResponse(connID string, answers []string) error {
+	if !s.vault.IsUnlocked() {
+		return vault.ErrLocked
+	}
+	return s.engine.SubmitKbdintResponse(connID, answers)
+}
+
+// CancelKbdint cancels the pending keyboard-interactive round on a bastion
+// hop (plan P009); the handshake aborts and the dial surfaces the failure.
+func (s *VaultService) CancelKbdint(connID string) error {
+	if !s.vault.IsUnlocked() {
+		return vault.ErrLocked
+	}
+	return s.engine.CancelKbdint(connID)
+}
+
 func (s *VaultService) emitVaultState(unlocked bool) {
 	s.emit.Emit(EventVaultStateChanged, VaultStatePayload{Unlocked: unlocked})
 }

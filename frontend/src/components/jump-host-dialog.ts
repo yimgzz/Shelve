@@ -11,13 +11,16 @@
 
 import { AppService, JumpHostService } from "../../bindings/shelve/internal/wailsvc";
 import { openDialog, type DialogHandle } from "../ui/dialog";
-import { store, type SavedJumpHostDTO } from "../store";
+import { store, type SavedJumpHostDTO, type SavedJumpHostInput } from "../store";
 import { confirmDialog } from "./confirm";
 import { toast } from "./toasts";
 
 // model.AuthType: AuthPassword=0, AuthKey=1.
 const AUTH_PASSWORD = 0;
 const AUTH_KEY = 1;
+
+// Plan P009: bastion-style saved jump host.
+const BASTION_TOOLTIP = "Route the referencing session's target through this host as login user@target";
 
 /** A labelled field wrapper with an inline error slot (mirrors the session editor). */
 function field(labelText: string, input: HTMLElement, opts?: { hint?: string }): {
@@ -164,7 +167,8 @@ export async function openJumpHostManager(opts: JumpHostManagerOptions = {}): Pr
             meta.className = "hint";
             const kind = jh.authType === AUTH_KEY ? "key" : "password";
             const secret = jh.authType === AUTH_KEY ? (jh.keyPath ? jh.keyPath : "key") : "••••••••";
-            meta.textContent = `${jh.user}@${jh.host}:${jh.port} — ${kind} — ${secret}`;
+            const bastionTag = jh.bastion ? " — bastion" : "";
+            meta.textContent = `${jh.user}@${jh.host}:${jh.port} — ${kind} — ${secret}${bastionTag}`;
             info.append(nameEl, meta);
 
             const actions = document.createElement("div");
@@ -334,7 +338,19 @@ export function openJumpHostEditor(existing?: SavedJumpHostDTO): Promise<boolean
     keyRb.rb.addEventListener("change", applyAuthMode);
     applyAuthMode();
 
-    body.append(nameF.wrap, hostF.wrap, portF.wrap, userF.wrap, authSection);
+    // Plan P009: mark this saved host as a bastion (parity with the inline
+    // jump rows). Referencing sessions reach their target through it as
+    // login user@target; the session's target port must be 22 (v1).
+    const bastion = document.createElement("input");
+    bastion.type = "checkbox";
+    bastion.className = "settings-check";
+    bastion.checked = !!(existing && existing.bastion);
+    bastion.title = BASTION_TOOLTIP;
+    const bastionF = field("Bastion", bastion, {
+        hint: "When a session references this host, its target is reached through it as login user@target; the session's target port must be 22 (v1).",
+    });
+
+    body.append(nameF.wrap, hostF.wrap, portF.wrap, userF.wrap, authSection, bastionF.wrap);
 
     const footer = document.createElement("div");
     const status = document.createElement("span");
@@ -402,7 +418,7 @@ export function openJumpHostEditor(existing?: SavedJumpHostDTO): Promise<boolean
         clearErrors();
         const authTypeValue = keyRb.rb.checked ? AUTH_KEY : AUTH_PASSWORD;
         const portValue = Number(port.value);
-        const input = {
+        const input: SavedJumpHostInput = {
             id: editing ? existing!.id : undefined,
             name: name.value.trim(),
             host: host.value.trim(),
@@ -411,6 +427,7 @@ export function openJumpHostEditor(existing?: SavedJumpHostDTO): Promise<boolean
             authType: authTypeValue,
             password: authTypeValue === AUTH_PASSWORD ? pwInput.value : undefined,
             keyPath: authTypeValue === AUTH_KEY ? keyPathInput.value.trim() : undefined,
+            bastion: bastion.checked,
         };
         const localErr: Array<[HTMLElement, string]> = [];
         if (!input.name) {

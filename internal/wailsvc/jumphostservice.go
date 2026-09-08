@@ -124,7 +124,7 @@ func resolveSessionJumpHost(st *store.Store, sess model.Session) model.Session {
 		return sess // inline snapshot fallback
 	}
 	sess.JumpHosts = []model.JumpHost{
-		{Host: jh.Host, Port: jh.Port, User: jh.User, Auth: jh.Auth},
+		{Host: jh.Host, Port: jh.Port, User: jh.User, Auth: jh.Auth, Bastion: jh.Bastion},
 	}
 	return sess
 }
@@ -146,7 +146,7 @@ func (s *SessionService) applyJumpHostSnapshot(sess *model.Session) error {
 		return &model.ValidationError{Field: "session.jumpHostRef", Rule: "references unknown saved jump host"}
 	}
 	sess.JumpHosts = []model.JumpHost{
-		{Host: jh.Host, Port: jh.Port, User: jh.User, Auth: jh.Auth},
+		{Host: jh.Host, Port: jh.Port, User: jh.User, Auth: jh.Auth, Bastion: jh.Bastion},
 	}
 	return nil
 }

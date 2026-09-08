@@ -15,8 +15,10 @@ import { renderShell } from "./components/shell";
 import {
     showHostKeyPrompt,
     showKeyPrompt,
+    showKbdintPrompt,
     type HostKeyPromptPayload,
     type KeyPromptPayload,
+    type KbdintPromptPayload,
 } from "./components/prompts";
 import { toast } from "./components/toasts";
 import { TermPool } from "./terminal/xterm";
@@ -35,6 +37,7 @@ const EV = {
     VaultStateChanged: "vault:state-changed",
     HostKeyPrompt: "vault:hostkey-prompt",
     KeyPrompt: "vault:key-prompt",
+    KbdintPrompt: "vault:kbdint-prompt",
     TerminalStatus: "terminal:status",
     TerminalData: "terminal:data",
     TerminalExit: "terminal:exit",
@@ -183,6 +186,9 @@ function handleEvent(name: string, payload: unknown): void {
         case EV.KeyPrompt:
             showKeyPrompt(p as unknown as KeyPromptPayload);
             break;
+        case EV.KbdintPrompt:
+            showKbdintPrompt(p as unknown as KbdintPromptPayload);
+            break;
         case EV.TerminalStatus: {
             const tabID = String(p.tabID ?? "");
             const state = String(p.state ?? "connecting") as TabState;
@@ -283,6 +289,7 @@ function subscribeEvents(): void {
     Events.On(EV.AppToast, (ev) => handleEvent(EV.AppToast, eventData(ev)));
     Events.On(EV.HostKeyPrompt, (ev) => handleEvent(EV.HostKeyPrompt, eventData(ev)));
     Events.On(EV.KeyPrompt, (ev) => handleEvent(EV.KeyPrompt, eventData(ev)));
+    Events.On(EV.KbdintPrompt, (ev) => handleEvent(EV.KbdintPrompt, eventData(ev)));
     Events.On(EV.TerminalStatus, (ev) => handleEvent(EV.TerminalStatus, eventData(ev)));
     Events.On(EV.TerminalData, (ev) => handleEvent(EV.TerminalData, eventData(ev)));
     Events.On(EV.TerminalExit, (ev) => handleEvent(EV.TerminalExit, eventData(ev)));

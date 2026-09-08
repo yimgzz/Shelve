@@ -36,6 +36,8 @@ export interface JumpHostInput {
     // Present-but-maybe-undefined, matching the Wails-generated model.
     password: string | undefined;
     keyPath: string | undefined;
+    /** Bastion-style hop (plan P009): last handshake, target-embedding. */
+    bastion: boolean;
 }
 
 export interface SessionInput {
@@ -67,6 +69,11 @@ export interface SessionInput {
 
 const EXTRA_ARGS_HELP =
     "Supported: -L, -D, -o ServerAliveInterval|ServerAliveCountMax|ConnectTimeout|StrictHostKeyChecking, ProxyJump=user@host[:port]";
+
+// Plan P009: bastion-style jump host UI copy.
+const BASTION_TOOLTIP = "Route this session's target through this bastion as login user@target";
+const BASTION_ROW_HINT =
+    "Session Host is reached through this bastion; target login = bastion login; target port must be 22 (v1).";
 
 /** A labelled field wrapper with an inline error slot. */
 function field(labelText: string, input: HTMLElement, opts?: { hint?: string }): {
@@ -185,6 +192,12 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
     port.max = "65535";
     port.value = String(editing ? initial!.port : 22);
     const portF = field("Port", port);
+    // Plan P009: shown while a bastion jump host is active (target must be 22).
+    const portBastionHint = document.createElement("div");
+    portBastionHint.className = "hint";
+    portBastionHint.style.display = "none";
+    portBastionHint.textContent = "Must be 22 while a bastion jump host is active (v1).";
+    portF.wrap.appendChild(portBastionHint);
 
     const user = document.createElement("input");
     user.type = "text";
@@ -224,11 +237,20 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
     authErr.className = "field-error";
     authErr.style.display = "none";
 
+    // Plan P009: static note shown in place of the target credentials while
+    // a bastion jump host is active (the bastion relays target auth; the
+    // saved values are preserved but unused).
+    const bastionAuthNote = document.createElement("div");
+    bastionAuthNote.className = "hint";
+    bastionAuthNote.style.display = "none";
+    bastionAuthNote.textContent =
+        "Bastion handles target authentication — you will be prompted when connecting (your saved bastion password prefills the prompt).";
+
     const authSection = document.createElement("div");
     authSection.className = "field";
     const authLabel = document.createElement("label");
     authLabel.textContent = "Authentication";
-    authSection.append(authLabel, authRadios, pwF.wrap, keyF.wrap, authErr);
+    authSection.append(authLabel, authRadios, pwF.wrap, keyF.wrap, bastionAuthNote, authErr);
 
     const applyAuthMode = () => {
         const key = keyRb.rb.checked;
@@ -357,6 +379,8 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         keyRadio: HTMLInputElement;
         pwRadio: HTMLInputElement;
         keyPath: HTMLInputElement;
+        /** Bastion checkbox (plan P009): routes the target through this hop. */
+        bastion: HTMLInputElement;
         /** The row-level inline error slot (shown in either auth mode). */
         err: HTMLElement;
     }
@@ -398,6 +422,23 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         authBox.className = "jump-auth";
         authBox.append(pwRb.el, keyRb.el, pw, keyPath.row);
 
+        // Plan P009: bastion checkbox — routes this session's target through
+        // this hop as login user@target.
+        const bastion = document.createElement("input");
+        bastion.type = "checkbox";
+        bastion.className = "settings-check";
+        bastion.checked = !!(j && j.bastion);
+        bastion.title = BASTION_TOOLTIP;
+        const bastionWrap = document.createElement("label");
+        bastionWrap.className = "jump-bastion";
+        const bastionSpan = document.createElement("span");
+        bastionSpan.textContent = "Bastion";
+        bastionWrap.append(bastion, bastionSpan);
+        const bastionHint = document.createElement("div");
+        bastionHint.className = "hint";
+        bastionHint.style.display = bastion.checked ? "" : "none";
+        bastionHint.textContent = BASTION_ROW_HINT;
+
         const row = document.createElement("div");
         row.className = "jump-row";
         const err = document.createElement("div");
@@ -409,7 +450,16 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         remove.textContent = "×";
         remove.title = "Remove jump host";
 
-        row.append(gridField("Host", host), gridField("Port", port), gridField("User", user), authBox, remove, err);
+        row.append(
+            gridField("Host", host),
+            gridField("Port", port),
+            gridField("User", user),
+            authBox,
+            bastionWrap,
+            bastionHint,
+            remove,
+            err,
+        );
         jumpRows.appendChild(row);
 
         const sync = () => {
@@ -423,8 +473,12 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         pwRb.rb.addEventListener("change", sync);
         keyRb.rb.addEventListener("change", sync);
         sync();
+        bastion.addEventListener("change", () => {
+            bastionHint.style.display = bastion.checked ? "" : "none";
+            refreshBastionUI();
+        });
 
-        const h: JumpHandles = { el: row, host, port, user, pw, keyRadio: keyRb.rb, pwRadio: pwRb.rb, keyPath: keyPathInput, err };
+        const h: JumpHandles = { el: row, host, port, user, pw, keyRadio: keyRb.rb, pwRadio: pwRb.rb, keyPath: keyPathInput, bastion, err };
         remove.addEventListener("click", () => {
             row.remove();
             const i = jumpHandles.indexOf(h);
@@ -471,6 +525,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
             jumpHostRefId = "";
             jhHint.style.display = "none";
             addJump.style.display = "";
+            refreshBastionUI();
             return;
         }
         jumpHostRefId = jh.id;
@@ -482,6 +537,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
             authType: jh.authType,
             hasPassword: jh.hasPassword,
             keyPath: jh.keyPath,
+            bastion: !!jh.bastion,
         });
         const row = jumpHandles[0];
         if (row && !row.keyRadio.checked && jh.hasPassword) {
@@ -490,6 +546,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         addJump.style.display = "none";
         jhHint.style.display = "";
         jhHint.textContent = `"${jh.name}" replaces the inline chain at connect time. Choose "None" to edit hops manually.`;
+        refreshBastionUI();
     }
 
     jhSelect.addEventListener("change", () => {
@@ -512,6 +569,28 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         const jh = store.getState().savedJumpHosts.find((x) => x.id === jumpHostRefId);
         if (jh) {
             applySavedJumpHost(jh);
+        }
+    }
+    // Reflect the initial bastion state (inline rows in edit mode, or the
+    // applied saved jump host) onto the target auth section + port hint.
+    refreshBastionUI();
+
+    // Plan P009: mirror the "any bastion row active" state onto the target
+    // auth section and the port hint. The saved target credentials are
+    // preserved (hidden, not cleared) — merely unused while a bastion is on.
+    function refreshBastionUI(): void {
+        const anyBastion = jumpHandles.some((h) => h.bastion.checked);
+        if (anyBastion) {
+            authRadios.style.display = "none";
+            pwF.wrap.style.display = "none";
+            keyF.wrap.style.display = "none";
+            bastionAuthNote.style.display = "";
+            portBastionHint.style.display = "";
+        } else {
+            bastionAuthNote.style.display = "none";
+            portBastionHint.style.display = "none";
+            authRadios.style.display = "";
+            applyAuthMode(); // restore the visible password/key wrap
         }
     }
 
@@ -590,6 +669,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
     function collect(): { input: SessionInput; valid: boolean } {
         clearErrors();
         const authTypeValue = keyRb.rb.checked ? AUTH_KEY : AUTH_PASSWORD;
+        const anyBastion = jumpHandles.some((h) => h.bastion.checked);
         const input: SessionInput = {
             id: editing ? initial!.id : "",
             folderId: editing ? initial!.folderId : opts.parentID,
@@ -607,6 +687,7 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
                 authType: h.keyRadio.checked ? AUTH_KEY : AUTH_PASSWORD,
                 password: h.keyRadio.checked ? undefined : h.pw.value,
                 keyPath: h.keyRadio.checked ? h.keyPath.value.trim() : undefined,
+                bastion: h.bastion.checked,
             })),
             extraArgs: extraArgs.value.trim(),
             sftpInitialPath: sftpPath.value.trim(),
@@ -623,7 +704,10 @@ export function openSessionEditor(opts: SessionEditorOptions): Promise<boolean> 
         if (!input.user) {
             localErr.push([userF.err, "must not be empty"]);
         }
-        if (authTypeValue === AUTH_KEY && !input.keyPath) {
+        // Plan P009: while a bastion jump host is active the target
+        // credentials are optional (the bastion relays target auth), so the
+        // target keyPath requirement is relaxed.
+        if (authTypeValue === AUTH_KEY && !input.keyPath && !anyBastion) {
             localErr.push([keyF.err, "keyPath is required when authType is key"]);
         }
         for (const [el, msg] of localErr) {

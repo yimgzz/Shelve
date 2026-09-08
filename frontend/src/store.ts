@@ -69,6 +69,8 @@ export interface JumpHostDTO {
     authType: number;
     hasPassword: boolean;
     keyPath?: string;
+    /** Bastion-style hop (plan P009): last handshake, target-embedding. */
+    bastion?: boolean;
 }
 
 /** Session read view snapshot (stored per tab). */
@@ -131,6 +133,8 @@ export interface SavedJumpHostDTO {
     authType: number;
     hasPassword: boolean;
     keyPath?: string;
+    /** Bastion-style host (plan P009): last handshake, target-embedding. */
+    bastion?: boolean;
 }
 
 /** Saved-jump-host write draft (password only flows INTO the vault). */
@@ -143,6 +147,8 @@ export interface SavedJumpHostInput {
     authType: number;
     password?: string;
     keyPath?: string;
+    /** Bastion-style host (plan P009): last handshake, target-embedding. */
+    bastion?: boolean;
 }
 
 /** One flat live-search result (master plan §2 A9). */

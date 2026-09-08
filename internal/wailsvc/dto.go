@@ -19,7 +19,8 @@ type NodeDTO struct {
 	Children []NodeDTO `json:"children"`
 }
 
-// JumpHostDTO exposes a jump host without its password.
+// JumpHostDTO exposes a jump host without its password. Bastion marks a
+// bastion-style hop (plan P009): the last handshake, target-embedding.
 type JumpHostDTO struct {
 	Host        string         `json:"host"`
 	Port        int            `json:"port"`
@@ -27,6 +28,7 @@ type JumpHostDTO struct {
 	AuthType    model.AuthType `json:"authType"`
 	HasPassword bool           `json:"hasPassword"`
 	KeyPath     string         `json:"keyPath,omitempty"`
+	Bastion     bool           `json:"bastion,omitempty"`
 }
 
 // SessionDTO is a session read view: no password material. CredentialID
@@ -71,7 +73,8 @@ type SessionInput struct {
 	JumpHostRef     string          `json:"jumpHostRef,omitempty"`
 }
 
-// JumpHostInput is the write view of a jump host.
+// JumpHostInput is the write view of a jump host. Bastion marks a
+// bastion-style hop (plan P009).
 type JumpHostInput struct {
 	Host     string         `json:"host"`
 	Port     int            `json:"port"`
@@ -79,6 +82,7 @@ type JumpHostInput struct {
 	AuthType model.AuthType `json:"authType"`
 	Password string         `json:"password,omitempty"`
 	KeyPath  string         `json:"keyPath,omitempty"`
+	Bastion  bool           `json:"bastion,omitempty"`
 }
 
 // CredentialDTO is a credential read view (plan P003 §4.3): secret-free —
@@ -104,6 +108,7 @@ type SavedJumpHostDTO struct {
 	AuthType    model.AuthType `json:"authType"`
 	HasPassword bool           `json:"hasPassword"`
 	KeyPath     string         `json:"keyPath,omitempty"`
+	Bastion     bool           `json:"bastion,omitempty"`
 }
 
 // SavedJumpHostInput carries a saved jump host draft from the frontend.
@@ -118,16 +123,18 @@ type SavedJumpHostInput struct {
 	AuthType model.AuthType `json:"authType"`
 	Password string         `json:"password,omitempty"`
 	KeyPath  string         `json:"keyPath,omitempty"`
+	Bastion  bool           `json:"bastion,omitempty"`
 }
 
 func (in SavedJumpHostInput) toModel() model.SavedJumpHost {
 	return model.SavedJumpHost{
-		ID:   in.ID,
-		Name: in.Name,
-		Host: in.Host,
-		Port: in.Port,
-		User: in.User,
-		Auth: model.Auth{Type: in.AuthType, Password: in.Password, KeyPath: in.KeyPath},
+		ID:      in.ID,
+		Name:    in.Name,
+		Host:    in.Host,
+		Port:    in.Port,
+		User:    in.User,
+		Auth:    model.Auth{Type: in.AuthType, Password: in.Password, KeyPath: in.KeyPath},
+		Bastion: in.Bastion,
 	}
 }
 
@@ -177,6 +184,7 @@ func ToSavedJumpHostDTO(jh model.SavedJumpHost) SavedJumpHostDTO {
 		AuthType:    jh.Auth.Type,
 		HasPassword: jh.Auth.Password != "",
 		KeyPath:     jh.Auth.KeyPath,
+		Bastion:     jh.Bastion,
 	}
 }
 
@@ -197,10 +205,11 @@ func (in SessionInput) toModel() model.Session {
 	sess.JumpHosts = make([]model.JumpHost, 0, len(in.JumpHosts))
 	for _, j := range in.JumpHosts {
 		sess.JumpHosts = append(sess.JumpHosts, model.JumpHost{
-			Host: j.Host,
-			Port: j.Port,
-			User: j.User,
-			Auth: model.Auth{Type: j.AuthType, Password: j.Password, KeyPath: j.KeyPath},
+			Host:    j.Host,
+			Port:    j.Port,
+			User:    j.User,
+			Auth:    model.Auth{Type: j.AuthType, Password: j.Password, KeyPath: j.KeyPath},
+			Bastion: j.Bastion,
 		})
 	}
 	return sess
@@ -214,6 +223,7 @@ func toJumpDTO(j model.JumpHost) JumpHostDTO {
 		AuthType:    j.Auth.Type,
 		HasPassword: j.Auth.Password != "",
 		KeyPath:     j.Auth.KeyPath,
+		Bastion:     j.Bastion,
 	}
 }
 

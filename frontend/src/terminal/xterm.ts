@@ -384,7 +384,11 @@ export const TermPool = {
             fontSize: opts.settings.fontSize,
             scrollback: opts.settings.scrollback,
             cursorBlink: true,
-            allowTransparency: true,
+            // allowTransparency stays false (the default): it forces an alpha
+            // texture atlas and a per-frame blend pass for no benefit — the
+            // theme backgrounds are fully opaque by design. Keep xterm's
+            // opaque fast paths; only set it if --terminal-bg ever gains an
+            // alpha channel.
             theme: {
                 background: pal.background,
                 foreground: pal.foreground,

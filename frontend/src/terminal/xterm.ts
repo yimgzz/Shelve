@@ -383,7 +383,7 @@ export const TermPool = {
             fontFamily: opts.settings.fontFamily,
             fontSize: opts.settings.fontSize,
             scrollback: opts.settings.scrollback,
-            cursorBlink: true,
+            cursorBlink: false,
             // allowTransparency stays false (the default): it forces an alpha
             // texture atlas and a per-frame blend pass for no benefit — the
             // theme backgrounds are fully opaque by design. Keep xterm's

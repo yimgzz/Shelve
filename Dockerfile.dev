@@ -3,7 +3,7 @@
 FROM golang:1.25-trixie
 
 # Pinned Wails v3 CLI version (master plan §3: pin an exact tagged version).
-ARG WAILS3_VERSION=v3.0.0-beta.15
+ARG WAILS3_VERSION=v3.0.0-beta.20
 
 # --no-install-recommends keeps the image lean.
 # Note: libglib2.0-0t64 is the Debian 13 (trixie) name for libglib2.0-0 (t64 transition).

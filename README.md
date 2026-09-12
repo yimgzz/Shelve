@@ -112,7 +112,7 @@ linuxdeploy / AppRun are downloaded at build time (network required during
 packaging) and cached in the gitignored `build/linux/appimage/build/` scratch
 dir.
 
-What is bundled (via `wails3 generate appimage`, pinned Wails v3.0.0-beta.15):
+What is bundled (via `wails3 generate appimage`, pinned Wails v3.0.0-beta.20):
 
 - the release binary (`-tags production`);
 - the GTK4 + WebKitGTK 6.0 runtime libraries, the WebKit helper processes
@@ -337,7 +337,7 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
 
 ## Pinned versions
 
-- Wails v3 CLI: **v3.0.0-beta.15** — `Dockerfile.dev` (`WAILS3_VERSION`)
+- Wails v3 CLI: **v3.0.0-beta.20** — `Dockerfile.dev` (`WAILS3_VERSION`)
   and `go.mod` (module `shelve`, `github.com/wailsapp/wails/v3`).
 - Base image: `golang:1.25-trixie` (Debian 13, GTK 4.18, WebKitGTK 6.0/2.52,
   Node 20).

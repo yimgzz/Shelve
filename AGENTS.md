@@ -111,7 +111,7 @@ Notes:
 | Concern | Choice |
 |---|---|
 | Language | Go ≥ 1.25, module `shelve` |
-| GUI | Wails v3 (beta, pinned `v3.0.0-beta.15`); all Wails API usage isolated in `main.go` + `internal/wailsvc` |
+| GUI | Wails v3 (beta, pinned `v3.0.0-beta.20`); all Wails API usage isolated in `main.go` + `internal/wailsvc` |
 | SSH | `golang.org/x/crypto/ssh` |
 | KDF/cipher | Argon2id (m=64 MiB, t=3, p=4, 16 B salt, 32 B key) + AES-256-GCM (random 12 B nonce, AAD `"dsmsv1"`) |
 | SFTP | `github.com/pkg/sftp` (pinned) |

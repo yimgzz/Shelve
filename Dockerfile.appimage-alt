@@ -14,7 +14,7 @@
 FROM alt:p11
 
 # Pinned Wails v3 CLI version (must match Dockerfile.dev and go.mod).
-ARG WAILS3_VERSION=v3.0.0-beta.15
+ARG WAILS3_VERSION=v3.0.0-beta.20
 
 # ALT's apt is rpm-backed and does NOT support --no-install-recommends.
 # Package groups:

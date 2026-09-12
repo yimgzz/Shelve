@@ -18,7 +18,7 @@
 #      must equal Wails' runtime GtkApplication id ("org.wails." + lowercased
 #      app name, hardcoded in linux_cgo.go) so panels associate the running
 #      window with this entry and display Name=shelve instead of the WM_CLASS
-#      fallback. Note: wails3 v3.0.0-beta.15 places the .desktop file at the
+#      fallback. Note: wails3 v3.0.0-beta.20 places the .desktop file at the
 #      AppDir ROOT (upstream linuxdeploy layout); usr/share/applications is
 #      intentionally left empty.
 #

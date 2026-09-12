@@ -25,19 +25,24 @@ var appIcon []byte
 func main() {
 	// WebKitGTK renderer selection.
 	//
-	// Software-only rendering (WEBKIT_DISABLE_DMABUF_RENDERER=1) was the
-	// original default (master plan §11, README "Troubleshooting") as a
-	// blank-window workaround for GPU-problematic setups (NVIDIA/gbm,
-	// Wayland sessions). But it breaks canvas presentation when the window
-	// is moved between monitors with different scale factors on X11 — the
-	// terminal freezes (no repaints) until the window returns to the
-	// original screen (verified: enabling dmabuf removes the freeze).
+	// The GPU dmabuf renderer was briefly the default (it prevents a
+	// terminal presentation freeze when moving between mixed-scale monitors
+	// on X11). But on GPU/WebKitGTK stacks it exposes the compositor's
+	// native clear colour whenever it re-tiles while the window is
+	// unfocused: with a terminal canvas open, the whole window flashes
+	// light/white every few seconds even fully idle — the dark theme
+	// background cannot cover a dropped composited layer (verified
+	// 2026-09-12 against the accelerated-compositing clear-colour latch
+	// documented in Wails v3's linux webview).
 	//
-	// Fix: default to the GPU dmabuf renderer everywhere EXCEPT explicit
-	// Wayland sessions (the case the original workaround targeted). Users
-	// can still force either side via WEBKIT_DISABLE_DMABUF_RENDERER=0/1.
-	if os.Getenv("XDG_SESSION_TYPE") == "wayland" &&
-		os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
+	// Fix: default to software-only rendering (WEBKIT_DISABLE_DMABUF_RENDERER=1)
+	// on every session type — the original v1 default and the flash-free
+	// path. The residual mixed-DPI canvas presentation freeze on X11 is
+	// mitigated by the renderer-recovery passes in frontend/src/terminal/xterm.ts
+	// (unpause + char re-measure + full refresh on stuck renderers after
+	// resize/move). Users can still force the GPU renderer with
+	// WEBKIT_DISABLE_DMABUF_RENDERER=0.
+	if os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
 		_ = os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
 	}
 

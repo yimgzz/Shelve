@@ -627,6 +627,16 @@
     padding: 8px;
 }
 
+/* The canvas renderer paints glyphs as texture-atlas sprites on a transparent
+   canvas, so the terminal's visual background comes from the DOM. Paint the
+   .xterm-screen layer itself (behind the canvas) in the terminal color: any
+   frame presented before a repaint lands (e.g. a mid-recovery invalidate on
+   WebKitGTK) must show the theme background, never the page's base color
+   ("white flash" in light themes). */
+.term-xterm .xterm-screen {
+    background: var(--terminal-bg);
+}
+
 .term-overlay {
     position: absolute;
     inset: 0;

@@ -189,9 +189,16 @@ function rendererStuck(e: Entry): boolean {
 /** Force the xterm renderer out of a stuck state after a resize/monitor
  *  move: clear the IntersectionObserver render pause, re-measure chars and
  *  repaint at the current devicePixelRatio (WebKitGTK does not reliably fire
- *  the matchMedia resolution events xterm relies on for DPR changes), then
- *  nudge WebKit to re-composite the canvas (visibility toggle, no layout
- *  shift). Guarded: only touches private API inside try/catch. */
+ *  the matchMedia resolution events xterm relies on for DPR changes).
+ *  Guarded: only touches private API inside try/catch.
+ *
+ *  This path must NEVER toggle element visibility or force reflows: it runs
+ *  on the focus-recovery paths (main.ts restoreTerminalFocus) that fire
+ *  periodically while the window is inactive, and hiding the subtree for a
+ *  frame makes WebKitGTK present the page without the terminal content —
+ *  a periodic white flash behind any live stream — until the queued repaint
+ *  lands. A full refreshRows() already forces the compositor to re-present
+ *  a dirty frame, which is all the recovery needs. */
 function recoverRenderer(e: Entry): void {
     try {
         const rs = (
@@ -227,28 +234,6 @@ function recoverRenderer(e: Entry): void {
             rs.clearTextureAtlas();
         }
         e.term.refresh(0, e.term.rows - 1);
-
-        const xel = e.term.element as HTMLElement | null;
-        if (xel) {
-            // Focus-preserving visibility nudge: hiding the element makes its
-            // helper textarea unfocusable — a focus() call while hidden is a
-            // silent no-op, and an already-focused terminal gets blurred.
-            // Capture the focus owner up front and restore it once the element
-            // is visible again on the next frame.
-            const wasFocused = xel.contains(document.activeElement);
-            xel.style.visibility = "hidden";
-            void xel.offsetHeight; // force a synchronous reflow
-            requestAnimationFrame(() => {
-                xel.style.visibility = "";
-                if (wasFocused) {
-                    try {
-                        e.term.focus();
-                    } catch {
-                        /* ignore */
-                    }
-                }
-            });
-        }
     } catch {
         /* ignore */
     }
@@ -653,35 +638,27 @@ export const TermPool = {
             return;
         }
         doFit(tabID, e);
-        // Focus FIRST while the pane is visible: recoverRenderer()'s recovery
-        // nudge below hides the xterm element until the next frame, and
-        // focusing an element inside a visibility:hidden subtree is a silent
-        // no-op — the helper textarea never receives keydowns, so typing
-        // would require a click. recoverRenderer() preserves this focus
-        // across its visibility toggle.
-        e.term.focus();
         // WebKitGTK keeps compositing the pane's pre-hide surface after a tab
         // switch (display:none → flex): xterm's renderer does not repaint the
         // re-shown terminal on its own (the stale canvas layer shows the
         // previous frame stretched until the first interaction forces a
-        // repaint). Force the recovery path — unpause + refresh + WebKit
-        // re-composite nudge — exactly like the window-resize path
-        // (onWindowResize), then repeat on the next frame to cover WebKit's
-        // late-layout timing.
+        // repaint). Force the recovery path — unpause + char re-measure +
+        // full refreshRows — exactly like the window-resize path
+        // (onWindowResize). Called ONCE per activation: it runs on the
+        // focus-recovery paths (main.ts) that fire repeatedly while the
+        // window is inactive, and every call is a full-grid repaint, so
+        // repeated calls must be a no-op in the healthy state (a full
+        // refresh re-presents the identical content with no visible change
+        // and no DOM/visibility churn).
         recoverRenderer(e);
+        // Focus AFTER the recovery pass: the refresh invalidates frames
+        // synchronously and a same-frame focus() right after a
+        // display:none→flex toggle can be dropped by WebKitGTK (deferred
+        // layout), so re-assert focus once more on the NEXT frame.
+        e.term.focus();
         requestAnimationFrame(() => {
             if (pool.get(tabID) === e) {
-                recoverRenderer(e);
-                // The nudge above hid the element again; re-assert focus on
-                // the NEXT frame, after its deferred visibility restore, so
-                // the textarea is focusable. This also covers WebKitGTK
-                // dropping a same-frame focus() right after the
-                // display:none→flex toggle (deferred layout).
-                requestAnimationFrame(() => {
-                    if (pool.get(tabID) === e) {
-                        e.term.focus();
-                    }
-                });
+                e.term.focus();
             }
         });
     },

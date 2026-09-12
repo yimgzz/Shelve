@@ -292,8 +292,14 @@ function onWindowResize(): void {
         for (const [id, e] of pool) {
             // Maximize/monitor-move on HiDPI screens can leave the xterm
             // renderer paused or WebKit's canvas composite stale; recover
-            // first, then settle the geometry.
-            recoverRenderer(e);
+            // only when the renderer actually reports itself stuck (paused /
+            // unmeasured). A healthy renderer must NOT be force-repainted
+            // here: this path also fires on focus-recovery cycles that
+            // repeat while a window is inactive, and every full-grid
+            // repaint with an atlas re-bake can present as a flash.
+            if (rendererStuck(e)) {
+                recoverRenderer(e);
+            }
             doFit(id, e);
         }
         // WebKitGTK can take longer than 250 ms to finish the surface
@@ -303,7 +309,9 @@ function onWindowResize(): void {
         winResizeTimer = window.setTimeout(() => {
             winResizeTimer = null;
             for (const [, e] of pool) {
-                recoverRenderer(e);
+                if (rendererStuck(e)) {
+                    recoverRenderer(e);
+                }
             }
         }, 1000);
     }, 250);
@@ -644,13 +652,17 @@ export const TermPool = {
         // previous frame stretched until the first interaction forces a
         // repaint). Force the recovery path — unpause + char re-measure +
         // full refreshRows — exactly like the window-resize path
-        // (onWindowResize). Called ONCE per activation: it runs on the
-        // focus-recovery paths (main.ts) that fire repeatedly while the
-        // window is inactive, and every call is a full-grid repaint, so
-        // repeated calls must be a no-op in the healthy state (a full
-        // refresh re-presents the identical content with no visible change
-        // and no DOM/visibility churn).
-        recoverRenderer(e);
+        // (onWindowResize), but ONLY when the renderer is genuinely stuck
+        // (paused / unmeasured). At a tab switch that is exactly the state:
+        // xterm's IntersectionObserver has not yet un-paused the renderer
+        // after display:none→flex, so _isPaused is still true and recovery
+        // runs. In the healthy steady state — including the repeated
+        // activate() calls from the focus-recovery path while a window is
+        // inactive — nothing is force-repainted, because every forced
+        // full-grid repaint with an atlas re-bake can present as a flash.
+        if (rendererStuck(e)) {
+            recoverRenderer(e);
+        }
         // Focus AFTER the recovery pass: the refresh invalidates frames
         // synchronously and a same-frame focus() right after a
         // display:none→flex toggle can be dropped by WebKitGTK (deferred
@@ -696,10 +708,12 @@ export const TermPool = {
         }
     },
 
-    /** Run the renderer recovery on every live instance (window focus after
-     *  a maximize/resize is a good late signal; harmless when healthy).
-     *  Rate-limited: focus-recovery paths may call this on every stray
-     *  keydown while focus sits on <body> (P007). */
+    /** Run the renderer recovery on every STUCK live instance (window focus
+     *  after a minimize/resize can leave a renderer paused; harmless when
+     *  healthy). Only touched when genuinely stuck: this runs on the
+     *  focus-recovery paths that fire on every stray keydown while focus sits
+     *  on <body> (P007), and force-repainting healthy terminals there is what
+     *  turns into a repeated flash while a window is inactive. */
     recoverAll(): void {
         const now = Date.now();
         if (now - lastRecoverAllAt < RECOVER_ALL_THROTTLE_MS) {
@@ -707,7 +721,9 @@ export const TermPool = {
         }
         lastRecoverAllAt = now;
         for (const [, e] of pool) {
-            recoverRenderer(e);
+            if (rendererStuck(e)) {
+                recoverRenderer(e);
+            }
         }
     },
 

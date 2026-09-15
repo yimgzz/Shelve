@@ -169,7 +169,6 @@ function handleEvent(name: string, payload: unknown): void {
                     searchQ: "",
                     credentials: [],
                     savedJumpHosts: [],
-                    pendingSessions: {},
                     forwards: {},
                     sftpTransfers: {},
                     monitor: {},

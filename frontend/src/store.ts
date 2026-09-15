@@ -138,12 +138,6 @@ export interface StoreState {
      */
     sftpTransfers: Record<string, SftpTransfer[]>;
     /**
-     * tabID → session snapshot for tabs whose `terminal:status` event may
-     * arrive before the optimistic tab is reconciled (Phase 4b task 4).
-     * Never persisted.
-     */
-    pendingSessions: Record<string, SessionDTO>;
-    /**
      * tabID → port-forward lifecycle cache (ssh:forward events, Phase 4c),
      * used by the status bar. One entry per unique spec (latest state wins).
      * Never persisted.
@@ -189,7 +183,6 @@ export const initialState: StoreState = {
     leftPanelWidth: DEFAULT_LEFT_WIDTH,
     credentials: [],
     savedJumpHosts: [],
-    pendingSessions: {},
     forwards: {},
     sftpTransfers: {},
     monitor: {},
@@ -291,7 +284,17 @@ class Store {
         });
         try {
             const tabID = await TerminalService.Connect(sessionID);
-            this.registerPendingSession(tabID, dto);
+            // The user may have closed the optimistic tab while Connect was
+            // still in flight (the temp id is clickable immediately). Tear the
+            // now-orphaned backend session down instead of leaking it.
+            if (!this.state.tabs.some((t) => t.id === tempId)) {
+                try {
+                    await TerminalService.Disconnect(tabID);
+                } catch {
+                    /* session already gone; nothing to clean up */
+                }
+                return;
+            }
             this.replaceTab(tempId, tabID);
         } catch (err) {
             this.setTabState(tempId, "error", String(err));
@@ -489,11 +492,6 @@ class Store {
         });
     }
 
-    /** Remember a real tabID→session so late status events can create it. */
-    registerPendingSession(tabID: string, dto: SessionDTO): void {
-        this.set({ pendingSessions: { ...this.state.pendingSessions, [tabID]: dto } });
-    }
-
     /** Swap an optimistic temp tabID for the real tabID Connect returned. */
     replaceTab(oldID: string, newID: string): void {
         const { tabs, activeTabID } = this.state;
@@ -508,28 +506,24 @@ class Store {
 
     /**
      * Update one tab's status (from a status event or a Connect error).
-     * Creates the tab on demand from the pending-session cache when a
-     * `terminal:status` event beats the optimistic-tab reconciliation
-     * (Phase 4b task 4). Auto-opens the SFTP right panel when the active tab
-     * turns ready and the setting is on.
+     * Status events never create tabs: the optimistic tab created by
+     * connectSession is the only source, so an event for an unknown id is a
+     * late event for a tab the user already closed and must be ignored (the
+     * bridge writes responses and events from separate goroutines, so the
+     * Disconnect response can overtake its own terminal:status "closed"
+     * event). Auto-opens the SFTP right panel when the active tab turns ready
+     * and the setting is on.
      */
     setTabState(tabID: string, state: TabState, message?: string): void {
-        const { tabs, activeTabID, settings, pendingSessions } = this.state;
-        const patch: Partial<StoreState> = {};
-        if (tabs.some((t) => t.id === tabID)) {
-            patch.tabs = tabs.map((t) =>
-                t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t,
-            );
-        } else {
-            const sess = pendingSessions[tabID];
-            if (!sess) {
-                return;
-            }
-            patch.tabs = [
-                ...tabs,
-                { id: tabID, session: sess, state, errorMessage: message || undefined },
-            ];
+        const { tabs, activeTabID, settings } = this.state;
+        if (!tabs.some((t) => t.id === tabID)) {
+            return;
         }
+        const patch: Partial<StoreState> = {
+            tabs: tabs.map((t) =>
+                t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t,
+            ),
+        };
         if (state === "ready" && tabID === activeTabID && settings.sftpBrowserEnabled) {
             patch.sftpPanelOpen = true;
         }

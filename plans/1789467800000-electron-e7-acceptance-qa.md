@@ -65,7 +65,7 @@ Use a fresh `$XDG_CONFIG_HOME/shelve` unless stated. Check every row.
 17. Remote `exit` → exit overlay with code; Retry re-dials.
 18. Flood `yes | head -c 1000000` and a 3 MB/s `tail -f`: responsive, no crash,
     no stalled presentation.
-19. All 12 theme variants: terminal palette + cursor/selection follow the
+19. All 18 theme variants: terminal palette + cursor/selection follow the
     variant; system mode follows the OS live.
 
 **Prompts / forwards / SFTP / monitor**

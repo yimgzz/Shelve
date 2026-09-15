@@ -82,6 +82,25 @@ func waitStatusState(t *testing.T, em *CapturingEmitter, tabID, state string) {
 	}, "status "+state)
 }
 
+// waitStatusPayload polls the emitter until the tab reports the given state
+// and returns that payload. Polling (not WaitEvent) is used because the
+// status can be emitted synchronously by the action under test, before the
+// waiter is registered.
+func waitStatusPayload(t *testing.T, em *CapturingEmitter, tabID, state string) TerminalStatusPayload {
+	t.Helper()
+	var p TerminalStatusPayload
+	waitFor(t, func() bool {
+		for _, e := range em.Events() {
+			if tp, ok := e.payload.(TerminalStatusPayload); ok && tp.TabID == tabID && tp.State == state {
+				p = tp
+				return true
+			}
+		}
+		return false
+	}, "terminal:status "+state)
+	return p
+}
+
 // TestInProcessPasswordConnectAndEcho drives a real password connection:
 // connecting → ready order, PTY echo, resize and disconnect.
 func TestInProcessPasswordConnectAndEcho(t *testing.T) {
@@ -96,10 +115,11 @@ func TestInProcessPasswordConnectAndEcho(t *testing.T) {
 	waitReady(t, m, em, tabID)
 
 	// PTY echo through the shell.
+	echo := em.Arm(EventTerminalData)
 	if err := m.Write(tabID, base64.StdEncoding.EncodeToString([]byte("hi\n"))); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	ev := em.WaitEvent(t, EventTerminalData, 15*time.Second)
+	ev := echo.Wait(t, 15*time.Second)
 	data, err := base64.StdEncoding.DecodeString(ev.payload.(TerminalDataPayload).Data)
 	if err != nil {
 		t.Fatalf("decode terminal data: %v", err)
@@ -137,11 +157,12 @@ func TestInProcessInteractiveEchoLatency(t *testing.T) {
 	}
 	waitReady(t, m, em, tabID)
 
+	echo := em.Arm(EventTerminalData)
 	start := time.Now()
 	if err := m.Write(tabID, base64.StdEncoding.EncodeToString([]byte("hi\n"))); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	ev := em.WaitEvent(t, EventTerminalData, 15*time.Second)
+	ev := echo.Wait(t, 15*time.Second)
 	latency := time.Since(start)
 
 	data, err := base64.StdEncoding.DecodeString(ev.payload.(TerminalDataPayload).Data)
@@ -227,10 +248,11 @@ func TestInProcessRemoteExit(t *testing.T) {
 	tabID, _ := m.Connect(rigPasswordSession(rig.Addr(), user, password))
 	waitReady(t, m, em, tabID)
 
+	exit := em.Arm(EventTerminalExit)
 	if err := m.Write(tabID, base64.StdEncoding.EncodeToString([]byte("exit\n"))); err != nil {
 		t.Fatal(err)
 	}
-	exitEv := em.WaitEvent(t, EventTerminalExit, 15*time.Second)
+	exitEv := exit.Wait(t, 15*time.Second)
 	ep := exitEv.payload.(TerminalExitPayload)
 	if ep.TabID != tabID || ep.ExitStatus == nil || *ep.ExitStatus != 0 {
 		t.Fatalf("exit payload = %+v, want tabID %s and exitStatus 0", ep, tabID)
@@ -270,8 +292,9 @@ func TestInProcessHostKeyApprove(t *testing.T) {
 	m, em := newManagerAtPath(t, khPath)
 	rig := newTestSSHServer(t, testSSHOpts{user: "u", password: "p"})
 
+	hostkey := em.Arm(EventVaultHostkeyPrompt)
 	tabID, _ := m.Connect(rigPasswordSession(rig.Addr(), "u", "p"))
-	promptEv := em.WaitEvent(t, EventVaultHostkeyPrompt, 15*time.Second)
+	promptEv := hostkey.Wait(t, 15*time.Second)
 	pp := promptEv.payload.(HostKeyPromptPayload)
 	if pp.Host != "127.0.0.1" || pp.ConnID != tabID {
 		t.Fatalf("prompt payload = %+v", pp)
@@ -312,17 +335,14 @@ func TestInProcessHostKeyApprove(t *testing.T) {
 func TestInProcessHostKeyReject(t *testing.T) {
 	rig := newTestSSHServer(t, testSSHOpts{user: "u", password: "p"})
 	m, em := newManagerAtPath(t, filepath.Join(t.TempDir(), "known_hosts"))
+	hostkey := em.Arm(EventVaultHostkeyPrompt)
 	tabID, _ := m.Connect(rigPasswordSession(rig.Addr(), "u", "p"))
-	em.WaitEvent(t, EventVaultHostkeyPrompt, 15*time.Second)
+	hostkey.Wait(t, 15*time.Second)
 
 	if err := m.RejectHostKey(tabID); err != nil {
 		t.Fatal(err)
 	}
-	errEv := em.WaitEvent(t, EventTerminalStatus, 15*time.Second)
-	ep := errEv.payload.(TerminalStatusPayload)
-	if ep.State != StateError {
-		t.Fatalf("state = %s, want error", ep.State)
-	}
+	ep := waitStatusPayload(t, em, tabID, StateError)
 	if !strings.Contains(ep.Message, "rejected") {
 		t.Fatalf("message = %q, want it to mention rejection", ep.Message)
 	}
@@ -345,8 +365,9 @@ func TestInProcessKeyPassphrase(t *testing.T) {
 
 	t.Run("correct passphrase", func(t *testing.T) {
 		m, em := newManager(t)
+		key := em.Arm(EventVaultKeyPrompt)
 		tabID, _ := m.Connect(sess)
-		em.WaitEvent(t, EventVaultKeyPrompt, 15*time.Second)
+		key.Wait(t, 15*time.Second)
 		if err := m.SubmitKeyPassphrase(tabID, "hunter2"); err != nil {
 			t.Fatal(err)
 		}
@@ -356,27 +377,23 @@ func TestInProcessKeyPassphrase(t *testing.T) {
 
 	t.Run("wrong passphrase", func(t *testing.T) {
 		m, em := newManager(t)
+		key := em.Arm(EventVaultKeyPrompt)
 		tabID, _ := m.Connect(sess)
-		em.WaitEvent(t, EventVaultKeyPrompt, 15*time.Second)
+		key.Wait(t, 15*time.Second)
 		if err := m.SubmitKeyPassphrase(tabID, "wrong"); err != nil {
 			t.Fatal(err)
 		}
-		ev := em.WaitEvent(t, EventTerminalStatus, 15*time.Second)
-		if got := ev.payload.(TerminalStatusPayload).State; got != StateError {
-			t.Fatalf("state = %s, want error", got)
-		}
+		waitStatusPayload(t, em, tabID, StateError)
 		_ = m.Disconnect(tabID)
 	})
 
 	t.Run("prompt timeout", func(t *testing.T) {
 		m, em := newManager(t)
 		m.PromptTimeout = 500 * time.Millisecond
+		key := em.Arm(EventVaultKeyPrompt)
 		tabID, _ := m.Connect(sess)
-		em.WaitEvent(t, EventVaultKeyPrompt, 15*time.Second)
-		ev := em.WaitEvent(t, EventTerminalStatus, 15*time.Second)
-		if got := ev.payload.(TerminalStatusPayload).State; got != StateError {
-			t.Fatalf("state = %s, want error", got)
-		}
+		key.Wait(t, 15*time.Second)
+		waitStatusPayload(t, em, tabID, StateError)
 		_ = m.Disconnect(tabID)
 	})
 }
@@ -615,8 +632,9 @@ func TestInProcessTestConnection(t *testing.T) {
 		sess := &model.Session{Host: host, Port: port, User: "u",
 			Auth: model.Auth{Type: model.AuthPassword, Password: "p"}}
 		done := make(chan error, 1)
+		hostkey := em.Arm(EventVaultHostkeyPrompt)
 		go func() { done <- m.TestConnection(sess) }()
-		em.WaitEvent(t, EventVaultHostkeyPrompt, 15*time.Second)
+		hostkey.Wait(t, 15*time.Second)
 		prompt := em.OfName(EventVaultHostkeyPrompt)[0].payload.(HostKeyPromptPayload)
 		if err := m.ApproveHostKey(prompt.ConnID); err != nil {
 			t.Fatalf("ApproveHostKey: %v", err)

@@ -203,11 +203,8 @@ func TestOversizePayloadSplit(t *testing.T) {
 }
 
 func TestFallbackWhenNeverConnected(t *testing.T) {
-	old := fallbackGrace
-	fallbackGrace = 50 * time.Millisecond
-	t.Cleanup(func() { fallbackGrace = old })
-
 	s := NewServer()
+	s.setFallbackGrace(50 * time.Millisecond)
 	called := make(chan []byte, 1)
 	s.SetFallback(func(tabID string, data []byte) {
 		called <- append([]byte(nil), data...)

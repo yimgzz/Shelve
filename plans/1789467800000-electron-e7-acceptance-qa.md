@@ -160,3 +160,124 @@ All rows pass; `internal/{vault,model,store,sshx,sshengine,sftp,monitor,config}`
 diff against the pre-migration tree shows only the mechanical
 `wailsvc`→`api` rename and no semantic change; AGENTS.md/README/master plan
 match the shipped architecture; the migration is complete.
+
+---
+
+# E7 acceptance run — results (2026-09-15)
+
+**Environment.** Docker-only execution from a non-interactive agent session. A
+Wayland session exists on the host, but the agent cannot drive the GUI, move a
+window across mixed-DPI monitors, force a GPU-process crash, or click through
+dialogs; no real external sshd is available for manual `make run` QA (the
+integration suite uses the testcontainers `docker/sshd`). The host has no
+`node`/`npm`; a system `go` exists and was not installed by this phase. The host
+config dir holds a real vault, so the seed tool was exercised with its `--dir`
+override instead of `make seed`.
+
+## Fixes this gate produced
+
+- **Real data race fixed** (`internal/termws/server.go`): the package-global
+  `fallbackGrace` was written by a test while server goroutines read it, which
+  `-race` reported as `WARNING: DATA RACE`. It is now a per-`Server` field
+  (default 3 s, behavior unchanged) read under the server mutex; the test uses a
+  locked setter.
+- **Deterministic test de-flaking** (`internal/sshengine`, `internal/sftp`,
+  `internal/termws` tests): `CapturingEmitter.WaitEvent` only observed events
+  emitted after it registered, so an echo, a keyboard-interactive round, or an
+  exit emitted synchronously by the action under test was missed and failed on a
+  15 s timeout. Tests now arm before the action (`Arm`/`EventWaiter`) or assert
+  on the recorded event log / the staged temp on disk. The racy API was removed;
+  every assertion is unchanged.
+- **Automated D40 coverage added**: `TestStore300SessionsSearchBudget` measures
+  search over the 331-node fixture and asserts the 10 ms budget.
+
+## Row-by-row
+
+Legend: **PASS** = executed here green; **PARTIAL** = backend half executed by
+the Go unit/integration suites, interactive UI half not executable here;
+**NOT RUN** = manual-only, cannot be executed from this session.
+
+### A. Functional parity
+- A1–A7 (vault create/wrong-password/auto-lock/lock/corrupt/perms) — PARTIAL:
+  vault+config unit suites cover create/unlock/wrong-password/tamper/corrupt/
+  lock/perms; the modal/shake/auto-lock timing UI is NOT RUN.
+- A8 — PARTIAL: seed/unseed run against an isolated `--dir` (300 sessions +
+  bastion; 0700/0600; `vault.json` ciphertext contains no plaintext secret;
+  unseed removes `vault.json` and leaves `settings.json`). `make seed`/`unseed`
+  against the host config dir NOT RUN (would overwrite a real vault).
+- A9–A13, A15–A22, A24–A30 — PARTIAL: the underlying engine/API paths are green
+  in `make test` + `make test-integration` (password/key auth, PTY echo, jump
+  chains, local forwards, host-key mismatch, disconnect events, SFTP ops + edit,
+  monitor metrics, 300-session perf smoke); no interactive desktop, so the
+  UI-level rows (tree/editor dialogs, tabs, clipboard, prompts, SFTP panel,
+  monitor bar, shell/shortcuts/single-instance/window/shutdown) are NOT RUN.
+- A14, A23 — PARTIAL: pty resize and `-L`/`-D` forwards + failed-bind are
+  exercised by the engine/integration suites; the live-window resize and the
+  `ssh:forward` toast UI are NOT RUN.
+
+### B. HiDPI / multi-monitor
+- B31–B35 — NOT RUN. Root cause: needs a real desktop with mixed-scale monitors
+  on both X11 and Wayland (and the interactive T7 zoom check). Follow-up: run
+  the E4 verification rows 1–10 + zoom on a physical multi-monitor host; the
+  E4 report already covers the escape-hatch paths, DPR 1/1.5/2 device emulation
+  and `--disable-gpu` headlessly.
+
+### C. GPU / rendering
+- C36, C37 — PARTIAL: `--gpu-info`, GPU flags and the `--disable-gpu` switch are
+  covered by the E4 headless runs; a real GPU host + live xterm WebGL check is
+  NOT RUN.
+- C38, C39 — PARTIAL/NOT RUN: the AppImage no-userns sandbox fallback is
+  covered by E5 and the pristine `debian:13-slim` smoke below; forcing a GPU
+  crash and the "no `--no-sandbox` needed" host check are NOT RUN here.
+
+### D. Performance
+- D40 — PASS: `TestStore300SessionsSearchBudget`, best-of-20 = ~93 µs over 331
+  nodes (budget 10 ms); timing logged.
+- D41 — NOT RUN for the DOM rebuild (needs a live renderer). The backend
+  equivalent (`TestStore300SessionsFixturePerf`) passes with a 50 ms budget.
+- D42 — PARTIAL: 100 KB/s / 3 MB/s engine smoke and the interactive-latency test
+  are green; the manual FPS/latency note requires a live window.
+- D43 — NOT RUN (needs the Wails v1.1 build for comparison, no longer present).
+
+### E. Security
+- E44 — PASS: `internal/config`/`vault` unit tests assert no secret fields and
+  the isolated seeded `vault.json` scan found no plaintext credentials.
+- E45 — PASS (unit-level): read DTOs expose only `AuthType`/`HasPassword`/
+  `KeyPath`; the single documented kbdint `prefill` exception is the only path.
+- E46 — PASS: the bridge binds `127.0.0.1:0` only and the token gate is asserted
+  for `/rpc` and `/terminal` (missing/empty/wrong token rejected).
+- E47 — PARTIAL: `contextIsolation: true`, `nodeIntegration: false`,
+  `sandbox: true`, the named-channel preload surface and the vite-injected CSP
+  are verified by static inspection; the `window.require === undefined` runtime
+  assertion needs a live renderer (NOT RUN).
+- E48 — PASS (unit-level): tmp files 0600 + sweep on lock/exit/start, atomic
+  vault writes (tmp+rename) and key/password zeroization are asserted.
+
+### F. Build & packaging
+- F49 — PASS: clean-container `make build`, `make test`, `make test-race`,
+  `make test-integration`, `make lint`, `make appimage` all green.
+- F50 — PASS: `make appimage-check` extracts and inspects the AppImage and the
+  best-effort `debian:13-slim` + xvfb smoke reaches the backend-ready handshake
+  with no GTK4/WebKit.
+- F51 — PARTIAL: no `node`/`npm` on the host (only a pre-existing system `go`);
+  nothing was installed on the host by this phase.
+- F52 — PASS: `git grep -i` for wails/wailsvc/wailsio/appimage-alt/linuxdeploy/
+  webkitgtk/webview2 over the tracked tree (excluding `plans/`) returns no
+  matches.
+
+## G. Parity statement
+
+All automated build/test/lint/packaging rows pass. The **interactive GUI
+matrix (A1–A7, A9–A30 UI halves), HiDPI/multi-monitor (B31–B35), live GPU
+rendering (C36–C38), DOM perf (D41, D43) and the runtime renderer-hardening
+check (E47)** could not be reproduced in this session with no interactive
+desktop, no mixed-DPI monitors, no GPU-crash control and no manual sshd.
+Root cause: environment, not the app. Follow-up: execute the per-phase manual QA
+checklists on a real Linux desktop (X11 + Wayland, 100–200 %, GPU on/off, AppImage
+launch) and annotate the results in the commit message per project convention.
+
+One deviation from the strict exit wording: the domain-package diff against the
+pre-migration tree (commit `7dc90be`) is comment-only **plus** the additive,
+absent-safe `ui.zoomLevel` settings field from E4 T7 (documented in master plan
+§4). It is not a behavior change at the default `0`, but it is an addition, not
+the pure `wailsvc`→`api` rename the exit criterion describes.

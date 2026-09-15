@@ -23,9 +23,10 @@ type InputHandler func(tabID string, data []byte) error
 // the tabs forever).
 type OutputFallback func(tabID string, data []byte)
 
-// fallbackGrace bounds how long output waits for the first connection
-// before routing through the fallback (var so tests can shorten it).
-var fallbackGrace = 3 * time.Second
+// defaultFallbackGrace bounds how long output waits for the first connection
+// before routing through the fallback. It is per Server (tests shorten it via
+// setFallbackGrace) so no package-global state is mutated across goroutines.
+const defaultFallbackGrace = 3 * time.Second
 
 // Server is the terminal I/O WebSocket endpoint. It owns a loopback TCP
 // listener started by Start (the bridge mounts ServeHTTP listener-less and
@@ -46,7 +47,10 @@ type Server struct {
 	startedAt time.Time
 	input     InputHandler
 	fallback  OutputFallback
-	connCh    chan struct{} // buffered(1): signaled on connection state change
+	// fallbackGrace bounds how long output waits for the first connection
+	// before routing through the fallback (read under mu).
+	fallbackGrace time.Duration
+	connCh        chan struct{} // buffered(1): signaled on connection state change
 
 	ln   net.Listener
 	srv  *http.Server
@@ -58,7 +62,11 @@ type Server struct {
 
 // NewServer creates a terminal I/O WebSocket server.
 func NewServer() *Server {
-	return &Server{startedAt: time.Now(), connCh: make(chan struct{}, 1)}
+	return &Server{
+		startedAt:     time.Now(),
+		connCh:        make(chan struct{}, 1),
+		fallbackGrace: defaultFallbackGrace,
+	}
 }
 
 // SetInputHandler installs the engine write path for input frames.
@@ -73,6 +81,13 @@ func (s *Server) SetInputHandler(fn InputHandler) {
 func (s *Server) SetFallback(fn OutputFallback) {
 	s.mu.Lock()
 	s.fallback = fn
+	s.mu.Unlock()
+}
+
+// setFallbackGrace overrides the never-connected fallback window (tests).
+func (s *Server) setFallbackGrace(d time.Duration) {
+	s.mu.Lock()
+	s.fallbackGrace = d
 	s.mu.Unlock()
 }
 
@@ -207,7 +222,8 @@ func (s *Server) OnTerminalData(tabID string, data []byte) {
 		closed := s.closed
 		ever := s.everConn
 		fb := s.fallback
-		deadline := s.startedAt.Add(fallbackGrace)
+		grace := s.fallbackGrace
+		deadline := s.startedAt.Add(grace)
 		s.mu.Unlock()
 		if closed {
 			return
@@ -229,7 +245,7 @@ func (s *Server) OnTerminalData(tabID string, data []byte) {
 				s.mu.Lock()
 				if !s.loggedFallback {
 					s.loggedFallback = true
-					log.Printf("termws: falling back to legacy terminal events (socket never connected within %s)", fallbackGrace)
+					log.Printf("termws: falling back to legacy terminal events (socket never connected within %s)", grace)
 				}
 				s.mu.Unlock()
 				fb(tabID, data)

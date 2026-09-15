@@ -298,32 +298,35 @@ func TestInProcessBastionKbdintSuccess(t *testing.T) {
 	m, em := newManagerAtPath(t, t.TempDir()+"/known_hosts")
 
 	base := settleGoroutines(t)
+	hostkey := em.Arm(EventVaultHostkeyPrompt)
 	tabID, err := m.Connect(bastionTestSession(rig.Addr(), "target.example.com"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// 1) Host-key prompt (fresh known_hosts) → approve.
-	em.WaitEvent(t, EventVaultHostkeyPrompt, 15*time.Second)
+	hostkey.Wait(t, 15*time.Second)
+	round1 := em.Arm(EventVaultKbdintPrompt)
 	if err := m.ApproveHostKey(tabID); err != nil {
 		t.Fatal(err)
 	}
 
 	// 2) kbdint round 1: prefill carries the stored bastion password.
-	ev := em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	ev := round1.Wait(t, 15*time.Second)
 	p := ev.payload.(KbdintPromptPayload)
 	if p.ConnID != tabID || p.Name != "LDAP" || len(p.Questions) != 1 ||
 		p.Questions[0] != "Password:" || len(p.Echo) != 1 || p.Echo[0] ||
 		p.Prefill != "b-pass" {
 		t.Fatalf("round-1 payload = %+v, want connID=%s name=LDAP [Password:] echo=[false] prefill=b-pass", p, tabID)
 	}
+	round2 := em.Arm(EventVaultKbdintPrompt)
 	if err := m.SubmitKbdintResponse(p.ConnID, []string{"b-pass"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// 3) kbdint round 2: the prefill is offered again (the user
 	// overwrites it — here the target answer differs).
-	ev = em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	ev = round2.Wait(t, 15*time.Second)
 	p = ev.payload.(KbdintPromptPayload)
 	if p.Prefill != "b-pass" || p.Name != "" {
 		t.Fatalf("round-2 payload = %+v, want prefill=b-pass empty name", p)
@@ -334,10 +337,11 @@ func TestInProcessBastionKbdintSuccess(t *testing.T) {
 
 	// 4) Ready + PTY echo.
 	waitReady(t, m, em, tabID)
+	echo := em.Arm(EventTerminalData)
 	if err := m.Write(tabID, base64.StdEncoding.EncodeToString([]byte("hi\n"))); err != nil {
 		t.Fatal(err)
 	}
-	ev = em.WaitEvent(t, EventTerminalData, 15*time.Second)
+	ev = echo.Wait(t, 15*time.Second)
 	data, _ := base64.StdEncoding.DecodeString(ev.payload.(TerminalDataPayload).Data)
 	if !strings.Contains(string(data), "echo: hi") {
 		t.Fatalf("terminal data = %q, want it to contain %q", data, "echo: hi")
@@ -378,11 +382,12 @@ func TestInProcessBastionKbdintWrongAnswer(t *testing.T) {
 	})
 	m, em := newManagerForRig(t, rig)
 
+	kbd := em.Arm(EventVaultKbdintPrompt)
 	tabID, err := m.Connect(bastionTestSession(rig.Addr(), "target.example.com"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev := em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	ev := kbd.Wait(t, 15*time.Second)
 	if err := m.SubmitKbdintResponse(ev.payload.(KbdintPromptPayload).ConnID, []string{"wrong"}); err != nil {
 		t.Fatal(err)
 	}
@@ -408,11 +413,12 @@ func TestInProcessBastionKbdintCancel(t *testing.T) {
 	})
 	m, em := newManagerForRig(t, rig)
 
+	kbd := em.Arm(EventVaultKbdintPrompt)
 	tabID, err := m.Connect(bastionTestSession(rig.Addr(), "target.example.com"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev := em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	ev := kbd.Wait(t, 15*time.Second)
 	if err := m.CancelKbdint(ev.payload.(KbdintPromptPayload).ConnID); err != nil {
 		t.Fatal(err)
 	}
@@ -435,11 +441,12 @@ func TestInProcessBastionKbdintTimeout(t *testing.T) {
 	m.PromptTimeout = 300 * time.Millisecond
 
 	start := time.Now()
+	kbd := em.Arm(EventVaultKbdintPrompt)
 	tabID, err := m.Connect(bastionTestSession(rig.Addr(), "target.example.com"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	kbd.Wait(t, 15*time.Second)
 	// No submit: the per-round timer must fire.
 	msg := waitForErrorState(t, m, tabID)
 	elapsed := time.Since(start)
@@ -462,12 +469,14 @@ func TestInProcessBastionKbdintRunaway(t *testing.T) {
 	})
 	m, em := newManagerForRig(t, rig)
 
+	kbd := em.Arm(EventVaultKbdintPrompt)
 	tabID, err := m.Connect(bastionTestSession(rig.Addr(), "target.example.com"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < maxKbdintRounds; i++ {
-		ev := em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+		ev := kbd.Wait(t, 15*time.Second)
+		kbd = em.Arm(EventVaultKbdintPrompt)
 		if err := m.SubmitKbdintResponse(ev.payload.(KbdintPromptPayload).ConnID, []string{"pw"}); err != nil {
 			t.Fatal(err)
 		}
@@ -493,11 +502,12 @@ func TestInProcessBastionKbdintTabDisconnectMidPrompt(t *testing.T) {
 	m, em := newManagerForRig(t, rig)
 
 	base := settleGoroutines(t)
+	kbd := em.Arm(EventVaultKbdintPrompt)
 	tabID, err := m.Connect(bastionTestSession(rig.Addr(), "target.example.com"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	kbd.Wait(t, 15*time.Second)
 	if err := m.Disconnect(tabID); err != nil {
 		t.Fatal(err)
 	}
@@ -529,11 +539,12 @@ func TestInProcessBastionKbdintServerDropMidPrompt(t *testing.T) {
 	m, em := newManagerForRig(t, rig)
 
 	base := settleGoroutines(t)
+	kbd := em.Arm(EventVaultKbdintPrompt)
 	tabID, err := m.Connect(bastionTestSession(rig.Addr(), "target.example.com"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev := em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	ev := kbd.Wait(t, 15*time.Second)
 	// The server drops ~300 ms after the round starts; the user still
 	// submits (the modal is open), which is when the dial fails.
 	time.Sleep(400 * time.Millisecond)
@@ -566,17 +577,19 @@ func TestInProcessBastionTestConnection(t *testing.T) {
 	sess := bastionTestSession(rig.Addr(), "target.example.com")
 
 	errCh := make(chan error, 1)
+	round1 := em.Arm(EventVaultKbdintPrompt)
 	go func() { errCh <- m.TestConnection(sess) }()
 
-	ev := em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	ev := round1.Wait(t, 15*time.Second)
 	connID := ev.payload.(KbdintPromptPayload).ConnID
 	if connID == "" || connID == sess.ID {
 		t.Fatalf("ephemeral connID = %q", connID)
 	}
+	round2 := em.Arm(EventVaultKbdintPrompt)
 	if err := m.SubmitKbdintResponse(connID, []string{"b-pass"}); err != nil {
 		t.Fatal(err)
 	}
-	ev = em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	ev = round2.Wait(t, 15*time.Second)
 	if err := m.SubmitKbdintResponse(ev.payload.(KbdintPromptPayload).ConnID, []string{"t-pass"}); err != nil {
 		t.Fatal(err)
 	}
@@ -601,9 +614,10 @@ func TestInProcessBastionTestConnectionFailure(t *testing.T) {
 	sess := bastionTestSession(rig.Addr(), "target.example.com")
 
 	errCh := make(chan error, 1)
+	kbd := em.Arm(EventVaultKbdintPrompt)
 	go func() { errCh <- m.TestConnection(sess) }()
 
-	ev := em.WaitEvent(t, EventVaultKbdintPrompt, 15*time.Second)
+	ev := kbd.Wait(t, 15*time.Second)
 	if err := m.SubmitKbdintResponse(ev.payload.(KbdintPromptPayload).ConnID, []string{"nope"}); err != nil {
 		t.Fatal(err)
 	}

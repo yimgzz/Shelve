@@ -454,6 +454,40 @@ func TestStore300SessionsFixturePerf(t *testing.T) {
 	}
 }
 
+// TestStore300SessionsSearchBudget (phase E7, master plan §6 D40): search over
+// the 300-session fixture stays inside the 10 ms budget. The best of several
+// runs is measured so scheduler noise on a loaded host cannot fail the gate
+// while a real regression is still caught; the measured time is logged.
+func TestStore300SessionsSearchBudget(t *testing.T) {
+	p := model.GenerateFixture(300)
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(nil)
+	if err := s.Load(raw); err != nil {
+		t.Fatal(err)
+	}
+
+	const runs = 20
+	best := time.Duration(1<<63 - 1)
+	for i := 0; i < runs; i++ {
+		t0 := time.Now()
+		hits := s.Search("host-")
+		el := time.Since(t0)
+		if el < best {
+			best = el
+		}
+		if len(hits) == 0 {
+			t.Fatal("fixture search returned no hits")
+		}
+	}
+	t.Logf("search over the 331-node fixture: best of %d = %v (budget 10 ms)", runs, best)
+	if best > 10*time.Millisecond {
+		t.Fatalf("search took %v, budget 10 ms", best)
+	}
+}
+
 func TestStore300SessionsFullPayloadRoundTrip(t *testing.T) {
 	p := model.GenerateFixture(300)
 	raw, err := json.Marshal(p)

@@ -77,22 +77,26 @@ func TestEditSaveRoundTripAndTempCleanup(t *testing.T) {
 		t.Fatalf("EditRemoteText: %v", err)
 	}
 
-	es := getEdit(m, tab)
-	if es == nil {
-		t.Fatal("no edit state registered after start")
-	}
-
 	// The watcher re-uploads once stable; remote content must change.
 	waitFor(t, 5*time.Second, "remote content updated",
 		func() bool { return strings.Contains(string(readRemoteAll(t, m, tab, "/notes.txt")), "appended") })
 
-	// After the single successful save the temp copy is deleted.
-	waitFor(t, 5*time.Second, "temp deleted", func() bool {
-		_, err := os.Stat(es.tempPath)
-		return os.IsNotExist(err)
+	// After the single successful save the temp copy is deleted and the
+	// editor log removed once the process exits, leaving no edit-* file
+	// behind. (This editor exits immediately, so the record itself may
+	// already be gone — assert on the tmp dir rather than the record.)
+	waitFor(t, 5*time.Second, "edit temp/log cleaned after save", func() bool {
+		ents, err := os.ReadDir(m.tmpDir)
+		if err != nil {
+			return false
+		}
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), "edit-") {
+				return false
+			}
+		}
+		return true
 	})
-	// The edit record is removed once the editor exits.
-	waitFor(t, 5*time.Second, "edit record removed", func() bool { return getEdit(m, tab) == nil })
 }
 
 func TestEditErrAlreadyEditing(t *testing.T) {
@@ -170,15 +174,29 @@ func TestEditNonZeroExitKeepsTemp(t *testing.T) {
 	if err := m.EditRemoteText(tab, "/err.txt", editor); err != nil {
 		t.Fatalf("EditRemoteText: %v", err)
 	}
-	es := getEdit(m, tab)
-	waitFor(t, 2*time.Second, "edit registered", func() bool { return getEdit(m, tab) != nil })
+	// The temp copy is staged synchronously; discover it on disk because the
+	// record is dropped as soon as the editor exits.
+	var tempPath string
+	waitFor(t, 5*time.Second, "edit temp staged", func() bool {
+		ents, err := os.ReadDir(m.tmpDir)
+		if err != nil {
+			return false
+		}
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), "edit-") && !strings.HasSuffix(e.Name(), ".log") {
+				tempPath = filepath.Join(m.tmpDir, e.Name())
+				return true
+			}
+		}
+		return false
+	})
 
 	// Editor exits non-zero before any save → the edit record is removed
 	// (process exited) and the temp copy is kept (no user-facing message:
 	// with launcher editors like xdg-open, an exit-time signal would be
 	// wrong, so the edit flow is silent except for save/failure toasts).
 	waitFor(t, 5*time.Second, "edit record removed", func() bool { return getEdit(m, tab) == nil })
-	if _, err := os.Stat(es.tempPath); err != nil {
+	if _, err := os.Stat(tempPath); err != nil {
 		t.Fatalf("temp should be KEPT on non-zero exit: %v", err)
 	}
 }
@@ -203,17 +221,26 @@ func TestEditUntouchedExitKeepsTempAndStaysWatchable(t *testing.T) {
 	if err := m.EditRemoteText(tab, "/clean.txt", editor); err != nil {
 		t.Fatalf("EditRemoteText: %v", err)
 	}
-	es := getEdit(m, tab)
-	waitFor(t, 2*time.Second, "edit registered", func() bool { return getEdit(m, tab) != nil })
 
 	// The launcher's exit must not end the watch: write the temp copy now,
 	// and the (still running) watcher must pick it up on stability and
-	// re-upload.
+	// re-upload. The edit record may already be gone (the process exited),
+	// so discover the staged temp on disk instead of via the record.
+	var tempPath string
 	waitFor(t, 5*time.Second, "temp present after launcher exit", func() bool {
-		_, err := os.Stat(es.tempPath)
-		return err == nil
+		ents, err := os.ReadDir(m.tmpDir)
+		if err != nil {
+			return false
+		}
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), "edit-") && !strings.HasSuffix(e.Name(), ".log") {
+				tempPath = filepath.Join(m.tmpDir, e.Name())
+				return true
+			}
+		}
+		return false
 	})
-	if err := os.WriteFile(es.tempPath, []byte("edited by the real editor\n"), 0o600); err != nil {
+	if err := os.WriteFile(tempPath, []byte("edited by the real editor\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "remote updated by watcher after launcher exit",

@@ -73,10 +73,11 @@ func TestDialMonitorClientConnectsAndCoexists(t *testing.T) {
 	}
 
 	// The live PTY still echoes while the monitor connection is open.
+	echo := em.Arm(EventTerminalData)
 	if err := m.Write(tabID, base64.StdEncoding.EncodeToString([]byte("hi pty\n"))); err != nil {
 		t.Fatalf("pty Write: %v", err)
 	}
-	ev := em.WaitEvent(t, EventTerminalData, 15*time.Second)
+	ev := echo.Wait(t, 15*time.Second)
 	data, err := base64.StdEncoding.DecodeString(ev.payload.(TerminalDataPayload).Data)
 	if err != nil {
 		t.Fatalf("decode terminal data: %v", err)

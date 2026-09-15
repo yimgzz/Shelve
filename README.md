@@ -288,55 +288,36 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
 
 ## Troubleshooting
 
-- **Window flashes light/white while inactive** (GPU/dmabuf accelerated
-  compositing, verified 2026-09-12): with a terminal open, leaving the
-  window visible but unfocused makes the whole window flash white every few
-  seconds — even fully idle, on dark themes. This is WebKitGTK exposing its
-  compositor's native clear colour during periodic re-tiles; the CSS dark
-  background cannot cover a dropped composited layer. The app therefore
-  defaults to the software renderer (`WEBKIT_DISABLE_DMABUF_RENDERER=1` is
-  set at startup on every session type — covers `make run`, `make dev` and
-  the AppImage alike), which is flash-free. If you hit the mixed-DPI freeze
-  below instead and prefer the GPU renderer, force it with
-  `WEBKIT_DISABLE_DMABUF_RENDERER=0`.
-- **Terminal freezes on a second monitor with a different scale factor**
-  (mixed-DPI X11: e.g. one 100 % screen + one 200 % screen — verified
-  2026-09-01). Moving or maximizing the window on the higher-DPI monitor can
-  stop input echo and streaming output from being painted, while the app
-  itself keeps running (keystrokes, transport and xterm rendering all
-  continue; only WebKitGTK's canvas presentation stalls). This is a
-  WebKitGTK limitation, not an app bug.
-  - What the app does about it: the software renderer is the default (the
-    GPU dmabuf renderer, which fixes the freeze when *moving* between
-    mixed-scale monitors, is opt-in via `WEBKIT_DISABLE_DMABUF_RENDERER=0`);
-    renderer-recovery passes detect a stuck (paused/unmeasured) xterm
-    renderer after a resize/move and force a repaint; terminal focus is
-    restored after window moves; the fit logic clamps rows to the
-    container's real height (so the prompt line is never clipped under the
-    monitor bar).
-  - Remaining limitation: **maximizing** the window on the higher-DPI monitor
-    while a command streams output can still freeze presentation — there is no
-    reliable app-side workaround (the WebGL renderer is unusable on
-    WebKitGTK/mixed-DPI and makes moves worse; renderer-recovery passes don't
-    help). The practical fix is to make the scale factors uniform across
-    monitors (set all monitors to the same zoom/scale in the desktop display
-    settings), after which every scenario behaves normally.
+- **Display backend, HiDPI and GPU** (Electron/Chromium). Hardware
+  acceleration is on by default and `--disable-gpu` (or
+  `--disable-hardware-acceleration`) is the only way to force software
+  rendering; `--gpu-info` prints the GPU feature status and exits. On a
+  Wayland session the app defaults to Chromium's native Wayland backend
+  (`--ozone-platform-hint=auto`) so per-monitor fractional scaling works at
+  125 / 150 / 175 %. On X11 Chromium exposes a **single global scale** for the
+  whole desktop (from `Xft.dpi` / GTK XSettings) — moving the window to a
+  monitor with a different scale factor cannot re-scale it, which is a
+  Chromium/X11 limitation rather than an app bug; terminals still refit and
+  never freeze. Overrides, in priority order:
+  1. `--ozone-platform=x11|wayland` on the command line (passed through);
+  2. `ELECTRON_OZONE_PLATFORM_HINT=x11|wayland|auto` (Electron-native; `auto`
+     asks Chromium to pick, it does not force a switch);
+  3. `SHELVE_DISPLAY_BACKEND=x11|wayland|auto` (app-specific), e.g.
+     `SHELVE_DISPLAY_BACKEND=x11 make run`;
+  4. `--force-device-scale-factor=<n>` to force one global Chromium scale.
+  The chosen backend and the effective platform are logged to stderr at
+  startup.
 - **Blank / hung window on some desktops** (NVIDIA/gbm, Wayland sessions):
-  the app disables the WebKit dmabuf renderer by default (see the flash item
-  above). If you still get a blank window, force the X11 backend as well:
-  ```
-  GDK_BACKEND=x11 make run
-  ```
-  (or `GDK_BACKEND=x11 ./bin/shelve-<version>-x86_64.AppImage`). To force
-  the GPU renderer anywhere (X11 included), export
-  `WEBKIT_DISABLE_DMABUF_RENDERER=0` before launching.
-- **In-container window fails under `make dev`** (GTK/DBus session limits inside
-  the container, WebKit sandbox namespace limits — observed on GNOME/XWayland
-  ALT Linux): use the always-supported workflow `make build` + `make run`
-  (compile in the container, run the binary on the host). See the Development
-  notes above.
+  force the X11 backend, either with
+  `SHELVE_DISPLAY_BACKEND=x11 make run` or directly with
+  `--ozone-platform=x11`.
+- **In-container window fails under `make dev`** (display/DBus session limits
+  inside the container): use the always-supported workflow `make build` +
+  `make run` (compile in the container, run the binary on the host). See the
+  Development notes above.
 - **X11 vs Wayland:** X11 forwarding works on X11 and on Wayland via XWayland;
-  native Wayland socket forwarding is a v1 non-goal.
+  native Wayland socket forwarding is out of scope for the containerized dev
+  session.
 - **SFTP "Edit as text" misbehaves:** check `$XDG_CONFIG_HOME/shelve/tmp/edit-*.log`
   for the configured editor's stdout/stderr. The command is run verbatim
   (`strings.Fields`) with the temp file path appended last — use something like

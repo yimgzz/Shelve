@@ -174,6 +174,9 @@ export const initialState: StoreState = {
         textEditorCommand: "xdg-open",
         sftpInitialPath: "~",
         window: { width: 1280, height: 800, leftWidth: DEFAULT_LEFT_WIDTH, sftpWidth: DEFAULT_SFTP_WIDTH },
+        // Phase E4 T7: user zoom (0 = none), separate from the OS device
+        // scale; applied at boot by main.ts via ui/zoom.
+        ui: { zoomLevel: 0 },
     },
     vaultState: "locked",
     sftpPanelOpen: true,

@@ -55,9 +55,9 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
     input.autocomplete = "off";
     input.spellcheck = false;
 
-    // Legacy fallback: WebKitGTK file inputs expose only the basename
-    // (no File.path), so this is used solely when the native binding is
-    // unavailable. window.shelve.pickFile returns the full path.
+    // Fallback for a missing native binding: a sandboxed renderer's File
+    // objects carry no filesystem path, so only the basename is recoverable.
+    // window.shelve.pickFile returns the full path.
     const file = document.createElement("input");
     file.type = "file";
     file.style.display = "none";

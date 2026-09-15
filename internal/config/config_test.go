@@ -403,7 +403,7 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 	for k := range m {
 		switch k {
 		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "monitoringEnabled",
-			"terminal", "textEditorCommand", "sftpInitialPath", "window":
+			"terminal", "textEditorCommand", "sftpInitialPath", "window", "ui":
 		default:
 			t.Fatalf("unexpected settings key %q", k)
 		}
@@ -470,5 +470,40 @@ func TestThemeVariantNormalizesWhitespace(t *testing.T) {
 	}
 	if got.ThemeVariant != "dracula" {
 		t.Fatalf("themeVariant = %q, want %q", got.ThemeVariant, "dracula")
+	}
+}
+
+// TestUISettingsZoomLevel (phase E4 T7): the additive `ui.zoomLevel` field is
+// absent-safe (a pre-E4 settings.json decodes to 0 = no zoom) and is clamped
+// to the renderer's supported ±8 range.
+func TestUISettingsZoomLevel(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{"absent ui → 0", `{"theme":"dark"}`, 0},
+		{"absent zoomLevel → 0", `{"ui":{}}`, 0},
+		{"explicit value kept", `{"ui":{"zoomLevel":3}}`, 3},
+		{"clamped high", `{"ui":{"zoomLevel":99}}`, 8},
+		{"clamped low", `{"ui":{"zoomLevel":-99}}`, -8},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolatedXDG(t)
+			if err := os.MkdirAll(Path(), DirPerm); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(File(SettingsFileName), []byte(tc.raw), FilePerm); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got.UI.ZoomLevel != tc.want {
+				t.Fatalf("ui.zoomLevel = %d, want %d", got.UI.ZoomLevel, tc.want)
+			}
+		})
 	}
 }

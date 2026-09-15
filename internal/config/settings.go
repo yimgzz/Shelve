@@ -30,6 +30,14 @@ type WindowSettings struct {
 	SftpWidth int `json:"sftpWidth"`
 }
 
+// UISettings holds renderer-side UI preferences (phase E4 T7). ZoomLevel is
+// VSCode's zoom model: user zoom, deliberately separate from the OS device
+// scale, applied in the renderer via webFrame.setZoomLevel. 0 = no zoom, which
+// is also the value an absent `ui` object decodes to.
+type UISettings struct {
+	ZoomLevel int `json:"zoomLevel"`
+}
+
 // Settings is the on-disk shape of settings.json (master plan §4).
 // It must never contain secrets.
 type Settings struct {
@@ -42,6 +50,7 @@ type Settings struct {
 	TextEditorCommand  string           `json:"textEditorCommand"`
 	SftpInitialPath    string           `json:"sftpInitialPath"` // global SFTP browser start path ("~" default)
 	Window             WindowSettings   `json:"window"`
+	UI                 UISettings       `json:"ui"`
 }
 
 // DefaultSettings returns the schema defaults from master plan §4 (phase 5d
@@ -68,6 +77,9 @@ func DefaultSettings() Settings {
 			LeftWidth: 320,
 			SftpWidth: 320,
 		},
+		// Phase E4 T7: user zoom (VSCode model), separate from the OS scale.
+		// 0 = no zoom. No UI exposes it yet; the renderer applies it at boot.
+		UI: UISettings{ZoomLevel: 0},
 	}
 }
 
@@ -156,5 +168,13 @@ func (s *Settings) normalize() {
 	}
 	if s.Window.SftpWidth <= 0 {
 		s.Window.SftpWidth = 320
+	}
+	// E4 T7: user zoom is clamped to the renderer's supported range
+	// (ui/zoom.ts MIN/MAX_ZOOM_LEVEL); an absent `ui` object decodes to 0.
+	if s.UI.ZoomLevel < -8 {
+		s.UI.ZoomLevel = -8
+	}
+	if s.UI.ZoomLevel > 8 {
+		s.UI.ZoomLevel = 8
 	}
 }

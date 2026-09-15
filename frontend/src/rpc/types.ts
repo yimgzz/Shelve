@@ -11,9 +11,9 @@
 // This module is types only; it emits no runtime code beyond the ambient
 // `Window.shelve` declaration.
 
-// The two IPC payloads are declared once for all three processes in ./ipc.
-import type { BridgeEndpoint, WindowState } from "./ipc";
-export type { BridgeEndpoint, WindowState };
+// The IPC payloads are declared once for all three processes in ./ipc.
+import type { BridgeEndpoint, DisplayChanged, WindowState } from "./ipc";
+export type { BridgeEndpoint, DisplayChanged, WindowState };
 
 // ---------------------------------------------------------------- DTOs ---
 
@@ -176,6 +176,15 @@ export interface WindowSettings {
     sftpWidth: number;
 }
 
+/**
+ * Renderer-side UI preferences (config.UISettings, E4 T7). `zoomLevel` is the
+ * VSCode zoom model — user zoom, separate from the OS device scale — applied
+ * via `window.shelve.zoom.setLevel`. 0 = no zoom (the default).
+ */
+export interface UISettings {
+    zoomLevel: number;
+}
+
 /** settings.json schema (config.Settings): never contains secrets. */
 export interface Settings {
     theme: string;
@@ -187,6 +196,7 @@ export interface Settings {
     textEditorCommand: string;
     sftpInitialPath: string;
     window: WindowSettings;
+    ui: UISettings;
 }
 
 // ------------------------------------------------- native (preload) API ---
@@ -207,6 +217,15 @@ export interface ShelveNative {
     /** Window geometry changes (debounced in main); returns an unsubscribe. */
     windowState: {
         onChange(cb: (state: WindowState) => void): () => void;
+    };
+    /** Display/DPI changes (debounced in main); returns an unsubscribe. */
+    display: {
+        onChange(cb: (state: DisplayChanged) => void): () => void;
+    };
+    /** User zoom, separate from OS DPI (E4 T7: 1.2 ** level). */
+    zoom: {
+        setLevel(level: number): void;
+        getLevel(): number;
     };
 }
 

@@ -4,13 +4,14 @@
 // Bundled to CommonJS (dist-electron/preload.cjs) because ESM preload scripts
 // are unsupported in sandboxed renderers. The surface is deliberately tiny
 // and reviewed: the backend endpoint, the clipboard, the native single-file
-// picker and the debounced window geometry. No Node, no arbitrary IPC, no
-// secrets (the per-run token rides `bridgeEndpoint()` only, never a log).
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+// picker, the debounced window geometry/display changes and the zoom level.
+// No Node, no arbitrary IPC, no secrets (the per-run token rides
+// `bridgeEndpoint()` only, never a log).
+import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from "electron";
 
 // The IPC payloads are declared once for main + preload + renderer in
 // frontend/src/rpc/ipc.ts (type-only import: erased from the bundle).
-import type { BridgeEndpoint, WindowState } from "../frontend/src/rpc/ipc";
+import type { BridgeEndpoint, DisplayChanged, WindowState } from "../frontend/src/rpc/ipc";
 
 contextBridge.exposeInMainWorld("shelve", {
     // The per-run loopback endpoint ({addr, token}) printed by the Go backend
@@ -39,5 +40,26 @@ contextBridge.exposeInMainWorld("shelve", {
                 ipcRenderer.removeListener("window:state", listener);
             };
         },
+    },
+
+    // Debounced display/DPI changes from the main process (E4 T3). The
+    // renderer's own devicePixelRatio stays authoritative for cell metrics;
+    // this is the "re-measure now" signal (VSCode keeps both).
+    display: {
+        onChange: (cb: (state: DisplayChanged) => void): (() => void) => {
+            const listener = (_event: IpcRendererEvent, state: DisplayChanged): void => cb(state);
+            ipcRenderer.on("display:changed", listener);
+            return () => {
+                ipcRenderer.removeListener("display:changed", listener);
+            };
+        },
+    },
+
+    // User zoom, kept strictly separate from OS DPI (E4 T7, the VSCode model:
+    // zoom = 1.2 ** level). Mechanism only in E4 — no UI exposes it; the
+    // renderer applies the persisted settings value once at boot.
+    zoom: {
+        setLevel: (level: number): void => webFrame.setZoomLevel(level),
+        getLevel: (): number => webFrame.getZoomLevel(),
     },
 });

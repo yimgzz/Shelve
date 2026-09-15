@@ -249,8 +249,8 @@ function render(): void {
     lastRenderKey = key;
 
     // Was the pointer interacting with Disk when this refresh hit? Captured
-    // BEFORE the wipe: the rebuild removes the hovered node, which in WebKit
-    // can also fire mouseleave on it (clearing diskTooltipOpen).
+    // BEFORE the wipe: the rebuild removes the hovered node, which can also
+    // fire mouseleave on it (clearing diskTooltipOpen).
     const oldDisk = el.querySelector<HTMLElement>(".mon-disk");
     const oldTip = oldDisk?.querySelector<HTMLElement>(".mon-tooltip");
     const diskWasHovered =

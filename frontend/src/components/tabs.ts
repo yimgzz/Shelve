@@ -3,9 +3,8 @@
 // amber / ready green / error red / closed gray), × close on hover,
 // middle-click close, click activate, horizontal scroll. Right-click opens
 // a batch-close context menu (Close Others / Close All Tabs / Close Tabs
-// to the Right); left-drag reorders the strip (pointer-based; HTML5 DnD is
-// unreliable in WebKitGTK). The right pane is owned by
-// components/terminal-view.ts (Phase 4c).
+// to the Right); left-drag reorders the strip (pointer-based). The right pane
+// is owned by components/terminal-view.ts (Phase 4c).
 
 import { store } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";

@@ -8,13 +8,25 @@
 //   * open one sandboxed, context-isolated BrowserWindow showing the Vite
 //     renderer (frontend/dist/index.html, or SHELVE_DEV_URL in dev);
 //   * provide the reviewed native surface (single-file picker, clipboard,
-//     debounced window geometry) over IPC;
+//     debounced window geometry, debounced display/DPI changes) over IPC;
 //   * own the backend lifecycle: bounded SIGTERM → SIGKILL on quit, error
-//     dialog + quit if it dies unexpectedly (no orphan).
+//     dialog + quit if it dies unexpectedly (no orphan);
+//   * own the process-wide GPU/display command line and report GPU status
+//     (phase E4: VSCode-parity acceleration, per-monitor DPI, `--gpu-info`).
 //
 // Stdio is lifecycle only (E2-D5): stdout is the handshake, stderr is inherited
 // logs. No application data crosses stdio.
-import { BrowserWindow, Menu, app, clipboard, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
+import {
+    BrowserWindow,
+    Menu,
+    app,
+    clipboard,
+    dialog,
+    ipcMain,
+    screen,
+    shell,
+    type IpcMainInvokeEvent,
+} from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -23,7 +35,7 @@ import { pathToFileURL } from "node:url";
 
 // The IPC payloads are declared once for main + preload + renderer in
 // frontend/src/rpc/ipc.ts (type-only import: erased from the bundle).
-import type { BridgeEndpoint, WindowState } from "../frontend/src/rpc/ipc";
+import type { BridgeEndpoint, DisplayChanged, WindowState } from "../frontend/src/rpc/ipc";
 
 // ------------------------------------------------------------------ config ---
 
@@ -41,6 +53,9 @@ const MIN_WIDTH = 960;
 const MIN_HEIGHT = 540;
 // Debounce for window:state pushes on resize/move (master plan A7).
 const WINDOW_STATE_DEBOUNCE_MS = 300;
+// Debounce for display:changed pushes (E4 T3, mirroring VSCode's 100 ms
+// `Event.debounce` over the `screen` display events).
+const DISPLAY_DEBOUNCE_MS = 100;
 
 // Main-process diagnostics go to stderr (inherited from the shell / Makefile).
 // The per-run token is never logged.
@@ -48,16 +63,169 @@ function log(...args: unknown[]): void {
     console.error("[shelve]", ...args);
 }
 
-// -------------------------------------------------------------- GPU (E2) ---
-// E2 baseline: hardware acceleration ON (VSCode parity — VSCode never appends
-// --disable-gpu; its only off-switch is app.disableHardwareAcceleration()).
-// E4 adds the DPI/GPU feature switches. Must run before `app` is ready.
-if (
-    process.argv.includes("--disable-gpu") ||
-    process.argv.includes("--disable-hardware-acceleration")
-) {
-    app.disableHardwareAcceleration();
+// ---------------------------------------------------- GPU & display (E4) ---
+// VSCode parity (`src/main.ts` `configureCommandlineSwitchesSync`): the switch
+// set below is exactly what VSCode applies and nothing more. In particular we
+// NEVER append --disable-gpu / --disable-gpu-compositing /
+// --ignore-gpu-blocklist / --enable-gpu-rasterization / --use-gl /
+// --use-angle / --disable-lcd-text. The only way to force software rendering
+// is the explicit `--disable-gpu` / `--disable-hardware-acceleration` switch,
+// which maps to `app.disableHardwareAcceleration()`.
+//
+// Everything here must run at module top level, BEFORE `app.whenReady()`.
+
+/** True when the CLI carried `--<name>` (bare or `=value`). */
+function hasArgvSwitch(name: string): boolean {
+    const flag = `--${name}`;
+    return process.argv.some((arg) => arg === flag || arg.startsWith(`${flag}=`));
 }
+
+/**
+ * Value of a switch supplied on the ORIGINAL command line (null when absent,
+ * "" for a bare `--<name>`). `app.commandLine` also carries switches Electron
+ * and Chromium add themselves — notably the `--ozone-platform` they select
+ * from the session — so reading it there would mistake a platform the app
+ * chose for a user override.
+ */
+function cliSwitch(name: string): string | null {
+    const prefix = `--${name}=`;
+    for (const arg of process.argv) {
+        if (arg.startsWith(prefix)) {
+            return arg.slice(prefix.length);
+        }
+    }
+    return process.argv.includes(`--${name}`) ? "" : null;
+}
+
+/**
+ * Locale for Chromium's `--lang` switch. VSCode passes the resolved user/OS
+ * locale; on Linux the equivalent source is the POSIX locale environment.
+ * Returns null when nothing usable is set (Chromium then keeps its default).
+ */
+function systemLocale(): string | null {
+    const raw = process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG;
+    if (!raw) {
+        return null;
+    }
+    // "ru_RU.UTF-8@euro" -> "ru-RU"
+    const base = raw.split(".")[0].split("@")[0].trim();
+    if (!base) {
+        return null;
+    }
+    return base.replace("_", "-");
+}
+
+/** True on a Wayland session (native or XWayland over a Wayland desktop). */
+function waylandSession(): boolean {
+    return process.env.XDG_SESSION_TYPE === "wayland" || !!process.env.WAYLAND_DISPLAY;
+}
+
+/**
+ * The platform Chromium will actually use: an explicit `--ozone-platform`
+ * (whether the user's or the one Electron derives from the session) always
+ * beats `--ozone-platform-hint`, so the hint alone cannot switch backends.
+ */
+function effectivePlatform(): string {
+    return app.commandLine.getSwitchValue("ozone-platform") || "(ozone default)";
+}
+
+/**
+ * Linux display backend (E4 T2). Chromium's *fractional* device scale is
+ * reliable on the native Wayland backend (`wp_fractional_scale_v1`); X11
+ * exposes one global scale instead. A Wayland session therefore requests
+ * `--ozone-platform-hint=auto` (per-monitor fractional scaling).
+ *
+ * Escape hatches, checked in order:
+ *   1. `--ozone-platform=x11|wayland` on the command line (passthrough);
+ *   2. `ELECTRON_OZONE_PLATFORM_HINT` (Electron reads it natively);
+ *   3. `SHELVE_DISPLAY_BACKEND=x11|wayland|auto` (documented in README).
+ *
+ * Note on the hint: Electron pre-selects `--ozone-platform` from the session
+ * before this runs, and Chromium ignores the hint once a platform is pinned —
+ * so `auto` never *switches* away from Electron's choice, it only asks for the
+ * automatic selection. The `x11`/`wayland` overrides use `--ozone-platform`
+ * and therefore do take effect. Every log line reports the effective platform
+ * so support output cannot mislead.
+ *
+ * `--force-device-scale-factor` is Chromium's own switch and stays a pure
+ * passthrough; it is only logged here.
+ */
+function configureLinuxDisplayBackend(): void {
+    const cli = cliSwitch("ozone-platform");
+    if (cli !== null) {
+        log(`display backend: ${cli || "?"} (--ozone-platform)`);
+    } else if (process.env.ELECTRON_OZONE_PLATFORM_HINT) {
+        const hint = process.env.ELECTRON_OZONE_PLATFORM_HINT;
+        log(`display backend: hint=${hint}, effective=${effectivePlatform()} (ELECTRON_OZONE_PLATFORM_HINT)`);
+    } else {
+        const override = (process.env.SHELVE_DISPLAY_BACKEND ?? "").trim().toLowerCase();
+        if (override === "auto") {
+            app.commandLine.appendSwitch("ozone-platform-hint", "auto");
+            log(`display backend: hint=auto, effective=${effectivePlatform()} (SHELVE_DISPLAY_BACKEND)`);
+        } else if (override === "x11" || override === "wayland") {
+            app.commandLine.appendSwitch("ozone-platform", override);
+            log(`display backend: ${override} (SHELVE_DISPLAY_BACKEND)`);
+        } else if (override) {
+            log(`display backend: ignoring unknown SHELVE_DISPLAY_BACKEND=${override}`);
+        } else if (waylandSession()) {
+            app.commandLine.appendSwitch("ozone-platform-hint", "auto");
+            log(`display backend: hint=auto, effective=${effectivePlatform()} — Wayland session (per-monitor fractional scale)`);
+        } else {
+            log("display backend: X11 (Chromium global scale from Xft.dpi/GTK XSettings)");
+        }
+    }
+    const forced = cliSwitch("force-device-scale-factor");
+    if (forced) {
+        log(`display backend: --force-device-scale-factor=${forced}`);
+    }
+}
+
+/** The complete VSCode-parity command line (E4 T1/T2). */
+function configureCommandLine(): void {
+    // The ONLY off-switch for hardware acceleration (VSCode parity): there is
+    // no forced-software path, and no --disable-gpu is ever appended.
+    if (hasArgvSwitch("disable-gpu") || hasArgvSwitch("disable-hardware-acceleration")) {
+        app.disableHardwareAcceleration();
+        log("GPU: hardware acceleration disabled by request");
+    }
+
+    // GPU-channel features VSCode enables. An existing --enable-features value
+    // is preserved (an advanced user may already have passed one).
+    app.commandLine.appendSwitch(
+        "enable-features",
+        [
+            "EarlyEstablishGpuChannel",
+            "EstablishGpuChannelAsync",
+            ...(process.platform === "linux" ? ["GlobalShortcutsPortal"] : []),
+            app.commandLine.getSwitchValue("enable-features"),
+        ]
+            .filter((value) => value.length > 0)
+            .join(","),
+    );
+    // Native window occlusion tracking misfires under compositors and stalls
+    // rendering; VSCode disables it on every platform.
+    app.commandLine.appendSwitch(
+        "disable-features",
+        ["CalculateNativeWinOcclusion", app.commandLine.getSwitchValue("disable-features")]
+            .filter((value) => value.length > 0)
+            .join(","),
+    );
+    // Each xterm instance may hold a WebGL context; the 16-context default is
+    // too low for a window full of tabs.
+    app.commandLine.appendSwitch("max-active-webgl-contexts", "32");
+
+    if (process.platform === "linux") {
+        // xdg-desktop-portal >= 4 supports the file dialog's current_folder.
+        app.commandLine.appendSwitch("xdg-portal-required-version", "4");
+        const lang = systemLocale();
+        if (lang) {
+            app.commandLine.appendSwitch("lang", lang);
+        }
+        configureLinuxDisplayBackend();
+    }
+}
+
+configureCommandLine();
 
 // ------------------------------------------------------------------ state ---
 
@@ -281,6 +449,67 @@ function wireWindowState(w: BrowserWindow): void {
     w.on("move", schedule);
 }
 
+// --------------------------------------------------------- display (E4) ---
+
+/** The display state pushed to the renderer (see rpc/ipc.ts). */
+function currentDisplayState(): DisplayChanged {
+    const primaryScaleFactor = screen.getPrimaryDisplay().scaleFactor;
+    // BrowserWindow exposes no getScaleFactor(); the display the window
+    // actually occupies is the one that governs the window's DPR.
+    const scaleFactor =
+        win && !win.isDestroyed()
+            ? screen.getDisplayMatching(win.getBounds()).scaleFactor
+            : primaryScaleFactor;
+    return { scaleFactor, primaryScaleFactor };
+}
+
+let displayWired = false;
+
+/**
+ * Push debounced display changes to the renderer (E4 T3, VSCode parity).
+ * Mirrors `screen`'s three display events with a 100 ms debounce; work-area
+ * only changes (panels/docks) are ignored because they cannot change the scale.
+ * The window is never recreated or reloaded — the renderer re-measures and
+ * refits, exactly like VSCode's `FontMeasurements.clearAllFontInfos` path.
+ */
+function wireDisplayChanges(w: BrowserWindow): void {
+    if (displayWired) {
+        return;
+    }
+    displayWired = true;
+    let timer: NodeJS.Timeout | null = null;
+    const schedule = (): void => {
+        if (timer) {
+            clearTimeout(timer);
+        }
+        timer = setTimeout(() => {
+            timer = null;
+            if (!w.isDestroyed()) {
+                w.webContents.send("display:changed", currentDisplayState());
+            }
+        }, DISPLAY_DEBOUNCE_MS);
+    };
+    screen.on("display-metrics-changed", (_event, _display, changed) => {
+        if (changed.length > 0 && changed.every((metric) => metric === "workArea")) {
+            return;
+        }
+        schedule();
+    });
+    screen.on("display-added", schedule);
+    screen.on("display-removed", schedule);
+}
+
+/**
+ * Chromium child processes (GPU, network, renderer…). A GPU-process crash is
+ * recovered by Chromium itself (it restarts the process; VSCode only
+ * special-cases this on macOS), so this is diagnostics only.
+ */
+function wireProcessDiagnostics(): void {
+    app.on("child-process-gone", (_event, details) => {
+        log(`child process gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`);
+    });
+}
+
 function createWindow(): BrowserWindow {
     const { width, height } = readWindowSize();
     const w = new BrowserWindow({
@@ -342,8 +571,26 @@ function createWindow(): BrowserWindow {
         log(`window content failed to load (${code} ${description}): ${url}`),
     );
 
+    // A dead renderer leaves a permanently blank window, i.e. no usable app:
+    // report it once and quit (same policy as a dead backend). Chromium's GPU
+    // process is handled separately (it restarts itself — see
+    // wireProcessDiagnostics).
+    w.webContents.on("render-process-gone", (_event, details) => {
+        log(`renderer process gone: reason=${details.reason} exitCode=${details.exitCode}`);
+        if (quitting || details.reason === "clean-exit") {
+            return;
+        }
+        quitting = true;
+        dialog.showErrorBox(
+            "Shelve window stopped",
+            `The window's renderer process exited unexpectedly (${details.reason}).`,
+        );
+        app.quit();
+    });
+
     w.once("ready-to-show", () => w.show());
     wireWindowState(w);
+    wireDisplayChanges(w);
     return w;
 }
 
@@ -411,9 +658,37 @@ function registerIpc(): void {
 
 // ------------------------------------------------------------------ boot ---
 
-if (!app.requestSingleInstanceLock()) {
+/** `--gpu-info`: print the GPU feature status + basic info to stderr and exit. */
+async function printGpuInfo(): Promise<void> {
+    const featureStatus = app.getGPUFeatureStatus();
+    let gpuInfo: unknown = null;
+    try {
+        gpuInfo = await app.getGPUInfo("basic");
+    } catch (err) {
+        log(`gpu info unavailable: ${String(err)}`);
+    }
+    process.stderr.write(`${JSON.stringify({ featureStatus, gpuInfo }, null, 2)}\n`);
+}
+
+const wantGpuInfo = hasArgvSwitch("gpu-info");
+
+if (wantGpuInfo) {
+    // Diagnostics mode: no window, no backend, no single-instance lock — a
+    // support run must work while another Shelve instance is open.
+    app.whenReady()
+        .then(async () => {
+            await printGpuInfo();
+            app.exit(0);
+        })
+        .catch((err: unknown) => {
+            log(`--gpu-info failed: ${String(err)}`);
+            app.exit(1);
+        });
+} else if (!app.requestSingleInstanceLock()) {
     app.quit();
 } else {
+    wireProcessDiagnostics();
+
     app.on("second-instance", () => {
         log("second instance launched; focusing the existing window");
         focusWindow();
@@ -438,6 +713,17 @@ if (!app.requestSingleInstanceLock()) {
             Menu.setApplicationMenu(null);
             registerIpc();
             win = createWindow();
+            // Support diagnostics: the chosen backend was logged pre-ready by
+            // configureLinuxDisplayBackend(); the scale only exists post-ready.
+            const display = currentDisplayState();
+            log(
+                `display: window scaleFactor=${display.scaleFactor} primary scaleFactor=${display.primaryScaleFactor}`,
+            );
+            log(
+                `gpu: enable-features=[${app.commandLine.getSwitchValue("enable-features")}] ` +
+                    `disable-features=[${app.commandLine.getSwitchValue("disable-features")}] ` +
+                    `max-active-webgl-contexts=${app.commandLine.getSwitchValue("max-active-webgl-contexts")}`,
+            );
             startBackend();
         })
         .catch((err: unknown) => {

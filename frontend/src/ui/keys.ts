@@ -1,10 +1,10 @@
 // ui/keys.ts — layout-independent physical-key helpers (plan P008, D1/D4).
 //
-// WebKitGTK computes KeyboardEvent fields from the LAYOUT-MAPPED GDK keyval:
-// under a Cyrillic layout `key` is the mapped letter ("с") and `keyCode`
-// falls to 0, while `code` stays the fixed US physical position (a scancode
-// table inside GTK). xterm.js 5.5 derives Ctrl+letter from the legacy
-// keyCode, so its own Ctrl path is unusable off English layouts.
+// Chromium reports `code` as the fixed US physical key position on every
+// layout, while the legacy `KeyboardEvent.keyCode` — which xterm.js 5.5 uses
+// to derive Ctrl+letter — follows the layout mapping (and is 0 for keys the
+// active layout does not map). xterm's own Ctrl path is therefore unusable
+// off English layouts.
 //
 // Physical-key principle (D1): every COMMAND chord (terminal control bytes,
 // app shortcuts) is identified by `KeyboardEvent.code`; all TEXT input keeps

@@ -3,10 +3,16 @@
 // so `terminal:data` arriving during "connecting" is never dropped.
 //
 // Responsibilities:
-//   - Renderer: try WebGL → on init error catch + fall back to the default
-//     renderer (one console.warn, no retry loop).
+//   - Renderer: prefer the WebGL addon (the Chromium GPU path); on init error
+//     or context loss, dispose it once and fall back to the default renderer
+//     (one console.warn, no retry loop). Software-GL stacks skip WebGL.
 //   - Addons: Fit (ResizeObserver → debounced fit → TerminalService.Resize),
 //     WebLinks.
+//   - DPI (phase E4): on a devicePixelRatio / display change, re-fit (debounced
+//     150 ms) and force a full `term.refresh` when the renderer has not
+//     re-measured, then notify the pty of the final geometry. Chromium's own
+//     per-monitor scale handling is trusted — no window reload, no renderer
+//     poking, no private xterm API.
 //   - term.onData → buffer chunks → flush immediately (no timer/rAF) →
 //     the terminal WebSocket (plan P005), falling back to
 //     TerminalService.Write before the socket connects. Per-keystroke
@@ -96,24 +102,22 @@ function flushInput(tabID: string, e: Entry): void {
     sendBytes(tabID, new TextEncoder().encode(str));
 }
 
-/** Guarded read of the renderer's CSS cell metrics (private API; the pinned
- *  @xterm/xterm 5.5 typings do not expose `term.dimensions`). */
-function cellMetrics(e: Entry): { width: number; height: number } | null {
-    try {
-        const dims = (
-            e.term as unknown as {
-                _core?: { _renderService?: { dimensions?: { css?: { cell?: { width?: number; height?: number } } } } };
-            }
-        )._core?._renderService?.dimensions;
-        const w = dims?.css?.cell?.width;
-        const h = dims?.css?.cell?.height;
-        if (w && h) {
-            return { width: w, height: h };
-        }
-    } catch {
-        /* ignore */
+/** The grid's CSS cell height, read from the public DOM. Both the default and
+ *  the WebGL renderer set `.xterm-screen`'s inline height to exactly
+ *  `rows * cell.height` px, so dividing recovers the cell height without
+ *  reaching into xterm internals. Returns null while the renderer has not
+ *  measured yet (mid-DPR transition) — callers retry on a later pass. */
+function cellHeightPx(e: Entry): number | null {
+    const rows = e.term.rows;
+    if (rows <= 0) {
+        return null;
     }
-    return null;
+    const screen = e.el.querySelector<HTMLElement>(".xterm-screen");
+    const height = screen ? parseFloat(screen.style.height) : NaN;
+    if (!Number.isFinite(height) || height <= 0) {
+        return null;
+    }
+    return height / rows;
 }
 
 /** Keep the prompt visible after a fit unless the user is deliberately
@@ -141,24 +145,29 @@ function ensureCursorVisible(e: Entry): void {
  * clipped by overflow:hidden directly above the 30px monitor band.
  *
  * Fix: clamp rows to the true content-box height (clientHeight minus the
- * container's vertical padding).
+ * container's vertical padding). The clamp may only REMOVE a row — `term.rows`
+ * (the fitted count) is the ceiling — and a sub-pixel tolerance keeps the trim
+ * working when `cellHeightPx` is off by the renderer's own rounding (the WebGL
+ * renderer rounds its grid height but reports an unrounded cell height).
  */
+const CLAMP_TOLERANCE_PX = 0.5;
+
 function clampRowsToContainer(e: Entry): void {
     try {
         if (e.el.offsetParent === null) {
             return; // hidden pane — zero-size container
         }
-        const m = cellMetrics(e);
-        if (!m) {
+        const cellHeight = cellHeightPx(e);
+        if (cellHeight === null) {
             return; // renderer unmeasured (mid-DPR transition); retried later
         }
         const style = window.getComputedStyle(e.el);
         const padV = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
         const avail = e.el.clientHeight - padV;
-        if (avail < m.height) {
+        if (avail < cellHeight) {
             return; // degenerate; leave the fit result for activation to fix
         }
-        const rows = Math.max(1, Math.floor(avail / m.height));
+        const rows = Math.max(1, Math.min(e.term.rows, Math.floor((avail + CLAMP_TOLERANCE_PX) / cellHeight)));
         if (rows !== e.term.rows) {
             e.term.resize(e.term.cols, rows);
         }
@@ -167,91 +176,21 @@ function clampRowsToContainer(e: Entry): void {
     }
 }
 
-/** True when the xterm renderer is stuck: the IntersectionObserver render
- *  pause is active, or cell metrics are unmeasured. WebKitGTK can leave the
- *  terminal screen reported as non-intersecting after a window resize/move
- *  (no follow-up observation fires) — xterm then keeps parsing output into
- *  the buffer but never paints it: streaming and input look frozen. */
-function rendererStuck(e: Entry): boolean {
-    try {
-        const rs = (
-            e.term as unknown as { _core?: { _renderService?: { _isPaused?: boolean } } }
-        )._core?._renderService;
-        if (rs && rs._isPaused === true) {
-            return true;
-        }
-    } catch {
-        /* ignore */
-    }
-    return cellMetrics(e) === null;
-}
-
-/** Force the xterm renderer out of a stuck state after a resize/monitor
- *  move: clear the IntersectionObserver render pause, re-measure chars and
- *  repaint at the current devicePixelRatio (WebKitGTK does not reliably fire
- *  the matchMedia resolution events xterm relies on for DPR changes).
- *  Guarded: only touches private API inside try/catch.
- *
- *  This path must NEVER toggle element visibility or force reflows: it runs
- *  on the focus-recovery paths (main.ts restoreTerminalFocus) that fire
- *  periodically while the window is inactive, and hiding the subtree for a
- *  frame makes WebKitGTK present the page without the terminal content —
- *  a periodic white flash behind any live stream — until the queued repaint
- *  lands. A full refreshRows() already forces the compositor to re-present
- *  a dirty frame, which is all the recovery needs. */
-function recoverRenderer(e: Entry): void {
-    try {
-        const rs = (
-            e.term as unknown as {
-                _core?: {
-                    _renderService?: {
-                        _isPaused?: boolean;
-                        _needsFullRefresh?: boolean;
-                        handleDevicePixelRatioChange?: () => void;
-                        handleCharSizeChanged?: () => void;
-                        refreshRows?: (start: number, end: number) => void;
-                        clearTextureAtlas?: () => void;
-                    };
-                };
-            }
-        )._core?._renderService;
-        if (!rs) {
-            return;
-        }
-        if (rs._isPaused === true) {
-            rs._isPaused = false;
-            rs._needsFullRefresh = false;
-        }
-        if (typeof rs.handleDevicePixelRatioChange === "function") {
-            rs.handleDevicePixelRatioChange();
-        } else if (typeof rs.handleCharSizeChanged === "function") {
-            rs.handleCharSizeChanged();
-        }
-        if (typeof rs.refreshRows === "function") {
-            rs.refreshRows(0, e.term.rows - 1);
-        }
-        if (typeof rs.clearTextureAtlas === "function") {
-            rs.clearTextureAtlas();
-        }
-        e.term.refresh(0, e.term.rows - 1);
-    } catch {
-        /* ignore */
-    }
-}
-
 /** One fit cycle: recompute cols/rows (padding-corrected), keep the prompt
  *  visible, and notify the pty of the final geometry. FitAddon no-ops while
- *  the renderer reports zero cell metrics (unmeasured — e.g. mid resize), so
- *  when the renderer looks stuck we recover it first and re-fit. */
+ *  the renderer reports no measurable cell metrics (unmeasured — e.g. mid
+ *  DPR transition); nudge a repaint and retry once. Every caller (the
+ *  ResizeObserver, the DPI path, activate()) runs again later, so a miss here
+ *  is always recoverable. */
 function doFit(tabID: string, e: Entry): void {
     try {
         e.fit.fit();
     } catch {
         return;
     }
-    if (rendererStuck(e)) {
-        recoverRenderer(e);
+    if (!e.fit.proposeDimensions()) {
         try {
+            e.term.refresh(0, e.term.rows - 1);
             e.fit.fit();
         } catch {
             /* ignore */
@@ -265,63 +204,29 @@ function doFit(tabID: string, e: Entry): void {
 }
 
 /**
- * Window-level resize net. Moving a window between monitors with different
- * scale factors triggers a multi-step WM resize (size change, then a
- * devicePixelRatio change that WebKitGTK does not reliably report through
- * matchMedia). The per-container ResizeObserver debounce can win that race,
- * leaving the terminal sized for an intermediate geometry that no later RO
- * event corrects. Re-fit every live terminal 250 ms after the window
- * settles. Installed once per app lifetime.
+ * Re-fit every VISIBLE terminal after a devicePixelRatio / display change
+ * (phase E4). Debounced: a monitor move fires several DPI signals in a row, so
+ * one debounced pass per burst avoids a refit storm. Hidden panes are skipped
+ * (their container has no box); activate() fits them when they are shown —
+ * Chromium's own per-monitor scale handling plus the per-container
+ * ResizeObserver covers everything else. Installed once per app lifetime.
  */
-let winResizeTimer: number | null = null;
-let winResizeHooked = false;
+const DPI_REFIT_DEBOUNCE_MS = 150;
+let dpiRefitTimer: number | null = null;
 
-// recoverAll throttle (P007): recoverAll forces a full renderer recovery
-// pass over every pooled terminal. It is called from focus-recovery paths
-// that can fire on EVERY stray keydown while focus sits on <body>
-// (main.ts restoreTerminalFocus), so the heavy pass must be rate-limited.
-const RECOVER_ALL_THROTTLE_MS = 300;
-let lastRecoverAllAt = 0;
-
-function onWindowResize(): void {
-    if (winResizeTimer !== null) {
-        window.clearTimeout(winResizeTimer);
+function refitForDpiChange(): void {
+    if (dpiRefitTimer !== null) {
+        window.clearTimeout(dpiRefitTimer);
     }
-    winResizeTimer = window.setTimeout(() => {
-        winResizeTimer = null;
+    dpiRefitTimer = window.setTimeout(() => {
+        dpiRefitTimer = null;
         for (const [id, e] of pool) {
-            // Maximize/monitor-move on HiDPI screens can leave the xterm
-            // renderer paused or WebKit's canvas composite stale; recover
-            // only when the renderer actually reports itself stuck (paused /
-            // unmeasured). A healthy renderer must NOT be force-repainted
-            // here: this path also fires on focus-recovery cycles that
-            // repeat while a window is inactive, and every full-grid
-            // repaint with an atlas re-bake can present as a flash.
-            if (rendererStuck(e)) {
-                recoverRenderer(e);
+            if (e.el.offsetParent === null) {
+                continue; // hidden pane — zero-size container
             }
             doFit(id, e);
         }
-        // WebKitGTK can take longer than 250 ms to finish the surface
-        // reconfiguration after a big resize (maximize on a HiDPI monitor);
-        // one delayed second pass is cheap insurance against the renderer
-        // ending up paused / canvas composite going stale after the fact.
-        winResizeTimer = window.setTimeout(() => {
-            winResizeTimer = null;
-            for (const [, e] of pool) {
-                if (rendererStuck(e)) {
-                    recoverRenderer(e);
-                }
-            }
-        }, 1000);
-    }, 250);
-}
-function hookWindowResize(): void {
-    if (winResizeHooked) {
-        return;
-    }
-    winResizeHooked = true;
-    window.addEventListener("resize", onWindowResize);
+    }, DPI_REFIT_DEBOUNCE_MS);
 }
 
 /** True when WebGL would run on a software rasterizer (llvmpipe, SwiftShader…). */
@@ -345,18 +250,13 @@ function isSoftwareWebGL(): boolean {
 }
 
 /**
- * True when the xterm canvas renderer should be used instead of the WebGL
- * addon. On Linux/WebKitGTK the canvas renderer is the reliable choice:
- * the WebGL addon freezes input/streaming whenever the window moves between
- * monitors with different scale factors (verified on multi-monitor X11), and
- * on software GL (llvmpipe/SwiftShader) its full-grid repaints cost more
- * than the incremental canvas renderer. Elsewhere (macOS/Windows on
- * accelerated stacks) the software-GL probe decides.
+ * True when the default renderer should be used instead of the WebGL addon:
+ * only on software GL (llvmpipe/SwiftShader), where the addon's full-grid
+ * repaints cost more than the default renderer's incremental paint. Every
+ * accelerated stack takes the WebGL path; a missing context or a context loss
+ * falls back once, without a retry loop.
  */
-function useCanvasRenderer(): boolean {
-    if (/Linux/i.test(navigator.userAgent)) {
-        return true; // WebKitGTK: WebGL addon breaks on monitor moves
-    }
+function useDefaultRenderer(): boolean {
     return isSoftwareWebGL();
 }
 
@@ -395,10 +295,9 @@ export const TermPool = {
         term.loadAddon(new WebLinksAddon());
 
         let webgl: WebglAddon | null = null;
-        // On software-rendered WebKitGTK (Linux default, dmabuf disabled) the
-        // canvas renderer beats the WebGL addon (software GL); keep WebGL only
-        // on accelerated GL stacks.
-        if (!useCanvasRenderer()) {
+        // Prefer the Chromium GPU path; skip it only on software GL, where the
+        // addon's full-grid repaints cost more than the default renderer.
+        if (!useDefaultRenderer()) {
             try {
                 webgl = new WebglAddon();
                 term.loadAddon(webgl);
@@ -425,7 +324,8 @@ export const TermPool = {
         pool.set(tabID, entry);
 
         // A single context-loss handler: dispose the WebGL addon so xterm
-        // falls back to the canvas renderer without "context lost" spam.
+        // falls back to the default renderer without "context lost" spam.
+        // Chromium restarts a lost GPU process itself; there is no retry loop.
         if (webgl) {
             webgl.onContextLoss(() => {
                 const current = pool.get(tabID);
@@ -479,9 +379,6 @@ export const TermPool = {
             }
         });
 
-        // One window-level resize listener for the whole pool (settled re-fit).
-        hookWindowResize();
-
         term.onData((data) => {
             entry.inputBuf += data;
             flushInput(tabID, entry);
@@ -490,9 +387,9 @@ export const TermPool = {
         // Custom key handling — plan P008 (layout-independent hotkeys).
         //
         // Physical-key rule (D1): every command chord is identified by
-        // KeyboardEvent.code (the US physical position), which WebKitGTK
-        // keeps stable under any keyboard layout. xterm's own Ctrl path
-        // reads the layout-mapped keyCode — 0 on Cyrillic layouts — so it is
+        // KeyboardEvent.code (the US physical position), which Chromium keeps
+        // stable under any keyboard layout. xterm's own Ctrl path reads the
+        // layout-mapped legacy keyCode — 0 on Cyrillic layouts — so it is
         // unusable there; we intercept the chords, send the bytes ourselves,
         // and return false so xterm neither double-sends nor no-ops. Plain
         // text (layout-aware — keypress/composition path), arrows, Enter,
@@ -529,7 +426,7 @@ export const TermPool = {
                 return true;
             }
             if (isCtrlShiftV(e)) {
-                // preventDefault: WebKit's native paste accelerator could
+                // preventDefault: the browser's own paste accelerator could
                 // otherwise fire a DOM `paste` event → double paste.
                 e.preventDefault();
                 e.stopPropagation();
@@ -602,7 +499,7 @@ export const TermPool = {
         };
         document.addEventListener("mouseup", entry.onDocMouseUp!, true);
 
-        // Right-click paste: swallow the WebKit context menu, then paste the
+        // Right-click paste: swallow the browser context menu, then paste the
         // system clipboard via term.paste() — the same onData → Write path as
         // typing, with xterm's bracketed-paste handling. Gated on the state
         // overlay being hidden (state "ready"); the overlay covers the pane
@@ -646,28 +543,9 @@ export const TermPool = {
             return;
         }
         doFit(tabID, e);
-        // WebKitGTK keeps compositing the pane's pre-hide surface after a tab
-        // switch (display:none → flex): xterm's renderer does not repaint the
-        // re-shown terminal on its own (the stale canvas layer shows the
-        // previous frame stretched until the first interaction forces a
-        // repaint). Force the recovery path — unpause + char re-measure +
-        // full refreshRows — exactly like the window-resize path
-        // (onWindowResize), but ONLY when the renderer is genuinely stuck
-        // (paused / unmeasured). At a tab switch that is exactly the state:
-        // xterm's IntersectionObserver has not yet un-paused the renderer
-        // after display:none→flex, so _isPaused is still true and recovery
-        // runs. In the healthy steady state — including the repeated
-        // activate() calls from the focus-recovery path while a window is
-        // inactive — nothing is force-repainted, because every forced
-        // full-grid repaint with an atlas re-bake can present as a flash.
-        if (rendererStuck(e)) {
-            recoverRenderer(e);
-        }
-        // Focus AFTER the recovery pass: the refresh invalidates frames
-        // synchronously and a same-frame focus() right after a
-        // display:none→flex toggle can be dropped by WebKitGTK (deferred
-        // layout), so re-assert focus once more on the NEXT frame.
         e.term.focus();
+        // Re-assert focus on the next frame: a display:none → flex toggle can
+        // drop the first focus() call while layout settles.
         requestAnimationFrame(() => {
             if (pool.get(tabID) === e) {
                 e.term.focus();
@@ -708,23 +586,11 @@ export const TermPool = {
         }
     },
 
-    /** Run the renderer recovery on every STUCK live instance (window focus
-     *  after a minimize/resize can leave a renderer paused; harmless when
-     *  healthy). Only touched when genuinely stuck: this runs on the
-     *  focus-recovery paths that fire on every stray keydown while focus sits
-     *  on <body> (P007), and force-repainting healthy terminals there is what
-     *  turns into a repeated flash while a window is inactive. */
-    recoverAll(): void {
-        const now = Date.now();
-        if (now - lastRecoverAllAt < RECOVER_ALL_THROTTLE_MS) {
-            return;
-        }
-        lastRecoverAllAt = now;
-        for (const [, e] of pool) {
-            if (rendererStuck(e)) {
-                recoverRenderer(e);
-            }
-        }
+    /** Re-fit every visible terminal after a devicePixelRatio / display change
+     *  (phase E4; registered as a `ui/dpi` listener from main.ts). Debounced
+     *  inside, so a burst of DPI signals costs one refit pass. */
+    applyDpiChange(): void {
+        refitForDpiChange();
     },
 
     /**

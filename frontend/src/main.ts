@@ -26,6 +26,8 @@ import { initTerminalWs, isTerminalWsActive, setTerminalOutputHandler } from "./
 import { b64ToBytes } from "./ui/b64";
 import { initShortcuts } from "./ui/shortcuts";
 import { initAutoLock } from "./ui/autolock";
+import { initDpi, onDpiChanged } from "./ui/dpi";
+import { applyZoomLevel } from "./ui/zoom";
 
 // Event names (master plan §5; the backend constants live in
 // internal/api + internal/sshengine).
@@ -49,6 +51,7 @@ const root = document.getElementById("app-root")!;
 function toSettings(raw: Record<string, unknown>): Settings {
    const win = (raw.window ?? {}) as Record<string, unknown>;
    const term = (raw.terminal ?? {}) as Record<string, unknown>;
+   const ui = (raw.ui ?? {}) as Record<string, unknown>;
    return {
        theme: typeof raw.theme === "string" ? raw.theme : "system",
        themeVariant: typeof raw.themeVariant === "string" ? raw.themeVariant : "",
@@ -70,6 +73,8 @@ function toSettings(raw: Record<string, unknown>): Settings {
             leftWidth: Number(win.leftWidth ?? 320) || 320,
             sftpWidth: Number(win.sftpWidth ?? 320) || 320,
         },
+        // E4 T7: user zoom, separate from OS DPI; absent -> 0 (no zoom).
+        ui: { zoomLevel: Number(ui.zoomLevel ?? 0) || 0 },
     };
 }
 
@@ -83,7 +88,9 @@ function destroyTerminals(): void {
  * monitors can move DOM focus to <body>, silently killing xterm input —
  * keydowns still reach the document but never the terminal's hidden
  * textarea. Re-focus on window focus/visibility change; a form field
- * (search, dialog) owns the keyboard and must not be stolen from.
+ * (search, dialog) owns the keyboard and must not be stolen from. DPI
+ * changes are handled separately by ui/dpi.ts, which refits rather than
+ * repaints.
  */
 function restoreTerminalFocus(): void {
     const st = store.getState();
@@ -98,8 +105,6 @@ function restoreTerminalFocus(): void {
         return;
     }
     TermPool.activate(st.activeTabID);
-    // Late recovery for canvas presentation after maximize/resize.
-    TermPool.recoverAll();
 }
 
 // Tracks whether the app shell is currently rendered. The unlock success
@@ -347,6 +352,12 @@ async function boot(): Promise<void> {
     initShortcuts();
     initAutoLock();
 
+    // Per-monitor DPI (phase E4): the renderer's matchMedia DPR monitor plus
+    // the main process's debounced display signal. Every change re-fits the
+    // live terminals through the pool — nothing is reloaded or recreated.
+    initDpi();
+    onDpiChanged(() => TermPool.applyDpiChange());
+
     // Restore xterm textarea focus after window moves. window.focus +
     // visibility cover the move itself; the capture-phase keydown fallback
     // catches cases where neither event fires (first keystroke refocuses,
@@ -384,6 +395,10 @@ async function boot(): Promise<void> {
         const normalized = toSettings(settings);
         store.set({ settings: normalized });
         initTheme(normalized.theme, normalized.themeVariant);
+        // E4 T7: apply the persisted user zoom (independent of the OS scale).
+        // The default 0 is a no-op, so this changes nothing until a plan adds
+        // a UI for it.
+        applyZoomLevel(normalized.ui.zoomLevel);
         // Install the geometry listener only after settings are in the store:
         // an early event must never persist the defaults over a remembered
         // size or panel widths (master plan A7).

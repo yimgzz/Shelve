@@ -2,7 +2,8 @@
 // (phase E3).
 //
 // All three sides reference these declarations:
-//   * electron/main.ts   — sends `window:state`, resolves `bridge:endpoint`;
+//   * electron/main.ts   — sends `window:state` + `display:changed`, resolves
+//     `bridge:endpoint`;
 //   * electron/preload.ts — forwards them over contextBridge;
 //   * the renderer (rpc/types.ts) — consumes them.
 //
@@ -20,4 +21,17 @@ export interface BridgeEndpoint {
 export interface WindowState {
     width: number;
     height: number;
+}
+
+/**
+ * Debounced display/DPI change pushed by the Electron main process (E4 T3).
+ * The renderer's own `devicePixelRatio` is authoritative for cell metrics
+ * (`ui/dpi.ts`); this signal only says "re-measure now" — the numbers are for
+ * diagnostics/logging.
+ */
+export interface DisplayChanged {
+    /** Scale factor of the display the window currently occupies. */
+    scaleFactor: number;
+    /** Scale factor of the primary display. */
+    primaryScaleFactor: number;
 }

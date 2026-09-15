@@ -71,7 +71,9 @@ scale is global and historically integer-rounded. Therefore:
   `--ozone-platform-hint=auto` so Chromium uses the native Wayland backend with
   per-monitor fractional scaling.
 - Escape hatches (checked before the above, in order):
-  1. `--ozone-platform=<x11|wayland|auto>` on the CLI (passthrough);
+  1. `--ozone-platform=x11|wayland` on the CLI (passthrough; Chromium rejects
+     any other value with `FATAL: Invalid ozone platform`, so `auto` belongs to
+     the hint switch only);
   2. `ELECTRON_OZONE_PLATFORM_HINT` env (Electron-native, passthrough);
   3. `SHELVE_DISPLAY_BACKEND=x11|wayland|auto` (app-specific, documented in README).
 - X11 session: rely on Chromium reading the global scale (Xft.dpi / GTK

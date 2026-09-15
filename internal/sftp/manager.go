@@ -30,9 +30,9 @@ type TabProvider interface {
 	SSHClient(tabID string) (*ssh.Client, error)
 }
 
-// Emitter is a minimal Go→JS event sink (master plan §5). Structurally
-// satisfied by the wailsvc emitter; implementations must be safe for
-// concurrent use and must not block. Phase 5a emits nothing yet but the
+// Emitter is a minimal backend→renderer event sink (master plan §5).
+// Structurally satisfied by the bridge emitter; implementations must be safe
+// for concurrent use and must not block. Phase 5a emits nothing yet but the
 // manager keeps the reference for the Phase 5b progress events.
 type Emitter interface {
 	Emit(event string, payload any)

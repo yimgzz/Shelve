@@ -8,14 +8,16 @@ TypeScript + Vite renderer. Sessions live in an encrypted vault (Argon2id +
 AES-256-GCM) under `$XDG_CONFIG_HOME/shelve`; no cloud, no telemetry, no
 accounts.
 
-**Status:** v1.1 — feature-complete (Phases 1–5d done, final gate closed) plus
-post-v1 refinements (terminal mouse behavior P003, system monitor P004). The
+**Status:** v2.0 — **Electron architecture**. The Go backend runs as a child
+process of Electron main; the renderer is vanilla TypeScript + Vite + xterm.js
+talking to the backend over a token-gated loopback RPC/terminal WebSocket. The
 app is a working SSH session manager: encrypted vault, session tree + live
-search, terminal tabs, an SFTP browser that is **enabled by default**
-(browse / upload / download / mkdir / rename / delete /
+search, terminal tabs, an SFTP browser in a right-hand panel that is **enabled
+by default** (browse / upload / download / mkdir / rename / delete /
 edit-text-with-system-editor), and a MobaXterm-style **system monitor bar**
 under the terminal (hostname / CPU / RAM / network / uptime / disk — enabled
-by default). Roadmap: `plans/` (master plan + phase plans).
+by default). Roadmap: `plans/` (Electron master plan + migration roadmap + E1–E7
+phase plans).
 
 ## Prerequisites
 
@@ -29,8 +31,8 @@ by default). Roadmap: `plans/` (master plan + phase plans).
   libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3
   libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libxss1 libxtst6
   libx11-xcb1 libxext6 libxrender1 libxi6 libxcursor1 libxshmfence1 fontconfig
-  libsecret-1-0`. No GTK4/WebKit runtime is needed (the old WebKit-based stack
-  is gone). The authoritative list is `scripts/host-runtime-libs.txt` (shared
+  libsecret-1-0`. No system webview runtime is needed — Electron bundles its
+  own Chromium. The authoritative list is `scripts/host-runtime-libs.txt` (shared
   with the `make run` hint and the AppImage smoke test).
 - The **AppImage bundles Chromium and its own runtime libraries**, so it needs
   no distro packages beyond the stock desktop libraries listed above (see
@@ -113,12 +115,11 @@ If the window fails to open under `make dev`:
   appended **last** — e.g. `nano` or `xdg-open` work as-is; for an editor with
   flags use something like `code --wait`. The app re-uploads automatically
   once the edited copy has been stable for 3 s.
-- **SFTP scope (v1):** the left panel replaces the session tree while the
-  active session is ready — browse, upload, download, mkdir, rename, delete,
-  and "edit text file with system editor". Drag & drop uploads are **out of
-  scope for v1** (D4). The browser is on by default; use **[Sessions]** /
-  **[SFTP]** in the left panel to switch views, and the path bar to jump to
-  any directory.
+- **SFTP scope (v1):** the browser lives in a right-hand panel beside the
+  terminal while the active session is ready — browse, upload, download, mkdir,
+  rename, delete, and "edit text file with system editor". Drag & drop uploads
+  are **out of scope for v1** (D4). The browser is on by default; the `×` in the
+  panel header closes it and the left toolbar's **[SFTP]** button reopens it.
 
 ## Packaging (AppImage)
 
@@ -141,8 +142,8 @@ What is bundled (via `electron-builder --linux AppImage`):
 Deliberately *not* bundled (provided by the host desktop): glibc/libstdc++, the
 GTK3/X11/Wayland client libraries, the font stack, and the GPU drivers
 (GL/EGL/drm/gbm — these must stay host-provided). The AppImage needs **no**
-GTK4/WebKit packages; Electron ships its own Chromium and links only the stock
-desktop libraries listed in [Prerequisites](#prerequisites).
+GTK4 or other system webview packages; Electron ships its own Chromium and links
+only the stock desktop libraries listed in [Prerequisites](#prerequisites).
 
 ```sh
 make appimage             # -> bin/shelve-<version>-x86_64.AppImage
@@ -171,9 +172,9 @@ make appimage-check       # headless payload + self-containment verification
 ## SFTP browser
 
 The SFTP browser is **enabled by default**. With a connected (ready) tab
-active, the left panel shows the browser rooted at the remote `$HOME`.
-Disable or re-enable it with **Ctrl+Shift+E** or Settings → General → "SFTP
-browser".
+active, it appears in a **right-hand panel** beside the terminal, rooted at the
+remote `$HOME`. Disable or re-enable it with **Ctrl+Shift+E** or Settings →
+General → "SFTP browser".
 
 - **Path bar:** the header shows the current remote directory in an editable
   field. Press **Enter** to navigate: type an absolute path (`/etc`), a
@@ -185,11 +186,12 @@ browser".
   backend refuses files >2 MiB or with binary content — use *Download…* for
   those); right-click rows for Edit as text / Download / Upload to here / New
   folder / Rename / Delete. The footer shows live transfer progress.
-- **Sessions ↔ SFTP:** a **[Sessions]** button in the panel header switches
-  the left panel back to the session tree; the toolbar's **[SFTP]** button
-  returns to the browser. Connecting a session, or activating a ready tab,
-  auto-shows the browser. When it is enabled but no session is ready, the
-  tree shows with a hint line.
+- **Panel & session tree:** the session tree always stays in the left panel. The
+  `×` in the SFTP header closes the right panel; the toolbar's **[SFTP]** button
+  reopens it (visible when the setting is on, a ready tab exists, and the panel
+  is closed). Connecting a session, or activating a ready tab, auto-shows the
+  browser. When it is enabled but no session is ready, the tree shows with a
+  hint line.
 
 ## System monitor bar
 

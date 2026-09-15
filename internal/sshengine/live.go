@@ -21,12 +21,12 @@ import (
 // Batching / backpressure parameters (master plan §2 A6, §5).
 const (
 	// batchInterval: flush pending output on this tick. Kept at the A6
-	// contract value: each terminal:data event crosses the Wails v3 event
-	// pipeline (mailbox goroutine → GTK main loop → webkit eval → JS), so a
-	// shorter tick under sustained output (tail -f style) multiplies that
-	// per-event churn and can exhaust process threads (pthread_create
-	// EAGAIN). Interactive latency is served by the fast path below, not by
-	// a shorter tick.
+	// contract value: output normally rides the binary /terminal WebSocket,
+	// and the terminal:data fallback event crosses the RPC event fan-out and
+	// the JS main thread, so a shorter tick under sustained output (tail -f
+	// style) multiplies that per-event churn and can exhaust process threads
+	// (pthread_create EAGAIN). Interactive latency is served by the fast path
+	// below, not by a shorter tick.
 	batchInterval = 50 * time.Millisecond
 	// batchBytes: flush pending output once it reaches this size. Raised from
 	// 16 KB (plan phase-4c allows tuning the write-coalescing granularity):

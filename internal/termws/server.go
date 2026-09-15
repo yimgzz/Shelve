@@ -28,12 +28,9 @@ type OutputFallback func(tabID string, data []byte)
 var fallbackGrace = 3 * time.Second
 
 // Server is the terminal I/O WebSocket endpoint. It owns a loopback TCP
-// listener started by Start — a WebSocket cannot be spoken over the
-// wails:// custom URI scheme the webview loads (Wails' own stream transport
-// documents exactly this), so a real listener is the ONLY way to get a
-// socket into the page. The frontend discovers the bound address with a
-// plain GET /termws-port on the wails:// asset handler (served via
-// ServeHTTP) and connects to ws://127.0.0.1:<port>/terminal.
+// listener started by Start (the bridge mounts ServeHTTP listener-less and
+// provisions the bound address to the renderer through the Electron
+// handshake); the renderer connects to ws://127.0.0.1:<port>/terminal.
 //
 // It implements the engine's TerminalDataSink: OnTerminalData blocks until
 // a connection is active and then delivers — blocking IS the flow control
@@ -80,10 +77,9 @@ func (s *Server) SetFallback(fn OutputFallback) {
 }
 
 // Start binds the loopback listener (addr should be 127.0.0.1:0 for an
-// ephemeral port) and serves /terminal WebSocket upgrades on it; the same
-// ServeHTTP also answers GET /termws-port for the frontend to learn the
-// address. Returns the bound address. Idempotent: a second call returns the
-// stored address without re-binding.
+// ephemeral port) and serves /terminal WebSocket upgrades on it. Returns the
+// bound address. Idempotent: a second call returns the stored address without
+// re-binding.
 func (s *Server) Start(addr string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -114,23 +110,14 @@ func (s *Server) Start(addr string) (string, error) {
 	return s.addr, nil
 }
 
-// Addr returns the bound loopback address, or "" if Start has not succeeded.
-func (s *Server) Addr() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.addr
-}
-
-// ServeHTTP handles the endpoints on whichever transport it is mounted on:
+// ServeHTTP handles the terminal endpoint on whichever transport it is
+// mounted on:
 //
-//   - /termws-port — GET, returns the loopback address as plain text. Served
-//     on the wails:// asset handler so the webview can provision the socket.
-//   - /terminal — upgrades to the terminal WebSocket (on the loopback
-//     listener in production; any other path is a plain 404).
+//   - /terminal — upgrades to the terminal WebSocket (mounted by the bridge
+//     on the token-gated loopback listener in production; any other path is a
+//     plain 404).
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-	case "/termws-port":
-		s.handlePort(w, r)
 	case "/terminal":
 		s.handleUpgrade(w, r)
 	default:
@@ -138,28 +125,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handlePort(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	addr := s.Addr()
-	if addr == "" {
-		http.Error(w, "termws: not listening", http.StatusServiceUnavailable)
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte(addr))
-}
-
 func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
-	// Origin check (master plan §8.9): the page origin of the shell may be
-	// the custom scheme (host part varies by build — wails://* covers it),
-	// the Electron renderer loading a local file, or a loopback dev server.
-	// coder/websocket rejects origins it cannot parse into a host, so strip
-	// the two opaque forms first:
-	//   * "null"    — how WebKitGTK may serialize the page origin;
+	// Origin check (master plan §8.9): the renderer loads a local file or a
+	// loopback dev server, so its page origin is the opaque form or
+	// file:///http://127.0.0.1. coder/websocket rejects origins it cannot
+	// parse into a host, so strip the opaque form first:
+	//   * "null"    — an opaque page origin;
 	//   * "file://" — how Chromium serializes a loadFile page origin
 	//                 (Electron's renderer).
 	// Everything else that is not one of the patterns — e.g. any
@@ -170,7 +141,7 @@ func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		r.Header.Del("Origin")
 	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"wails://*", "localhost:*", "127.0.0.1:*"},
+		OriginPatterns: []string{"localhost:*", "127.0.0.1:*"},
 	})
 	if err != nil {
 		s.mu.Lock()

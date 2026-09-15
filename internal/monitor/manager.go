@@ -10,10 +10,10 @@
 // output — a 2 s exec on the live connection previously stalled `tail -f`
 // style output for up to seconds (P004 fix).
 //
-// Layering follows master plan §5/§11: the Manager talks to the engine only
-// through the structural Dialer interface and never imports wailsvc or the
-// engine. Events flow through an Emitter wired by the composition root. Only
-// the ACTIVE tab is monitored — the frontend drives lifecycle via
+// Layering follows master plan §5: the Manager talks to the engine only
+// through the structural Dialer interface and never imports the service or
+// bridge packages. Events flow through an Emitter wired by the composition
+// root. Only the ACTIVE tab is monitored — the frontend drives lifecycle via
 // Start/Stop (plan P004 D2).
 package monitor
 
@@ -72,9 +72,10 @@ type Dialer interface {
 	DialMonitorClient(tabID string) ([]*ssh.Client, error)
 }
 
-// Emitter is a minimal Go→JS event sink (master plan §5). Structurally
-// satisfied by the wailsvc emitter; implementations must be safe for
-// concurrent use and must not block — Emit is called from tick goroutines.
+// Emitter is a minimal backend→renderer event sink (master plan §5).
+// Structurally satisfied by the bridge emitter; implementations must be safe
+// for concurrent use and must not block — Emit is called from tick
+// goroutines.
 type Emitter interface {
 	Emit(event string, payload any)
 }

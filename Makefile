@@ -194,15 +194,13 @@ unseed: ensure-image ## Remove the seeded vault.json + known_hosts (keeps settin
 	./$(SEED_BIN) -unseed
 
 # ----------------------------------------------------------------- lint ---
-# Note: build/ is excluded from gofmt — it holds historical platform assets
-# that are not gofmt-clean upstream (removed in E6).
 
 .PHONY: lint
 lint: ensure-image node-deps ## gofmt + go vet (container) + electron & renderer tsc --noEmit
 	$(DOCKER_RUN) $(IMAGE) sh -c '\
 		set -e; \
 		cd /app; \
-		unformatted=$$(gofmt -l . | grep -v "^build/" || true); \
+		unformatted=$$(gofmt -l . || true); \
 		if [ -n "$$unformatted" ]; then echo "gofmt: files need formatting:"; echo "$$unformatted"; exit 1; fi; \
 		go vet ./...; \
 		npm run typecheck'

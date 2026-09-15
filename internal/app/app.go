@@ -23,8 +23,8 @@ import (
 	"shelve/internal/vault"
 )
 
-// Version is the application version. Keep in sync with build/config.yml
-// and build/linux/nfpm/nfpm.yaml.
+// Version is the application version. Keep in sync with the root
+// package.json `version` (master plan §7).
 const Version = "0.1.0"
 
 // exitShutdownTimeout bounds the engine teardown inside Shutdown on

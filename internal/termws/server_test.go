@@ -254,51 +254,6 @@ func TestStartBindsLoopbackAndServes(t *testing.T) {
 	}
 }
 
-func TestTermWSPortEndpoint(t *testing.T) {
-	s, base := startServer(t)
-
-	// Not started yet: the endpoint reports 503.
-	resp, err := http.Get(base + "/termws-port")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status before start = %d, want 503", resp.StatusCode)
-	}
-
-	addr, err := s.Start("127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	resp, err = http.Get(base + "/termws-port")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	buf := new(bytes.Buffer)
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
-		t.Fatal(err)
-	}
-	if got := buf.String(); got != addr {
-		t.Fatalf("address = %q, want %q", got, addr)
-	}
-
-	// Non-GET is rejected.
-	req, _ := http.NewRequest(http.MethodPost, base+"/termws-port", nil)
-	r2, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r2.Body.Close()
-	if r2.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("POST status = %d, want 405", r2.StatusCode)
-	}
-}
-
 func TestCloseStopsLoopbackListener(t *testing.T) {
 	s := NewServer()
 	addr, err := s.Start("127.0.0.1:0")
@@ -328,17 +283,7 @@ func TestOriginPolicy(t *testing.T) {
 		t.Fatal("foreign origin was accepted")
 	}
 
-	// The wails:// custom-scheme page origin must be accepted.
-	c, _, err := websocket.Dial(ctx, base+"/terminal", &websocket.DialOptions{
-		HTTPHeader: http.Header{"Origin": []string{"wails://wails"}},
-	})
-	if err != nil {
-		t.Fatalf("wails:// origin rejected: %v", err)
-	}
-	defer c.Close(websocket.StatusNormalClosure, "")
-
-	// An opaque ("null") origin — how WebKitGTK may serialize the page
-	// origin — must be accepted too.
+	// An opaque ("null") page origin must be accepted too.
 	c2, _, err := websocket.Dial(ctx, base+"/terminal", &websocket.DialOptions{
 		HTTPHeader: http.Header{"Origin": []string{"null"}},
 	})

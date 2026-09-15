@@ -7,9 +7,20 @@ A lightweight, fast, fully local SSH session manager. Go backend
 xterm.js), no Electron. Sessions live in an encrypted vault (Argon2id +
 AES-256-GCM) under `$XDG_CONFIG_HOME/shelve`.
 
-**Status: v1.1 — feature-complete.** Phases 1–5c of the roadmap are done and
-the final gate is closed. The app is a working SSH session manager (encrypted
-vault, session tree + live search, terminal tabs, optional SFTP browser).
+**Status: v1.1 — feature-complete (Wails v3).** Phases 1–5c of the Wails
+roadmap are done and the final gate is closed. The app is a working SSH session
+manager (encrypted vault, session tree + live search, terminal tabs, optional
+SFTP browser).
+
+> **Planned migration (2026-09-15): Wails v3 → Electron.** A full switch to
+> Electron/Chromium is planned; the Go domain layer is preserved and only the
+> GUI substrate changes. The sections below still describe the **currently
+> shipped Wails app** — keep following them for work on the current tree. For
+> migration work, the Electron master plan and E1–E7 phase plans are
+> authoritative and E6 fully rewrites this file. Documented in
+> `plans/1789467100000-master-plan.md` and
+> `plans/1789467100000-electron-migration-roadmap.md`. Linux only: `make build &&
+> make run` and `make appimage` (the `appimage-alt` pipeline is removed).
 
 ---
 
@@ -20,8 +31,11 @@ The project is driven by a detailed, single-source-of-truth planning system in
 
 | Reference | File | Contents |
 |---|---|---|
-| Master plan | [`plans/1787912690309-master-plan.md`](plans/1787912690309-master-plan.md) | Architecture, data model, interfaces, build strategy, security model, roadmap index (§1–§12). |
+| Master plan (shipped, Wails v3) | [`plans/1787912690309-master-plan.md`](plans/1787912690309-master-plan.md) | Architecture, data model, interfaces, build strategy, security model, roadmap index (§1–§12). |
 | Phase plans | `plans/*.md` | Per-phase task lists, exit criteria, QA checklists. |
+| Master plan (planned, Electron) | [`plans/1789467100000-master-plan.md`](plans/1789467100000-master-plan.md) | Electron architecture, process/RPC model, HiDPI/GPU model, security, build, acceptance (§1–§12). |
+| Migration roadmap | [`plans/1789467100000-electron-migration-roadmap.md`](plans/1789467100000-electron-migration-roadmap.md) | Wails→Electron strategy, transport contract, phase index E1–E7, cross-cutting gates and risks. |
+| Migration phases | `plans/1789467200000-electron-e1-*.md` … `plans/1789467800000-electron-e7-*.md` | Per-phase backend bridge, Electron shell/build, frontend transport, HiDPI/GPU, packaging, legacy cleanup, acceptance. |
 
 Every plan references the master plan sections (`§`) that must be read before
 implementing. **Follow the "read the §s before starting" instructions at the top

@@ -13,7 +13,7 @@
 //
 // The router only acts while the vault is unlocked (no tree/tabs when locked).
 
-import { AppService } from "../../bindings/shelve/internal/wailsvc";
+import { AppService } from "../rpc";
 import { store } from "../store";
 import { focusSearch } from "../components/search";
 import {

@@ -1,29 +1,16 @@
 # Build output
 bin/
 
-# Frontend (wails-generated bindings are never committed)
+# Electron main/preload bundle (esbuild)
+dist-electron/
+
+# Frontend bundle (Vite) + JS dependencies — never committed
 frontend/dist/
-frontend/bindings/
 node_modules/
-frontend/node_modules/
 
 # Runtime scratch dir (SFTP edit temps, master plan §4)
 tmp/
 
-# Wails-generated per-machine / build tooling artifacts
-.task
-build/linux/appimage/build
-build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
-build/ios/xcode/overlay.json
-build/ios/xcode/gen/
-build/android/overlay.json
-build/android/gen/
-build/linux/appimage/shelve
-build/linux/appimage/shelve.png
-
 # OS noise
 .DS_Store
 *.swp
-
-**/**/**/.gradle
-**/**/**/problems-report.html

@@ -5,7 +5,7 @@ import "fmt"
 // GenerateFixture builds a deterministic tree payload with the given number
 // of sessions spread over 10 top-level folders with 2 subfolders each
 // (30 folders total), plus a few root-level sessions. It is test-only
-// (master plan §9 perf smoke) and exported so store/wailsvc tests can
+// (master plan §9 perf smoke) and exported so store/api tests can
 // reuse it.
 func GenerateFixture(sessionCount int) Payload {
 	folders := make([]Folder, 0, 30)

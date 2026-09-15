@@ -10,10 +10,10 @@
 // output — a 2 s exec on the live connection previously stalled `tail -f`
 // style output for up to seconds (P004 fix).
 //
-// Layering follows master plan §5/§11: the Manager talks to the engine only
-// through the structural Dialer interface and never imports wailsvc or the
-// engine. Events flow through an Emitter wired by the composition root. Only
-// the ACTIVE tab is monitored — the frontend drives lifecycle via
+// Layering follows master plan §5: the Manager talks to the engine only
+// through the structural Dialer interface and never imports the service or
+// bridge packages. Events flow through an Emitter wired by the composition
+// root. Only the ACTIVE tab is monitored — the frontend drives lifecycle via
 // Start/Stop (plan P004 D2).
 package monitor
 
@@ -58,6 +58,11 @@ const (
 	DefaultInterval        = 2 * time.Second
 	DefaultExecTimeout     = 5 * time.Second
 	maxConsecutiveFailures = 5
+	// dfRefreshTicks is how many ticks pass between full `df -h` listings
+	// (plan Phase 4.2). The other ticks run the core script only and reuse
+	// the cached listing; every mount's df output is otherwise re-fetched and
+	// re-serialized into JSON every 2 s for no visible benefit.
+	dfRefreshTicks = 5
 )
 
 // Dialer opens a DEDICATED SSH connection chain for a tab's monitoring.
@@ -72,9 +77,10 @@ type Dialer interface {
 	DialMonitorClient(tabID string) ([]*ssh.Client, error)
 }
 
-// Emitter is a minimal Go→JS event sink (master plan §5). Structurally
-// satisfied by the wailsvc emitter; implementations must be safe for
-// concurrent use and must not block — Emit is called from tick goroutines.
+// Emitter is a minimal backend→renderer event sink (master plan §5).
+// Structurally satisfied by the bridge emitter; implementations must be safe
+// for concurrent use and must not block — Emit is called from tick
+// goroutines.
 type Emitter interface {
 	Emit(event string, payload any)
 }
@@ -224,16 +230,29 @@ func (m *Manager) tick(ctx context.Context, tabID string) {
 	var (
 		prev   *rawSample
 		prevAt time.Time
+		dfText string // cached full `df -h` listing (plan Phase 4.2)
+		ticks  int
 	)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
+		// Full `df -h` listing every dfRefreshTicks ticks; core-only script
+		// in between, reusing the cached listing (payload shape unchanged,
+		// tooltip may lag by up to dfRefreshTicks ticks).
+		full := ticks%dfRefreshTicks == 0
+		script := collectScriptLight
+		if full {
+			script = collectScript
+		}
 		execCtx, cancel := context.WithTimeout(ctx, timeout)
-		out, err := m.runExec(execCtx, tabID, collectScript)
+		out, err := m.runExec(execCtx, tabID, script)
 		cancel()
+		ticks++
 		switch {
 		case err != nil:
 			// A Stop/restart canceled ctx while the exec was in flight
@@ -255,6 +274,11 @@ func (m *Manager) tick(ctx context.Context, tabID string) {
 			if perr != nil {
 				break // malformed output: skip this tick
 			}
+			if full {
+				dfText = cur.DfText
+			} else {
+				cur.DfText = dfText
+			}
 			failures = 0
 			now := time.Now()
 			p := buildPayload(tabID, cur, prev, now.Sub(prevAt))
@@ -264,7 +288,7 @@ func (m *Manager) tick(ctx context.Context, tabID string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-ticker.C:
 		}
 	}
 }

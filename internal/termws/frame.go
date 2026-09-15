@@ -1,20 +1,21 @@
 // Package termws implements the plan P005 terminal I/O transport: a
-// WebSocket carrying raw terminal bytes between the engine and the webview,
-// bypassing the Wails v3 event bridge — which starves keyboard input
-// (promise-chain microtask starvation) and churns goroutines/threads under
-// sustained output floods (pthread_create EAGAIN).
+// WebSocket carrying raw terminal bytes between the engine and the renderer,
+// bypassing the RPC event path — which would starve keyboard input
+// (microtask starvation) and churn goroutines/threads under sustained output
+// floods (pthread_create EAGAIN).
 //
-// The webview loads from the wails:// custom URI scheme, which cannot carry
-// WebSockets, so the socket rides a dedicated 127.0.0.1 loopback listener
-// started by Server.Start; the frontend discovers the port via GET
-// /termws-port on the wails:// asset handler (see ServeHTTP) and connects
-// with ws://127.0.0.1:<port>/terminal. Exactly one connection is active
-// (single-window app, master plan A7); a second upgrade is rejected.
+// The socket rides a dedicated 127.0.0.1 loopback listener started by
+// Server.Start; the bridge mounts ServeHTTP listener-less and provisions the
+// bound address to the renderer through the Electron handshake (see
+// internal/bridge), which connects with ws://127.0.0.1:<port>/terminal.
+// Exactly one connection is active (single-window app, master plan A7); a
+// second upgrade is rejected.
 //
 // Security (master plan §8.9, documented exception): the listener is bound
 // to loopback only, the port is random per run and never leaves the app,
-// Origin is validated against the wails:// page origin (plus loopback and
-// opaque origins), and frames are capped.
+// Origin is validated against the loopback page origins (plus the opaque
+// origin), the per-run bridge token gates the RPC endpoint, and frames are
+// capped.
 package termws
 
 import (

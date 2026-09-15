@@ -75,6 +75,38 @@ func TestWriteFileCreates0600Content(t *testing.T) {
 	}
 }
 
+// TestWriteFileAtomicOutsidePreservesDirMode covers the configuration-export
+// path: the file is written atomically 0600, but the target directory's mode is
+// left untouched (unlike WriteFileAtomic, which re-asserts 0700).
+func TestWriteFileAtomicOutsidePreservesDirMode(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomicOutside(dir, "cfg.shelve", []byte("data")); err != nil {
+		t.Fatalf("WriteFileAtomicOutside: %v", err)
+	}
+
+	fi, err := os.Stat(filepath.Join(dir, "cfg.shelve"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != FilePerm {
+		t.Fatalf("file perms = %o, want %o", fi.Mode().Perm(), FilePerm)
+	}
+	di, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if di.Mode().Perm() != 0o755 {
+		t.Fatalf("dir perms = %o, want 755 (untouched)", di.Mode().Perm())
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "cfg.shelve"))
+	if err != nil || string(data) != "data" {
+		t.Fatalf("content = %q, %v", data, err)
+	}
+}
+
 func TestWriteFileAtomicRenameFailureLeavesStateIntact(t *testing.T) {
 	isolatedXDG(t)
 	dir := t.TempDir()
@@ -403,7 +435,7 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 	for k := range m {
 		switch k {
 		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "monitoringEnabled",
-			"terminal", "textEditorCommand", "sftpInitialPath", "window":
+			"terminal", "textEditorCommand", "sftpInitialPath", "window", "ui":
 		default:
 			t.Fatalf("unexpected settings key %q", k)
 		}
@@ -470,5 +502,40 @@ func TestThemeVariantNormalizesWhitespace(t *testing.T) {
 	}
 	if got.ThemeVariant != "dracula" {
 		t.Fatalf("themeVariant = %q, want %q", got.ThemeVariant, "dracula")
+	}
+}
+
+// TestUISettingsZoomLevel (phase E4 T7): the additive `ui.zoomLevel` field is
+// absent-safe (a pre-E4 settings.json decodes to 0 = no zoom) and is clamped
+// to the renderer's supported ±8 range.
+func TestUISettingsZoomLevel(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{"absent ui → 0", `{"theme":"dark"}`, 0},
+		{"absent zoomLevel → 0", `{"ui":{}}`, 0},
+		{"explicit value kept", `{"ui":{"zoomLevel":3}}`, 3},
+		{"clamped high", `{"ui":{"zoomLevel":99}}`, 8},
+		{"clamped low", `{"ui":{"zoomLevel":-99}}`, -8},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolatedXDG(t)
+			if err := os.MkdirAll(Path(), DirPerm); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(File(SettingsFileName), []byte(tc.raw), FilePerm); err != nil {
+				t.Fatal(err)
+			}
+			got, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got.UI.ZoomLevel != tc.want {
+				t.Fatalf("ui.zoomLevel = %d, want %d", got.UI.ZoomLevel, tc.want)
+			}
+		})
 	}
 }

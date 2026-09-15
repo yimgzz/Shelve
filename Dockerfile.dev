@@ -1,42 +1,91 @@
-# shelve-dev — the complete build toolchain for shelve.
-# The developer host needs Docker only (master plan §7).
+# shelve-dev — the complete build toolchain for shelve (master plan §7, phase E2).
+# The developer host needs Docker only: Go + Node/npm + the Electron/Chromium
+# runtime libraries + electron-builder all live here.
+
 FROM golang:1.25-trixie
 
-# Pinned Wails v3 CLI version (master plan §3: pin an exact tagged version).
-ARG WAILS3_VERSION=v3.0.0-beta.20
-
-# --no-install-recommends keeps the image lean.
-# Note: libglib2.0-0t64 is the Debian 13 (trixie) name for libglib2.0-0 (t64 transition).
-# Note: appimagetool (AppImage packaging, plan P004) hard-requires `file`.
+# The libnss3… set is the Chromium RUNTIME half (the npm-downloaded Electron
+# binary carries no system libraries), so the container can also run the app
+# under xvfb for the E2 smoke check. trixie uses the t64 package names for the
+# glib/atk/cups/asound/gtk3 ABI transition. `fakeroot libarchive-tools zstd
+# xdg-utils` are electron-builder's packaging helpers (used from E5 on).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
-        libgtk-4-dev \
-        libglib2.0-dev-bin \
-        libwebkitgtk-6.0-dev \
-        libdbus-1-dev \
-        nodejs \
-        npm \
-        fuse3 \
-        libglib2.0-0t64 \
         ca-certificates \
-        x11-apps \
-        x11-utils \
+        curl \
+        git \
         file \
+        xz-utils \
+        libnss3 \
+        libnspr4 \
+        libatk1.0-0t64 \
+        libatk-bridge2.0-0t64 \
+        libatspi2.0-0t64 \
+        libgtk-3-0t64 \
+        libcups2t64 \
+        libdrm2 \
+        libgbm1 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libpango-1.0-0 \
+        libcairo2 \
+        libasound2t64 \
+        libxss1 \
+        libxtst6 \
+        libsecret-1-0 \
+        libx11-xcb1 \
+        libxext6 \
+        libxrender1 \
+        libxi6 \
+        libxcursor1 \
+        libxshmfence1 \
+        fontconfig \
+        fakeroot \
+        libarchive-tools \
+        zstd \
+        xdg-utils \
+        xvfb \
+        xauth \
+        x11-utils \
  && rm -rf /var/lib/apt/lists/*
 
-# Pin the Wails v3 CLI next to the rest of the toolchain.
-RUN go install github.com/wailsapp/wails/v3/cmd/wails3@${WAILS3_VERSION} \
- && ln -sf /go/bin/wails3 /usr/local/bin/wails3
+# Node.js is installed from the official nodejs.org tarball, NOT Debian trixie.
+# Decision (E2 task 6): trixie ships nodejs 20.19.2 + npm 9.2.0, which satisfies
+# Vite 8 (^20.19.0 || >=22.12.0) but NOT Electron 42.10.0's own tooling —
+# `@electron/get@5`, `@electron/rebuild@4` and `node-abi@4` all declare
+# `node >= 22.12.0` (verified with `npm install --package-lock-only`, which
+# emitted EBADENGINE for each). Node 24 LTS is also the line Electron 42 bundles
+# (24.18.1), so the toolchain matches the runtime. The tarball is verified
+# against the release's SHASUMS256.txt before extraction.
+ARG NODE_VERSION=v24.21.0
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) node_arch=x64 ;; \
+        arm64) node_arch=arm64 ;; \
+        *) echo "unsupported architecture" >&2; exit 1 ;; \
+    esac; \
+    base="node-${NODE_VERSION}-linux-${node_arch}"; \
+    curl -fsSL --proto '=https' --tlsv1.2 "https://nodejs.org/dist/${NODE_VERSION}/${base}.tar.xz" -o "/tmp/${base}.tar.xz"; \
+    curl -fsSL --proto '=https' --tlsv1.2 "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt" -o /tmp/SHASUMS256.txt; \
+    (cd /tmp && grep " ${base}.tar.xz$" SHASUMS256.txt | sha256sum -c -); \
+    tar -xJf "/tmp/${base}.tar.xz" -C /usr/local --strip-components=1; \
+    rm -f "/tmp/${base}.tar.xz" /tmp/SHASUMS256.txt; \
+    node --version; \
+    npm --version
+
+# Electron / electron-builder download caches (mounted as named volumes by the
+# Makefile so repeated builds don't re-fetch the ~100 MB runtime).
+ENV ELECTRON_CACHE=/root/.cache/electron \
+    ELECTRON_BUILDER_CACHE=/root/.cache/electron-builder
 
 # The repo is mounted at /app, owned by the host user, while the container
-# runs as root: declare /app a safe git directory so `go build`'s VCS
-# stamping and git calls work (git >= 2.35.2 "dubious ownership" guard).
+# runs as root: declare /app a safe git directory so `go build`'s VCS stamping
+# and git calls work (git >= 2.35.2 "dubious ownership" guard).
 RUN git config --system --add safe.directory /app
 
 WORKDIR /app
-
-# Wails subcommands are the default entrypoint (`docker run shelve-dev build`, ...);
-# the Makefile passes --entrypoint explicitly for non-wails commands.
-ENTRYPOINT ["wails3"]

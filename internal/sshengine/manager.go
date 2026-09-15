@@ -6,8 +6,9 @@
 // Disconnect/Reconnect/Shutdown. Local port forwards (ssh:forward) and
 // TestConnection land in Phase 3d.
 //
-// The engine must NOT import internal/wailsvc: wailsvc imports the
-// engine and adapts its Emitter to the Wails runtime (master plan §11).
+// The engine must NOT import internal/api or internal/bridge: the service
+// layer imports the engine and adapts its Emitter to the RPC event fan-out
+// (master plan §5).
 package sshengine
 
 import (
@@ -134,9 +135,9 @@ type ToastPayload struct {
 	Message string `json:"message"`
 }
 
-// Emitter delivers Go→JS events. Structurally satisfied by the
-// wailsvc emitter types; the engine never imports wailsvc (dependency
-// direction, master plan §11). Implementations must be safe for
+// Emitter delivers backend→renderer events. Structurally satisfied by the
+// api/bridge emitter types; the engine never imports them (dependency
+// direction, master plan §5). Implementations must be safe for
 // concurrent use and must not block: they are called from engine
 // goroutines.
 type Emitter interface {
@@ -148,6 +149,11 @@ type Emitter interface {
 // root when a dedicated transport is wired; nil keeps the legacy emitter
 // path (headless tests unchanged). It MAY block — blocking is the intended
 // transport flow control that propagates backpressure to the pump.
+//
+// Ownership contract: the slice is only valid for the duration of the call.
+// Implementations must copy or serialize it before returning (termws copies
+// into a frame; the base64 fallback encodes immediately) — the pump recycles
+// the backing array for the next batch.
 type TerminalDataSink interface {
 	OnTerminalData(tabID string, data []byte)
 }

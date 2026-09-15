@@ -1,0 +1,31 @@
+# Electron/Chromium runtime libraries needed to run the unpacked build on a
+# minimal host (`make run`) — Debian/Ubuntu/ALT package names, one per line.
+# This is the single source of truth; it is referenced by the Makefile `run`
+# hint and by scripts/verify-appimage.sh's debian:13-slim smoke run.
+libnss3
+libnspr4
+libatk1.0-0
+libatk-bridge2.0-0
+libatspi2.0-0
+libgtk-3-0
+libcups2
+libdrm2
+libxkbcommon0
+libxcomposite1
+libxdamage1
+libxfixes3
+libxrandr2
+libgbm1
+libpango-1.0-0
+libcairo2
+libasound2
+libxss1
+libxtst6
+libx11-xcb1
+libxext6
+libxrender1
+libxi6
+libxcursor1
+libxshmfence1
+fontconfig
+libsecret-1-0

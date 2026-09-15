@@ -92,7 +92,7 @@ export function applyTheme(mode: ThemeMode, variant = ""): EffectiveTheme {
 }
 
 /** Re-apply the OS preference — used when system theme changes while in
- *  system mode (matchMedia listener or the Wails ThemeChanged event). */
+ *  system mode (the matchMedia listener installed by initTheme). */
 export function refreshFromSystem(): void {
     if (currentMode === "system") {
         applyTheme("system", currentVariant);
@@ -165,9 +165,9 @@ export function themeMode(): ThemeMode {
 
 /**
  * Initialize the theme from settings. In "system" mode it installs a
- * prefers-color-scheme change listener. Call once at bootstrap after
- * settings are loaded. The Wails ThemeChanged listener is wired in
- * main.ts (the single event owner) and calls refreshFromSystem().
+ * prefers-color-scheme change listener (phase E3: Chromium fires it under
+ * Electron, so no native theme event is needed). Call once at bootstrap
+ * after settings are loaded.
  */
 export function initTheme(settingsTheme: string, settingsVariant = ""): void {
     applyTheme(normalizeTheme(settingsTheme), settingsVariant);

@@ -1,8 +1,9 @@
 // Package app is the application composition root (master plan §5): it
 // wires config, vault and store and owns the master-password lifecycle
-// (unlock loads the tree, lock flushes + zeroizes). It must NOT import
-// the Wails API — all Wails usage stays in main.go and internal/wailsvc
-// (§11); Go→JS events go through the Emitter wired by main.go.
+// (unlock loads the tree, lock flushes + zeroizes). It must NOT import a
+// GUI toolkit; the services live in internal/api and are served by
+// internal/bridge, which also receives Go→JS events through the Emitter
+// wired by the entry point.
 package app
 
 import (
@@ -11,6 +12,7 @@ import (
 	"log"
 	"time"
 
+	"shelve/internal/api"
 	"shelve/internal/config"
 	"shelve/internal/monitor"
 	"shelve/internal/sftp"
@@ -19,18 +21,17 @@ import (
 	"shelve/internal/store"
 	"shelve/internal/termws"
 	"shelve/internal/vault"
-	"shelve/internal/wailsvc"
 )
 
-// Version is the application version. Keep in sync with build/config.yml
-// and build/linux/nfpm/nfpm.yaml.
+// Version is the application version. Keep in sync with the root
+// package.json `version` (master plan §7).
 const Version = "0.1.0"
 
 // exitShutdownTimeout bounds the engine teardown inside Shutdown on
 // app exit.
 const exitShutdownTimeout = 3 * time.Second
 
-// App is the composition root shared by all Wails services.
+// App is the composition root shared by all API services.
 type App struct {
 	vault     *vault.Vault
 	store     *store.Store
@@ -39,15 +40,16 @@ type App struct {
 	monMgr    *monitor.Manager
 	termwsSrv *termws.Server
 
-	appService        *wailsvc.AppService
-	vaultService      *wailsvc.VaultService
-	sessionService    *wailsvc.SessionService
-	credentialService *wailsvc.CredentialService
-	jumpHostService   *wailsvc.JumpHostService
-	terminalService   *wailsvc.TerminalService
-	sftpService       *wailsvc.SftpService
-	monitorService    *wailsvc.MonitorService
-	emitter           *wailsvc.LateEmitter
+	appService        *api.AppService
+	vaultService      *api.VaultService
+	sessionService    *api.SessionService
+	credentialService *api.CredentialService
+	jumpHostService   *api.JumpHostService
+	terminalService   *api.TerminalService
+	sftpService       *api.SftpService
+	monitorService    *api.MonitorService
+	transferService   *api.TransferService
+	emitter           *api.LateEmitter
 }
 
 // New constructs the app:
@@ -56,8 +58,8 @@ type App struct {
 //     → create pending, file present → locked pending);
 //  3. wires the store's debounced persistence callback to vault.Save.
 //
-// The Wails runtime does not exist yet at this point, so events flow
-// through a LateEmitter that main.go wires after the runtime is created.
+// The bridge does not exist yet at this point, so events flow through a
+// LateEmitter that the entry point wires once the bridge is constructed.
 func New() (*App, error) {
 	if _, err := config.Load(); err != nil {
 		return nil, err
@@ -70,7 +72,7 @@ func New() (*App, error) {
 	st := store.New(func(payload []byte) error {
 		return v.Save(payload)
 	})
-	emit := &wailsvc.LateEmitter{}
+	emit := &api.LateEmitter{}
 
 	kh, err := knownhosts.New(config.File(config.KnownHostsFileName))
 	if err != nil {
@@ -78,18 +80,16 @@ func New() (*App, error) {
 	}
 	engine := sshengine.New(emit, kh)
 
-	// Plan P005: raw terminal I/O rides a WebSocket instead of the Wails
-	// event bridge (input starvation + thread churn under output floods).
-	// The webview loads from the wails:// custom scheme, which cannot carry
-	// WebSockets, so the socket lives on a dedicated 127.0.0.1 loopback
-	// listener; the frontend learns the port via GET /termws-port on the
-	// asset handler. Here the server is wired as the engine's data sink and
-	// input path.
+	// Terminal bytes ride the plan P005 binary WebSocket, not the event
+	// transport: the bridge mounts this server listener-less at /terminal on
+	// its own loopback listener. Here the server is wired as the engine's
+	// data sink and input path; the listener itself is owned by the bridge.
 	termwsSrv := termws.NewServer()
 	termwsSrv.SetInputHandler(engine.WriteRaw)
-	// Safety net (plan P005): if the webview can never reach the loopback
+	// Safety net (plan P005): if the client can never reach the loopback
 	// socket, output falls back to the legacy terminal:data events instead
-	// of stalling every tab on a socket that will never arrive.
+	// of stalling every tab on a socket that will never arrive. The bridge
+	// routes those fallback events over /rpc.
 	termwsSrv.SetFallback(func(tabID string, data []byte) {
 		emit.Emit(sshengine.EventTerminalData, sshengine.TerminalDataPayload{
 			TabID: tabID,
@@ -97,9 +97,6 @@ func New() (*App, error) {
 		})
 	})
 	engine.SetDataSink(termwsSrv)
-	if _, err := termwsSrv.Start("127.0.0.1:0"); err != nil {
-		log.Printf("termws: loopback listener failed (%v); terminal I/O falls back to legacy events", err)
-	}
 
 	// SFTP per-tab clients ride on the engine's active connections (master
 	// plan §5). The manager is attached to the engine structurally and
@@ -133,66 +130,72 @@ func New() (*App, error) {
 		monMgr:            monMgr,
 		termwsSrv:         termwsSrv,
 		emitter:           emit,
-		appService:        wailsvc.NewAppService(Version),
-		vaultService:      wailsvc.NewVaultService(v, st, engine, sftpMgr, emit),
-		sessionService:    wailsvc.NewSessionService(st, v, engine, emit),
-		credentialService: wailsvc.NewCredentialService(st, v),
-		jumpHostService:   wailsvc.NewJumpHostService(st, v),
-		terminalService:   wailsvc.NewTerminalService(st, v, engine),
-		sftpService:       wailsvc.NewSftpService(v, sftpMgr),
-		monitorService:    wailsvc.NewMonitorService(v, monMgr),
+		appService:        api.NewAppService(Version),
+		vaultService:      api.NewVaultService(v, st, engine, sftpMgr, emit),
+		sessionService:    api.NewSessionService(st, v, engine, emit),
+		credentialService: api.NewCredentialService(st, v),
+		jumpHostService:   api.NewJumpHostService(st, v),
+		terminalService:   api.NewTerminalService(st, v, engine),
+		sftpService:       api.NewSftpService(v, sftpMgr),
+		monitorService:    api.NewMonitorService(v, monMgr),
+		transferService:   api.NewTransferService(st, v, engine, Version),
 	}, nil
 }
 
-// AppService returns the Wails-facing app service.
-func (a *App) AppService() *wailsvc.AppService {
+// AppService returns the app service.
+func (a *App) AppService() *api.AppService {
 	return a.appService
 }
 
-// VaultService returns the Wails-facing vault service.
-func (a *App) VaultService() *wailsvc.VaultService {
+// VaultService returns the vault service.
+func (a *App) VaultService() *api.VaultService {
 	return a.vaultService
 }
 
-// SessionService returns the Wails-facing session-tree service.
-func (a *App) SessionService() *wailsvc.SessionService {
+// SessionService returns the session-tree service.
+func (a *App) SessionService() *api.SessionService {
 	return a.sessionService
 }
 
-// CredentialService returns the Wails-facing credential service.
-func (a *App) CredentialService() *wailsvc.CredentialService {
+// CredentialService returns the credential service.
+func (a *App) CredentialService() *api.CredentialService {
 	return a.credentialService
 }
 
-// JumpHostService returns the Wails-facing saved-jump-host service.
-func (a *App) JumpHostService() *wailsvc.JumpHostService {
+// JumpHostService returns the saved-jump-host service.
+func (a *App) JumpHostService() *api.JumpHostService {
 	return a.jumpHostService
 }
 
-// TerminalService returns the Wails-facing terminal-tab service.
-func (a *App) TerminalService() *wailsvc.TerminalService {
+// TerminalService returns the terminal-tab service.
+func (a *App) TerminalService() *api.TerminalService {
 	return a.terminalService
 }
 
-// SftpService returns the Wails-facing SFTP service.
-func (a *App) SftpService() *wailsvc.SftpService {
+// SftpService returns the SFTP service.
+func (a *App) SftpService() *api.SftpService {
 	return a.sftpService
 }
 
-// MonitorService returns the Wails-facing system-monitor service.
-func (a *App) MonitorService() *wailsvc.MonitorService {
+// MonitorService returns the system-monitor service.
+func (a *App) MonitorService() *api.MonitorService {
 	return a.monitorService
 }
 
-// TerminalWS returns the plan P005 terminal I/O WebSocket server, mounted
-// by main.go on the app's HTTP transport at /terminal.
+// TransferService returns the configuration export/import service.
+func (a *App) TransferService() *api.TransferService {
+	return a.transferService
+}
+
+// TerminalWS returns the plan P005 terminal I/O WebSocket server. The
+// bridge mounts it listener-less at /terminal on its loopback listener.
 func (a *App) TerminalWS() *termws.Server {
 	return a.termwsSrv
 }
 
-// SetEmitter wires the Wails-backed event emitter. Called from main.go
-// after the runtime is constructed (before Run).
-func (a *App) SetEmitter(e wailsvc.Emitter) {
+// SetEmitter wires the transport-backed event emitter. Called from the
+// entry point once the bridge (or another Emitter) is constructed.
+func (a *App) SetEmitter(e api.Emitter) {
 	a.emitter.Set(e)
 }
 

@@ -1,7 +1,7 @@
 // store.ts — tiny typed pub/sub store (master plan §5).
 //
 // RULE: components subscribe to the store; they never call
-// `Events.On` directly. main.ts is the single owner of the Wails event
+// `events.on` directly. main.ts is the single owner of the rpc event
 // bus and routes every event here via set(). This keeps one source of
 // truth and prevents listener growth across lock/unlock cycles.
 //
@@ -15,150 +15,41 @@
 //
 // The store also owns the few user actions that mutate backend state
 // and must reconcile async results with the UI (connectSession,
-// closeTab): those bridge the Wails service bindings and the reactive
+// closeTab): those bridge the rpc service proxies and the reactive
 // state in one place so components stay presentation-only.
 
-import { CredentialService, JumpHostService, SessionService, TerminalService } from "../bindings/shelve/internal/wailsvc";
+import { AppService, CredentialService, JumpHostService, SessionService, TerminalService } from "./rpc";
+import type {
+    CredentialDTO,
+    NodeDTO,
+    SavedJumpHostDTO,
+    SessionDTO,
+    Settings,
+} from "./rpc/types";
 import { toast } from "./components/toasts";
+import { initTheme } from "./ui/theme";
+import { applyZoomLevel } from "./ui/zoom";
+
+// The wire contract lives in ONE place: rpc/types.ts mirrors the Go json
+// tags. These re-exports keep every existing `type X from "../store"` import
+// working without a second, drift-prone copy of the same shape.
+export type {
+    CredentialDTO,
+    CredentialInput,
+    JumpHostDTO,
+    NodeDTO,
+    SavedJumpHostDTO,
+    SavedJumpHostInput,
+    SearchResultDTO,
+    SessionDTO,
+    Settings,
+    SftpEntryDTO,
+    TerminalSettings,
+    WindowSettings,
+} from "./rpc/types";
 
 export type VaultState = "create" | "locked" | "unlocked";
 export type TabState = "connecting" | "ready" | "error" | "closed";
-
-export interface WindowSettings {
-    width: number;
-    height: number;
-    leftWidth: number;
-    /** Persisted SFTP right-panel width (0/absent → normalized to 320). */
-    sftpWidth: number;
-}
-
-export interface TerminalSettings {
-    fontFamily: string;
-    fontSize: number;
-    scrollback: number;
-}
-
-export interface Settings {
-   theme: string; // "system" | "light" | "dark" — the mode
-   /** Concrete palette id ("" = family default). Plan P001. */
-   themeVariant: string;
-   autoLockMinutes: number;
-    sftpBrowserEnabled: boolean;
-    /** Bottom-bar system monitor (plan P004). Defaults to ON. */
-    monitoringEnabled: boolean;
-    terminal: TerminalSettings;
-    textEditorCommand: string;
-    /** Global SFTP browser start path ("~" default). Plan P002. */
-    sftpInitialPath: string;
-    window: WindowSettings;
-}
-
-/** Session-tree node (secret-free read view, master plan §5). */
-export interface NodeDTO {
-    kind: "folder" | "session";
-    id: string;
-    name: string;
-    children: NodeDTO[];
-}
-
-/** Jump host read view. */
-export interface JumpHostDTO {
-    host: string;
-    port: number;
-    user: string;
-    authType: number;
-    hasPassword: boolean;
-    keyPath?: string;
-    /** Bastion-style hop (plan P009): last handshake, target-embedding. */
-    bastion?: boolean;
-}
-
-/** Session read view snapshot (stored per tab). */
-export interface SessionDTO {
-    id: string;
-    folderId: string;
-    name: string;
-    host: string;
-    port: number;
-    user: string;
-    authType: number;
-    hasPassword: boolean;
-    keyPath?: string;
-    jumpHosts: JumpHostDTO[];
-    extraArgs: string;
-    /** Per-session SFTP browser start path ("" = global default). Plan P002. */
-    sftpInitialPath?: string;
-    /**
-     * Optional reference to a named credential (plan P003). While set,
-     * the backend resolves User+Auth from the credential at connect/test
-     * time; the inline fields remain the fallback snapshot.
-     */
-    credentialId?: string;
-    /**
-     * Optional reference to a saved jump host (plan P006). While set, the
-     * backend replaces the whole inline jump chain with the saved host's
-     * hop at connect/test time; the inline rows remain the fallback
-     * snapshot.
-     */
-    jumpHostRef?: string;
-}
-
-/** Saved-credential read view (secret-free, plan P003 §4.3). */
-export interface CredentialDTO {
-    id: string;
-    name: string;
-    user: string;
-    authType: number;
-    hasPassword: boolean;
-    keyPath?: string;
-}
-
-/** Saved-credential write draft (password only flows INTO the vault). */
-export interface CredentialInput {
-    id?: string;
-    name: string;
-    user: string;
-    authType: number;
-    password?: string;
-    keyPath?: string;
-}
-
-/** Saved-jump-host read view (secret-free, plan P006). */
-export interface SavedJumpHostDTO {
-    id: string;
-    name: string;
-    host: string;
-    port: number;
-    user: string;
-    authType: number;
-    hasPassword: boolean;
-    keyPath?: string;
-    /** Bastion-style host (plan P009): last handshake, target-embedding. */
-    bastion?: boolean;
-}
-
-/** Saved-jump-host write draft (password only flows INTO the vault). */
-export interface SavedJumpHostInput {
-    id?: string;
-    name: string;
-    host: string;
-    port: number;
-    user: string;
-    authType: number;
-    password?: string;
-    keyPath?: string;
-    /** Bastion-style host (plan P009): last handshake, target-embedding. */
-    bastion?: boolean;
-}
-
-/** One flat live-search result (master plan §2 A9). */
-export interface SearchResultDTO {
-    id: string;
-    name: string;
-    host: string;
-    user: string;
-    folderPath: string;
-}
 
 export interface Tab {
     id: string;
@@ -177,16 +68,7 @@ export interface ForwardDTO {
     error?: string;
 }
 
-/** One SFTP listing row (mirrors wailsvc.SftpEntryDTO; master plan §5). */
-export interface SftpEntryDTO {
-    name: string;
-    isDir: boolean;
-    size: number;
-    /** RFC3339 string (Go time.Time over the wire). */
-    modTime: string;
-    /** Display hint for the row icon (📄 vs 📦); does not gate editing. */
-    textLike: boolean;
-}
+/** One SFTP listing row (SftpEntryDTO is defined in rpc/types.ts). */
 
 /** Cached latest state of one in-flight transfer (Phase 5c, sftp:progress). */
 export interface SftpTransfer {
@@ -258,12 +140,6 @@ export interface StoreState {
      */
     sftpTransfers: Record<string, SftpTransfer[]>;
     /**
-     * tabID → session snapshot for tabs whose `terminal:status` event may
-     * arrive before the optimistic tab is reconciled (Phase 4b task 4).
-     * Never persisted.
-     */
-    pendingSessions: Record<string, SessionDTO>;
-    /**
      * tabID → port-forward lifecycle cache (ssh:forward events, Phase 4c),
      * used by the status bar. One entry per unique spec (latest state wins).
      * Never persisted.
@@ -279,6 +155,40 @@ export interface StoreState {
 export const DEFAULT_LEFT_WIDTH = 320;
 export const DEFAULT_SFTP_WIDTH = 320;
 
+/**
+ * Map an arbitrary backend settings object onto our Settings shape (the single
+ * normalization point: boot in main.ts and import reconciliation here).
+ */
+export function normalizeSettings(raw: Record<string, unknown>): Settings {
+    const win = (raw.window ?? {}) as Record<string, unknown>;
+    const term = (raw.terminal ?? {}) as Record<string, unknown>;
+    const ui = (raw.ui ?? {}) as Record<string, unknown>;
+    return {
+        theme: typeof raw.theme === "string" ? raw.theme : "system",
+        themeVariant: typeof raw.themeVariant === "string" ? raw.themeVariant : "",
+        autoLockMinutes: Number(raw.autoLockMinutes ?? 0),
+        sftpBrowserEnabled: Boolean(raw.sftpBrowserEnabled),
+        // Plan P004: presence-aware default ON (the backend also forces
+        // `true` when the key is absent, so `?? true` is belt-and-braces).
+        monitoringEnabled: Boolean(raw.monitoringEnabled ?? true),
+        terminal: {
+            fontFamily: String(term.fontFamily ?? "monospace"),
+            fontSize: Number(term.fontSize ?? 13),
+            scrollback: Number(term.scrollback ?? 10000),
+        },
+        textEditorCommand: String(raw.textEditorCommand ?? "xdg-open"),
+        sftpInitialPath: String(raw.sftpInitialPath ?? "~"),
+        window: {
+            width: Number(win.width ?? 1280),
+            height: Number(win.height ?? 800),
+            leftWidth: Number(win.leftWidth ?? 320) || 320,
+            sftpWidth: Number(win.sftpWidth ?? 320) || 320,
+        },
+        // E4 T7: user zoom, separate from OS DPI; absent -> 0 (no zoom).
+        ui: { zoomLevel: Number(ui.zoomLevel ?? 0) || 0 },
+    };
+}
+
 export const initialState: StoreState = {
     settings: {
         theme: "system",
@@ -286,7 +196,7 @@ export const initialState: StoreState = {
         autoLockMinutes: 0,
         // Phase 5d: the SFTP browser is on by default (mirrors the backend
         // default; AppService.GetSettings() at boot overrides with the
-        // persisted value via toSettings). Same rule for the plan-P004
+        // persisted value via normalizeSettings). Same rule for the plan-P004
         // system monitor.
         sftpBrowserEnabled: true,
         monitoringEnabled: true,
@@ -294,6 +204,9 @@ export const initialState: StoreState = {
         textEditorCommand: "xdg-open",
         sftpInitialPath: "~",
         window: { width: 1280, height: 800, leftWidth: DEFAULT_LEFT_WIDTH, sftpWidth: DEFAULT_SFTP_WIDTH },
+        // Phase E4 T7: user zoom (0 = none), separate from the OS device
+        // scale; applied at boot by main.ts via ui/zoom.
+        ui: { zoomLevel: 0 },
     },
     vaultState: "locked",
     sftpPanelOpen: true,
@@ -306,7 +219,6 @@ export const initialState: StoreState = {
     leftPanelWidth: DEFAULT_LEFT_WIDTH,
     credentials: [],
     savedJumpHosts: [],
-    pendingSessions: {},
     forwards: {},
     sftpTransfers: {},
     monitor: {},
@@ -344,7 +256,7 @@ class Store {
     /** Re-fetch the session tree into the store (called after mutations). */
     async refreshTree(): Promise<void> {
         try {
-            const tree = (await SessionService.Tree()) as unknown as NodeDTO[];
+            const tree = await SessionService.Tree();
             this.set({ tree });
         } catch (err) {
             toast("error", String(err));
@@ -357,7 +269,7 @@ class Store {
      */
     async refreshCredentials(): Promise<void> {
         try {
-            const credentials = (await CredentialService.List()) as unknown as CredentialDTO[];
+            const credentials = await CredentialService.List();
             this.set({ credentials });
         } catch (err) {
             toast("error", String(err));
@@ -370,11 +282,43 @@ class Store {
      */
     async refreshSavedJumpHosts(): Promise<void> {
         try {
-            const savedJumpHosts = (await JumpHostService.List()) as unknown as SavedJumpHostDTO[];
+            const savedJumpHosts = await JumpHostService.List();
             this.set({ savedJumpHosts });
         } catch (err) {
             toast("error", String(err));
         }
+    }
+
+    /**
+     * Reconcile the UI after a configuration import (plan
+     * config-export-import §6). Merge keeps live tabs and just refreshes the
+     * tree/credentials/jump hosts. Replace tears the local tab state down (the
+     * backend already disconnected the sessions), re-reads and applies the
+     * imported settings (theme + zoom, no reload), then refreshes everything.
+     */
+    async afterImport(mode: "merge" | "replace"): Promise<void> {
+        if (mode === "replace") {
+            this.set({
+                tabs: [],
+                activeTabID: null,
+                selectedID: null,
+                forwards: {},
+                sftpTransfers: {},
+                monitor: {},
+            });
+            try {
+                const raw = (await AppService.GetSettings()) as unknown as Record<string, unknown>;
+                const settings = normalizeSettings(raw);
+                this.set({ settings });
+                initTheme(settings.theme, settings.themeVariant);
+                applyZoomLevel(settings.ui.zoomLevel);
+            } catch (err) {
+                toast("error", String(err));
+            }
+        }
+        await this.refreshTree();
+        await this.refreshCredentials();
+        await this.refreshSavedJumpHosts();
     }
 
     /** Set the live search query (empty string restores the tree). */
@@ -396,7 +340,7 @@ class Store {
     async connectSession(sessionID: string): Promise<void> {
         let dto: SessionDTO;
         try {
-            dto = (await SessionService.Session(sessionID)) as unknown as SessionDTO;
+            dto = await SessionService.Session(sessionID);
         } catch (err) {
             toast("error", String(err));
             return;
@@ -408,7 +352,17 @@ class Store {
         });
         try {
             const tabID = await TerminalService.Connect(sessionID);
-            this.registerPendingSession(tabID, dto);
+            // The user may have closed the optimistic tab while Connect was
+            // still in flight (the temp id is clickable immediately). Tear the
+            // now-orphaned backend session down instead of leaking it.
+            if (!this.state.tabs.some((t) => t.id === tempId)) {
+                try {
+                    await TerminalService.Disconnect(tabID);
+                } catch {
+                    /* session already gone; nothing to clean up */
+                }
+                return;
+            }
             this.replaceTab(tempId, tabID);
         } catch (err) {
             this.setTabState(tempId, "error", String(err));
@@ -606,11 +560,6 @@ class Store {
         });
     }
 
-    /** Remember a real tabID→session so late status events can create it. */
-    registerPendingSession(tabID: string, dto: SessionDTO): void {
-        this.set({ pendingSessions: { ...this.state.pendingSessions, [tabID]: dto } });
-    }
-
     /** Swap an optimistic temp tabID for the real tabID Connect returned. */
     replaceTab(oldID: string, newID: string): void {
         const { tabs, activeTabID } = this.state;
@@ -625,28 +574,24 @@ class Store {
 
     /**
      * Update one tab's status (from a status event or a Connect error).
-     * Creates the tab on demand from the pending-session cache when a
-     * `terminal:status` event beats the optimistic-tab reconciliation
-     * (Phase 4b task 4). Auto-opens the SFTP right panel when the active tab
-     * turns ready and the setting is on.
+     * Status events never create tabs: the optimistic tab created by
+     * connectSession is the only source, so an event for an unknown id is a
+     * late event for a tab the user already closed and must be ignored (the
+     * bridge writes responses and events from separate goroutines, so the
+     * Disconnect response can overtake its own terminal:status "closed"
+     * event). Auto-opens the SFTP right panel when the active tab turns ready
+     * and the setting is on.
      */
     setTabState(tabID: string, state: TabState, message?: string): void {
-        const { tabs, activeTabID, settings, pendingSessions } = this.state;
-        const patch: Partial<StoreState> = {};
-        if (tabs.some((t) => t.id === tabID)) {
-            patch.tabs = tabs.map((t) =>
-                t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t,
-            );
-        } else {
-            const sess = pendingSessions[tabID];
-            if (!sess) {
-                return;
-            }
-            patch.tabs = [
-                ...tabs,
-                { id: tabID, session: sess, state, errorMessage: message || undefined },
-            ];
+        const { tabs, activeTabID, settings } = this.state;
+        if (!tabs.some((t) => t.id === tabID)) {
+            return;
         }
+        const patch: Partial<StoreState> = {
+            tabs: tabs.map((t) =>
+                t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t,
+            ),
+        };
         if (state === "ready" && tabID === activeTabID && settings.sftpBrowserEnabled) {
             patch.sftpPanelOpen = true;
         }

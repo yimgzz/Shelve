@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -134,10 +135,24 @@ func (p *progressSink) final(done int64, errMsg string) {
 	p.m.emitProgress(p.tabID, p.transferID, p.direction, p.fileName, done, p.total, errMsg)
 }
 
+// copyBufPool recycles the 64 KiB buffers used by streamCopy so a long
+// transfer (or a series of small ones) does not allocate one per call. The
+// buffer is only read/written inside streamCopy and is never retained by dst
+// (sftp.File writes copy into the wire buffers; os.File writes copy into the
+// kernel), so returning it to the pool is safe.
+var copyBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 64<<10)
+		return &b
+	},
+}
+
 // streamCopy copies src → dst while feeding cumulative progress to sink.
 // It returns the number of bytes copied and any write/read error.
 func (m *Manager) streamCopy(dst io.Writer, src io.Reader, sink *progressSink) (int64, error) {
-	buf := make([]byte, 64<<10)
+	bp := copyBufPool.Get().(*[]byte)
+	buf := *bp
+	defer copyBufPool.Put(bp)
 	var done int64
 	for {
 		n, rerr := src.Read(buf)

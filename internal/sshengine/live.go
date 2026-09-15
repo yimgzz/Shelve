@@ -21,12 +21,12 @@ import (
 // Batching / backpressure parameters (master plan §2 A6, §5).
 const (
 	// batchInterval: flush pending output on this tick. Kept at the A6
-	// contract value: each terminal:data event crosses the Wails v3 event
-	// pipeline (mailbox goroutine → GTK main loop → webkit eval → JS), so a
-	// shorter tick under sustained output (tail -f style) multiplies that
-	// per-event churn and can exhaust process threads (pthread_create
-	// EAGAIN). Interactive latency is served by the fast path below, not by
-	// a shorter tick.
+	// contract value: output normally rides the binary /terminal WebSocket,
+	// and the terminal:data fallback event crosses the RPC event fan-out and
+	// the JS main thread, so a shorter tick under sustained output (tail -f
+	// style) multiplies that per-event churn and can exhaust process threads
+	// (pthread_create EAGAIN). Interactive latency is served by the fast path
+	// below, not by a shorter tick.
 	batchInterval = 50 * time.Millisecond
 	// batchBytes: flush pending output once it reaches this size. Raised from
 	// 16 KB (plan phase-4c allows tuning the write-coalescing granularity):
@@ -506,9 +506,23 @@ func (l *liveConn) fail(err error) {
 // SSH channel window applies remote backpressure meanwhile), which keeps
 // memory flat and input responsive under output floods.
 func (l *liveConn) pump() {
+	// The data sink is installed once at boot, before any tab connects, so
+	// capture it here instead of taking the manager lock on every flush.
+	l.m.mu.Lock()
+	sink := l.m.dataSink
+	l.m.mu.Unlock()
+
+	// Double-buffered accumulation: `pending` is what the reader appends to,
+	// `spare` is the free buffer the flusher swaps in before handing the
+	// filled one to the sink. The sink contract copies/serializes the data
+	// before returning (termws.AppendFrame copies; the fallback
+	// base64-encodes), after which the filled buffer becomes the spare again.
+	// This keeps the sustained-output path allocation-free while guaranteeing
+	// a buffer is never visible to the reader and the flusher at once.
 	var (
 		mu           sync.Mutex
-		pending      []byte
+		pending      = make([]byte, 0, batchBytes)
+		spare        = make([]byte, 0, batchBytes)
 		burstStarted bool
 		lastEmit     time.Time // when terminal:data was last emitted (zero: none yet)
 	)
@@ -569,15 +583,13 @@ func (l *liveConn) pump() {
 			return
 		}
 		data := pending
-		pending = nil
+		pending = spare[:0]
+		spare = nil
 		lastEmit = time.Now()
 		mu.Unlock()
 		// Plan P005: with a raw-data sink wired, output goes there directly
 		// (blocking = transport flow control); otherwise the legacy
 		// terminal:data emitter path is used (headless tests unchanged).
-		l.m.mu.Lock()
-		sink := l.m.dataSink
-		l.m.mu.Unlock()
 		if sink != nil {
 			sink.OnTerminalData(l.tabID, data)
 		} else {
@@ -586,6 +598,10 @@ func (l *liveConn) pump() {
 				Data:  base64.StdEncoding.EncodeToString(data),
 			})
 		}
+		// The sink has consumed `data`; reclaim its array as the spare.
+		mu.Lock()
+		spare = data[:0]
+		mu.Unlock()
 		select {
 		case drained <- struct{}{}:
 		default:

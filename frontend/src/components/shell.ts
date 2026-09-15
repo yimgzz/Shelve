@@ -4,7 +4,7 @@
 // + terminal panes) and the status-band row. The toolbar hosts the gear
 // menu (Phase 4d) that opens Settings / Lock vault / About.
 
-import { AppService } from "../../bindings/shelve/internal/wailsvc";
+import { AppService } from "../rpc";
 import {
     store,
     sftpPanelVisible,
@@ -62,11 +62,14 @@ let sftpResizeUnsub: (() => void) | null = null;
  * width by the time this runs, so a single full-settings write suffices.
  */
 function persistWindow(): void {
-    const { settings } = store.getState();
     if (saveTimer !== null) {
         window.clearTimeout(saveTimer);
     }
     saveTimer = window.setTimeout(() => {
+        // Read the store inside the timeout so a concurrent window:state
+        // merge (main-process geometry) can never be clobbered by a stale
+        // snapshot captured before the merge.
+        const { settings } = store.getState();
         const next: Settings = { ...settings, window: { ...settings.window } };
         void AppService.SaveSettings(next).catch((err) => toast("error", String(err)));
     }, SAVE_DEBOUNCE_MS);

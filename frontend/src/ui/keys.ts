@@ -1,16 +1,20 @@
 // ui/keys.ts — layout-independent physical-key helpers (plan P008, D1/D4).
 //
-// WebKitGTK computes KeyboardEvent fields from the LAYOUT-MAPPED GDK keyval:
-// under a Cyrillic layout `key` is the mapped letter ("с") and `keyCode`
-// falls to 0, while `code` stays the fixed US physical position (a scancode
-// table inside GTK). xterm.js 5.5 derives Ctrl+letter from the legacy
-// keyCode, so its own Ctrl path is unusable off English layouts.
+// Chromium reports `code` as the fixed US physical key position on every
+// layout, while the legacy `KeyboardEvent.keyCode` — which xterm.js 5.5 uses
+// to derive Ctrl+letter — follows the layout mapping (and is 0 for keys the
+// active layout does not map). xterm's own Ctrl path is therefore unusable
+// off English layouts.
 //
 // Physical-key principle (D1): every COMMAND chord (terminal control bytes,
 // app shortcuts) is identified by `KeyboardEvent.code`; all TEXT input keeps
 // the layout and flows through xterm's keypress/composition path untouched.
 //
-// Pure module: no DOM side effects, no wails/bindings imports — usable from
+// Two chords are reserved ahead of the control-byte table (D2): Ctrl+Shift+V
+// pastes the system clipboard and Ctrl+Shift+C copies the terminal selection;
+// neither ever emits a control byte (0x16 / 0x03).
+//
+// Pure module: no DOM side effects, no rpc/bindings imports — usable from
 // both ui/ and terminal/.
 
 /** Per-code Shift rule for Ctrl chords (D3/D4):
@@ -76,6 +80,13 @@ export function isCtrlShiftV(e: KeyboardEvent): boolean {
     return (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === "KeyV";
 }
 
+/** Ctrl+Shift+C (physical) = copy the terminal selection to the system
+ *  clipboard. Checked BEFORE the control-char dispatch so the KeyC row never
+ *  emits ETX (0x03) for it. Plain Ctrl+C (no Shift) stays the interrupt. */
+export function isCtrlShiftC(e: KeyboardEvent): boolean {
+    return (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === "KeyC";
+}
+
 /**
  * The control byte to send for this keydown, or null when the app must not
  * intercept the chord (xterm handles it: plain text via keypress/composition
@@ -89,6 +100,10 @@ export function controlCharForCode(e: KeyboardEvent): string | null {
     }
     // Reserved for paste (D2) — never a literal 0x16 quote-insert.
     if (e.code === "KeyV" && e.shiftKey) {
+        return null;
+    }
+    // Reserved for copy (Ctrl+Shift+C) — never ETX (0x03).
+    if (e.code === "KeyC" && e.shiftKey) {
         return null;
     }
     const byte = CTRL_CODE_CHAR.get(e.code);

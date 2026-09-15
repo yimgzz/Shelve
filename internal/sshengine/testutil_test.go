@@ -42,29 +42,22 @@ type capturedEvent struct {
 	payload any
 }
 
-// CapturingEmitter records every Emit call in order and lets tests wait
-// for a specific event name to arrive after the wait begins.
+// CapturingEmitter records every Emit call in order. Tests observe the log
+// either by polling it or through an armed EventWaiter (see Arm).
 type CapturingEmitter struct {
-	mu      sync.Mutex
-	events  []capturedEvent
-	waiters map[string][]chan struct{}
+	mu     sync.Mutex
+	events []capturedEvent
 }
 
 // NewCapturingEmitter returns an empty capturing emitter.
 func NewCapturingEmitter() *CapturingEmitter {
-	return &CapturingEmitter{waiters: map[string][]chan struct{}{}}
+	return &CapturingEmitter{}
 }
 
-// Emit appends the event and wakes every waiter registered for its name.
+// Emit appends the event to the ordered log.
 func (c *CapturingEmitter) Emit(event string, payload any) {
 	c.mu.Lock()
 	c.events = append(c.events, capturedEvent{name: event, payload: payload})
-	for _, ch := range c.waiters[event] {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-	}
 	c.mu.Unlock()
 }
 
@@ -91,46 +84,45 @@ func (c *CapturingEmitter) Has(name string) bool {
 	return len(c.OfName(name)) > 0
 }
 
-// WaitEvent blocks until an event named `name` is emitted after the call,
-// returning it. It fails the test after a timeout.
-func (c *CapturingEmitter) WaitEvent(t *testing.T, name string, timeout time.Duration) capturedEvent {
-	t.Helper()
-	ch := make(chan struct{}, 1)
+// EventWaiter is an armed wait. Arm records the current event-log position, so
+// Wait observes an event emitted between Arm and Wait. A plain "wait for the
+// next event" API (register when called) could not see such an event — a race
+// when the event is produced synchronously by the action under test (a PTY
+// echo, a keyboard-interactive round triggered by SubmitKbdintResponse, an
+// exit triggered by Write). Arm before the action instead.
+type EventWaiter struct {
+	em   *CapturingEmitter
+	name string
+	from int
+}
+
+// Arm records the current event-log length for `name`.
+func (c *CapturingEmitter) Arm(name string) *EventWaiter {
 	c.mu.Lock()
-	start := len(c.events)
-	c.waiters[name] = append(c.waiters[name], ch)
-	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		ws := c.waiters[name]
-		for i, w := range ws {
-			if w == ch {
-				c.waiters[name] = append(ws[:i], ws[i+1:]...)
-				break
+	defer c.mu.Unlock()
+	return &EventWaiter{em: c, name: name, from: len(c.events)}
+}
+
+// Wait blocks until the first event named w.name emitted at or after the arm
+// position, returning it. It fails the test after timeout.
+func (w *EventWaiter) Wait(t *testing.T, timeout time.Duration) capturedEvent {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		w.em.mu.Lock()
+		for i := w.from; i < len(w.em.events); i++ {
+			if w.em.events[i].name == w.name {
+				e := w.em.events[i]
+				w.em.mu.Unlock()
+				return e
 			}
 		}
-		c.mu.Unlock()
-	}()
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ch:
-			c.mu.Lock()
-			for i := start; i < len(c.events); i++ {
-				if c.events[i].name == name {
-					e := c.events[i]
-					c.mu.Unlock()
-					return e
-				}
-			}
-			c.mu.Unlock()
-			// Spurious wake (an earlier event already consumed): keep waiting.
-		case <-timer.C:
-			t.Fatalf("timed out waiting for event %q", name)
+		w.em.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for event %q", w.name)
 			return capturedEvent{}
 		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 

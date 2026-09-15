@@ -7,7 +7,7 @@
 // (Connect/Edit/Duplicate/Move to…/Delete), F2 inline rename, inline new
 // folder. Expand/collapse is component-local (not persisted in v1).
 
-import { SessionService } from "../../bindings/shelve/internal/wailsvc";
+import { SessionService } from "../rpc";
 import { store, type NodeDTO, type SearchResultDTO, type StoreState } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { openSessionEditor } from "./session-editor";
@@ -104,9 +104,15 @@ export function renderTreeBody(host: HTMLElement): void {
     let prev = pickTreeState(store.getState());
     unsub = store.subscribe((s) => {
         const next = pickTreeState(s);
-        if (next.tree !== prev.tree || next.searchQ !== prev.searchQ || next.selectedID !== prev.selectedID) {
+        if (next.tree !== prev.tree || next.searchQ !== prev.searchQ) {
             prev = next;
             rerender();
+        } else if (next.selectedID !== prev.selectedID) {
+            // Selection-only change: patch the `.selected` classes instead of
+            // rebuilding the DOM (which would also blur a focused inline
+            // create/rename input).
+            prev = next;
+            updateSelection();
         }
     });
     rerender();
@@ -115,6 +121,25 @@ export function renderTreeBody(host: HTMLElement): void {
 /** Subset of the store the tree actually renders. */
 function pickTreeState(s: StoreState): Pick<StoreState, "tree" | "searchQ" | "selectedID"> {
     return { tree: s.tree, searchQ: s.searchQ, selectedID: s.selectedID };
+}
+
+/** Patch the `.selected` class on the rendered rows to match the current
+ *  selection. Used when only `selectedID` changed; a full rerender() is
+ *  reserved for tree/search changes. Folder rows do not carry their own
+ *  data-id (the `.tree-folder` wrapper does), so the id is resolved from the
+ *  nearest ancestor with one. */
+function updateSelection(): void {
+    if (!bodyHost) {
+        return;
+    }
+    const selectedID = store.getState().selectedID;
+    bodyHost.querySelectorAll<HTMLElement>(".tree-row").forEach((row) => {
+        if (row.classList.contains("inline-row")) {
+            return; // transient editor, never a selectable node
+        }
+        const id = row.closest<HTMLElement>("[data-id]")?.dataset.id ?? "";
+        row.classList.toggle("selected", id !== "" && id === selectedID);
+    });
 }
 
 function rerender(): void {
@@ -371,7 +396,7 @@ function makeInlineRenameInput(id: string, kind: string, value: string): HTMLEle
 }
 
 async function renameSession(id: string, newName: string): Promise<void> {
-    const dto = (await SessionService.Session(id)) as unknown as import("../store").SessionDTO;
+    const dto = await SessionService.Session(id);
     await SessionService.UpdateSession({
         id: dto.id,
         folderId: dto.folderId,
@@ -427,7 +452,7 @@ function startRename(id: string, kind: string, value: string): void {
 }
 
 async function editSession(id: string): Promise<void> {
-    const dto = (await SessionService.Session(id)) as unknown as import("../store").SessionDTO;
+    const dto = await SessionService.Session(id);
     await openSessionEditor({ mode: "edit", parentID: dto.folderId, initial: dto });
 }
 
@@ -524,15 +549,22 @@ async function deleteNode(node: NodeDTO): Promise<void> {
 
 // --------------------------------------------------------------- helpers ---
 
+// Memoized descendant counts keyed by NodeDTO snapshot identity. The store
+// replaces the tree with fresh DTOs on every refresh, so stale entries are
+// collected with their objects; within one snapshot each node is visited once
+// (O(n) total) instead of re-walking every folder subtree on every render.
+const childCountCache = new WeakMap<NodeDTO, number>();
+
 function countChildren(node: NodeDTO): number {
+    const cached = childCountCache.get(node);
+    if (cached !== undefined) {
+        return cached;
+    }
     let n = 0;
-    const walk = (ns: NodeDTO[]) => {
-        for (const x of ns) {
-            n++;
-            walk(x.children);
-        }
-    };
-    walk(node.children);
+    for (const c of node.children) {
+        n += 1 + countChildren(c);
+    }
+    childCountCache.set(node, n);
     return n;
 }
 
@@ -609,7 +641,7 @@ async function queryResults(host: HTMLElement, q: string): Promise<void> {
         console.time(`search(${q})`);
     }
     try {
-        const results = (await SessionService.Search(q)) as unknown as SearchResultDTO[];
+        const results = await SessionService.Search(q);
         if (store.getState().searchQ.trim() !== q) {
             return; // query changed while awaiting
         }

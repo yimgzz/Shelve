@@ -184,7 +184,7 @@ func (v *Vault) Create(path, masterPassword string, payload []byte) error {
 	if _, err := rand.Read(salt); err != nil {
 		return fmt.Errorf("vault: %w", err)
 	}
-	key := v.derive(masterPassword, salt, kdfTime, kdfMemory, kdfThreads)
+	key := derive(masterPassword, salt, kdfTime, kdfMemory, kdfThreads)
 
 	env := Envelope{
 		V: FileVersion,
@@ -247,7 +247,7 @@ func (v *Vault) openLocked(path, masterPassword string) ([]byte, error) {
 		return nil, ErrCorruptVault
 	}
 
-	key := v.derive(masterPassword, salt, env.KDF.Time, env.KDF.Memory, env.KDF.Threads)
+	key := derive(masterPassword, salt, env.KDF.Time, env.KDF.Memory, env.KDF.Threads)
 
 	payload, err := openGCM(key, nonce, ct)
 	if err != nil {
@@ -322,7 +322,7 @@ func (v *Vault) sealInto(env *Envelope, key, payload []byte) error {
 	return nil
 }
 
-func (v *Vault) derive(password string, salt []byte, iterations, memory, threads int) []byte {
+func derive(password string, salt []byte, iterations, memory, threads int) []byte {
 	pw := make([]byte, len(password))
 	copy(pw, password)
 	defer zero(pw)
@@ -370,6 +370,14 @@ func sweepTempDir(vaultPath string) {
 }
 
 func sealGCM(key, nonce, plaintext []byte) ([]byte, error) {
+	return sealGCMWithAAD(key, nonce, plaintext, []byte(aad))
+}
+
+// sealGCMWithAAD seals plaintext under key/bound AAD. The vault uses the
+// master-plan §8.2 AAD; the export envelope (export.go) passes its own
+// domain-separating AAD so a vault ciphertext can never be opened as an
+// export and vice versa.
+func sealGCMWithAAD(key, nonce, plaintext, aad []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("vault: %w", err)
@@ -378,10 +386,15 @@ func sealGCM(key, nonce, plaintext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vault: %w", err)
 	}
-	return gcm.Seal(nil, nonce, plaintext, []byte(aad)), nil
+	return gcm.Seal(nil, nonce, plaintext, aad), nil
 }
 
 func openGCM(key, nonce, ct []byte) ([]byte, error) {
+	return openGCMWithAAD(key, nonce, ct, []byte(aad))
+}
+
+// openGCMWithAAD opens ct bound to aad (see sealGCMWithAAD).
+func openGCMWithAAD(key, nonce, ct, aad []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("vault: %w", err)
@@ -390,7 +403,7 @@ func openGCM(key, nonce, ct []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vault: %w", err)
 	}
-	return gcm.Open(nil, nonce, ct, []byte(aad))
+	return gcm.Open(nil, nonce, ct, aad)
 }
 
 func b64encode(b []byte) string {

@@ -17,7 +17,7 @@ export interface ThemeVariant {
     family: ThemeFamily;
 }
 
-/** The 12 selectable variants (6 dark + 6 light), plan P001 §1. */
+/** The 18 selectable variants (9 dark + 9 light), plan P001 §1. */
 export const THEME_CATALOG: ThemeVariant[] = [
     // Dark family
     { id: "default-dark", label: "Default Dark", family: "dark" },
@@ -26,6 +26,10 @@ export const THEME_CATALOG: ThemeVariant[] = [
     { id: "nord", label: "Nord", family: "dark" },
     { id: "gruvbox-dark", label: "Gruvbox Dark", family: "dark" },
     { id: "one-dark", label: "One Dark", family: "dark" },
+    // Dark family (continued)
+    { id: "vscode-dark-plus", label: "VS Code Dark+", family: "dark" },
+    { id: "solarized-dark", label: "Solarized Dark", family: "dark" },
+    { id: "tokyo-night", label: "Tokyo Night", family: "dark" },
     // Light family
     { id: "default-light", label: "Default Light", family: "light" },
     { id: "catppuccin-latte", label: "Catppuccin Latte", family: "light" },
@@ -33,6 +37,10 @@ export const THEME_CATALOG: ThemeVariant[] = [
     { id: "nord-light", label: "Nord Light", family: "light" },
     { id: "gruvbox-light", label: "Gruvbox Light", family: "light" },
     { id: "github-light", label: "GitHub Light", family: "light" },
+    // Light family (continued)
+    { id: "vscode-light-plus", label: "VS Code Light+", family: "light" },
+    { id: "one-light", label: "One Light", family: "light" },
+    { id: "quiet-light", label: "Quiet Light", family: "light" },
 ];
 
 /** The default variant id for a family ("" semantics, plan P001 §4.1). */

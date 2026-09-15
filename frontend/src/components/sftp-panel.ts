@@ -18,7 +18,7 @@
 // Footer carries the transfer progress line fed by the store's sftp:progress
 // cache.
 
-import { SftpService } from "../../bindings/shelve/internal/wailsvc";
+import { SftpService } from "../rpc";
 import { store, type SftpEntryDTO } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { confirmDialog } from "./confirm";
@@ -283,7 +283,7 @@ async function loadList(): Promise<void> {
     errorMsg = null;
     renderList();
     try {
-        const res = (await SftpService.List(tabID, curPath)) as unknown as SftpEntryDTO[];
+        const res = await SftpService.List(tabID, curPath);
         if (store.getState().activeTabID !== tabID) {
             return; // tab switched while awaiting
         }
@@ -461,9 +461,7 @@ async function removeEntry(entry: SftpEntryDTO): Promise<void> {
 async function doUpload(): Promise<void> {
     let paths: string[] = [];
     try {
-        const picked = (await SftpService.PickLocalFiles(tabID, true)) as unknown as
-            | string[]
-            | null;
+        const picked = await SftpService.PickLocalFiles(tabID, true);
         paths = picked ?? [];
     } catch (err) {
         const msg = String(err);

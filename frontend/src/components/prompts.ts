@@ -4,7 +4,7 @@
 // or Esc close while a prompt is pending.
 
 import { openDialog } from "../ui/dialog";
-import { VaultService } from "../../bindings/shelve/internal/wailsvc";
+import { VaultService } from "../rpc";
 import { toast } from "./toasts";
 
 export interface HostKeyPromptPayload {

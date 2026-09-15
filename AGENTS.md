@@ -323,7 +323,7 @@ queue blocks the emitter rather than dropping a lifecycle event.
   plain text input remains layout-aware. Terminal keys: Ctrl+C always sends
   the interrupt (ETX, even with a selection); Shift+Backspace deletes the
   previous word (^W); Ctrl+Shift+V pastes the system clipboard into the active
-  terminal.
+  terminal; Ctrl+Shift+C copies the terminal selection (no-op when empty).
 - **HiDPI/zoom model:** OS scale comes from Chromium per-monitor; the renderer
   watches `matchMedia('(resolution: Ndppx)')` plus the main-process debounced
   display event and re-measures/refits (no reload). User zoom is separate

@@ -24,9 +24,11 @@
 //     clipboard when the gesture completes; right-click pastes via
 //     term.paste() (same onData → Write path, bracketed paste honored).
 //   - Keyboard (plan P008): Ctrl+Shift+V (physical) pastes the system
-//     clipboard via the same term.paste() path; all terminal control keys
-//     (Ctrl+C/Z/A…, Ctrl+[ \ ], Shift+Backspace) are keyed to the physical
-//     code, so they send identical bytes on any keyboard layout.
+//     clipboard via the same term.paste() path; Ctrl+Shift+C (physical) copies
+//     the current selection to the system clipboard (no-op when empty); all
+//     terminal control keys (Ctrl+C/Z/A…, Ctrl+[ \ ], Shift+Backspace) are
+//     keyed to the physical code, so they send identical bytes on any keyboard
+//     layout.
 //   - destroy(tabID) on tab close, destroyAll() on vault lock. All addons
 //     are disposed with the terminal instance.
 
@@ -40,7 +42,7 @@ import { TerminalService } from "../rpc";
 import type { TerminalSettings } from "../store";
 import { currentThemeTokens } from "../ui/theme";
 import { copyText, readText } from "../ui/clipboard";
-import { controlCharForCode, isCtrlShiftV } from "../ui/keys";
+import { controlCharForCode, isCtrlShiftC, isCtrlShiftV } from "../ui/keys";
 import { bytesToB64 } from "../ui/b64";
 import { sendInput } from "./ws";
 
@@ -414,12 +416,13 @@ export const TermPool = {
         //
         // Chords sent (bytes per ui/keys, xterm-5.5 English parity, D4):
         //
-        // Ctrl+letter (Ctrl+Shift+C too — Shift ignored, D3): the control
-        // byte, including Ctrl+C. xterm copies the selection on Ctrl+C with
-        // text selected, so the interrupt silently never fires (drag-select
-        // makes selections common); always emitting ETX here lets the remote
-        // tty (ISIG/VINTR) discard the input line and print a fresh prompt.
-        // Copy is not lost: drag-selection already auto-copies (P003).
+        // Ctrl+letter (plain Ctrl+C included — the reserved chords below take
+        // precedence over the KeyV/KeyC rows): the control byte. xterm copies
+        // the selection on Ctrl+C with text selected, so the interrupt silently
+        // never fires (drag-select makes selections common); always emitting
+        // ETX here lets the remote tty (ISIG/VINTR) discard the input line and
+        // print a fresh prompt. Copy is not lost: drag-selection already
+        // auto-copies (P003).
         //
         // Symbol control combos: Ctrl+Space, Ctrl+2 (with Shift → ^@),
         // Ctrl+3…7, Ctrl+8, Ctrl+[ \ ], Ctrl+/ (with Shift) — exact parity
@@ -430,6 +433,12 @@ export const TermPool = {
         // bracketed-paste handling honored. Gated on the state overlay being
         // hidden (state "ready"), exactly like the right-click handler; an
         // empty clipboard is a no-op. Plain Ctrl+V stays 0x16 (D3).
+        //
+        // Ctrl+Shift+C (physical): copy the current selection to the system
+        // clipboard (no-op when the selection is empty). Consumed in every
+        // case — including when it is empty or the pane is not "ready" — so
+        // it never falls through to the KeyC row and never emits ETX. Ctrl+C
+        // (no Shift) still sends the interrupt, even with a selection.
         //
         // Shift+Backspace: xterm maps it to a single-character erase byte.
         // Emit ^W (VWERASE 0x17) instead — the remote line editor deletes the
@@ -456,6 +465,23 @@ export const TermPool = {
                         entry.term.paste(text);
                     }
                 });
+                return false;
+            }
+            if (isCtrlShiftC(e)) {
+                // preventDefault: the browser's own copy accelerator could
+                // otherwise fire a DOM `copy` event on the selection.
+                e.preventDefault();
+                e.stopPropagation();
+                const overlay = parent.closest(".term-pane")?.querySelector<HTMLElement>(".term-overlay");
+                if (overlay && overlay.style.display !== "none") {
+                    return false; // not "ready" — same gate as paste
+                }
+                if (entry.term.hasSelection()) {
+                    const text = entry.term.getSelection();
+                    if (text) {
+                        void copyText(text);
+                    }
+                }
                 return false;
             }
             const cc = controlCharForCode(e);

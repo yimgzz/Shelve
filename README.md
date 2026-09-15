@@ -227,6 +227,7 @@ non-loopback interfaces), **uptime**, and **disk** usage of the main partition
 | F2 / Delete | Rename / delete the selected tree node |
 | Esc | Close the topmost modal / clear search |
 | Ctrl+Shift+V | Paste the system clipboard into the active terminal (bracketed-paste safe) |
+| Ctrl+Shift+C | Copy the terminal selection to the system clipboard (no-op when empty) |
 | Ctrl+Shift+E | Toggle SFTP browser (mirrors the Settings checkbox) |
 
 Shortcuts are suppressed while you are typing in a form field (except Esc,

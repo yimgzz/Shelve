@@ -10,6 +10,10 @@
 // app shortcuts) is identified by `KeyboardEvent.code`; all TEXT input keeps
 // the layout and flows through xterm's keypress/composition path untouched.
 //
+// Two chords are reserved ahead of the control-byte table (D2): Ctrl+Shift+V
+// pastes the system clipboard and Ctrl+Shift+C copies the terminal selection;
+// neither ever emits a control byte (0x16 / 0x03).
+//
 // Pure module: no DOM side effects, no rpc/bindings imports — usable from
 // both ui/ and terminal/.
 
@@ -76,6 +80,13 @@ export function isCtrlShiftV(e: KeyboardEvent): boolean {
     return (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === "KeyV";
 }
 
+/** Ctrl+Shift+C (physical) = copy the terminal selection to the system
+ *  clipboard. Checked BEFORE the control-char dispatch so the KeyC row never
+ *  emits ETX (0x03) for it. Plain Ctrl+C (no Shift) stays the interrupt. */
+export function isCtrlShiftC(e: KeyboardEvent): boolean {
+    return (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.code === "KeyC";
+}
+
 /**
  * The control byte to send for this keydown, or null when the app must not
  * intercept the chord (xterm handles it: plain text via keypress/composition
@@ -89,6 +100,10 @@ export function controlCharForCode(e: KeyboardEvent): string | null {
     }
     // Reserved for paste (D2) — never a literal 0x16 quote-insert.
     if (e.code === "KeyV" && e.shiftKey) {
+        return null;
+    }
+    // Reserved for copy (Ctrl+Shift+C) — never ETX (0x03).
+    if (e.code === "KeyC" && e.shiftKey) {
         return null;
     }
     const byte = CTRL_CODE_CHAR.get(e.code);

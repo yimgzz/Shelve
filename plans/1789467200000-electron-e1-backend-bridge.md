@@ -204,6 +204,13 @@ Frontend `tsc` is **not** a gate here: `frontend/bindings/` is about to be
 deleted and the frontend is switched to the local `rpc` module in E3. Note this
 explicitly in the commit message so the transitional red state is intentional.
 
+The Wails-driven workflow (`make build`, `make run`, `make dev`, `make appimage`,
+`make package`) is also intentionally **non-functional between E1 and E2**: the
+root Wails bootstrap is deleted and the Wails CLI path in `Makefile`/`Dockerfile.dev`
+still targets it until E2 rewrites the toolchain. The E1 workaround is the Go-only
+gate above plus `go build -o bin/shelve-backend ./cmd/shelve-backend`. Do not
+"fix" the Makefile here; that is E2's deliverable.
+
 ## Exit criteria
 
 The Go process is a toolkit-free backend that exposes the complete service

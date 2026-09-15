@@ -1,4 +1,4 @@
-package wailsvc
+package api
 
 import (
 	"shelve/internal/sshengine"

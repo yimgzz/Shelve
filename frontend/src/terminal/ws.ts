@@ -22,6 +22,10 @@ import { resolveEndpoint } from "../rpc/endpoint";
 const MAX_TABID_LEN = 64;
 const MAX_PAYLOAD = 256 * 1024;
 
+// Module-level codecs: allocated once instead of per keystroke / per frame.
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
 let ws: WebSocket | null = null;
 let wsURL: string | null = null;
 let retryTimer: number | null = null;
@@ -35,7 +39,7 @@ export function setTerminalOutputHandler(fn: (tabID: string, bytes: Uint8Array) 
 }
 
 function encodeFrame(tabID: string, payload: Uint8Array): Uint8Array<ArrayBuffer> {
-    const id = new TextEncoder().encode(tabID);
+    const id = textEncoder.encode(tabID);
     const out = new Uint8Array(1 + id.length + 4 + payload.length);
     out[0] = id.length;
     out.set(id, 1);
@@ -65,7 +69,7 @@ function handleMessage(ev: MessageEvent): void {
     if (tabLen === 0 || tabLen > MAX_TABID_LEN) {
         return;
     }
-    const id = new TextDecoder().decode(view.subarray(1, 1 + tabLen));
+    const id = textDecoder.decode(view.subarray(1, 1 + tabLen));
     const size = new DataView(buf).getUint32(1 + tabLen, false);
     const off = 1 + tabLen + 4;
     if (view.length < off + size) {

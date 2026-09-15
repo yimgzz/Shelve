@@ -262,3 +262,66 @@ func TestStartIsIdempotent(t *testing.T) {
 		t.Fatalf("second Start = %q/%v, want %q/nil", again, err, first)
 	}
 }
+
+// blockingTestService exposes an allow-listed blocking method (Upload) plus a
+// fast one, so the async dispatch path can be exercised over a real socket.
+type blockingTestService struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingTestService) Upload(tabID string, localPaths []string, remoteDir string) error {
+	close(b.entered)
+	<-b.release
+	return nil
+}
+
+func (b *blockingTestService) Fast() (string, error) { return "fast", nil }
+
+// TestBlockingMethodDoesNotStallReadLoop proves the plan Phase 4.1 dispatch:
+// an allow-listed blocking method (SftpService.Upload) runs off the read loop,
+// so a fast call issued while it is in flight is answered first.
+func TestBlockingMethodDoesNotStallReadLoop(t *testing.T) {
+	svc := &blockingTestService{entered: make(chan struct{}), release: make(chan struct{})}
+	s := New(nil)
+	s.Register("SftpService", svc)
+	addr, err := s.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	c := dialURL(t, "ws://"+addr+"/rpc?token="+s.token)
+
+	// Upload is dispatched on a bounded goroutine and parks.
+	writeText(t, c, `{"id":1,"svc":"SftpService","method":"Upload","args":["t1",[],"/tmp"]}`)
+	select {
+	case <-svc.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Upload was never dispatched")
+	}
+
+	// With Upload still blocked, a fast call must be answered first.
+	writeText(t, c, `{"id":2,"svc":"SftpService","method":"Fast","args":[]}`)
+	var fast struct {
+		ID     uint64 `json:"id"`
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(readText(t, c), &fast); err != nil {
+		t.Fatalf("fast response: %v", err)
+	}
+	if fast.ID != 2 || fast.Result != "fast" {
+		t.Fatalf("first answered frame = %+v, want the fast call (id 2)", fast)
+	}
+
+	// Releasing Upload now lets its own response through.
+	close(svc.release)
+	var upload struct {
+		ID uint64 `json:"id"`
+	}
+	if err := json.Unmarshal(readText(t, c), &upload); err != nil {
+		t.Fatalf("upload response: %v", err)
+	}
+	if upload.ID != 1 {
+		t.Fatalf("second answered frame id = %d, want 1", upload.ID)
+	}
+}

@@ -111,8 +111,8 @@ dev: ensure-image node-deps ## Hot-reload dev session in the container (X11); El
 payload: ensure-image ## Build the Go backend + renderer + Electron bundles (shared by build/appimage)
 	$(DOCKER_RUN) $(IMAGE) sh -c '\
 		set -e; \
-		go build -o bin/shelve-backend ./cmd/shelve-backend; \
-		npm ci --no-audit --no-fund; \
+		CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/shelve-backend ./cmd/shelve-backend; \
+		[ -d node_modules ] || npm ci --no-audit --no-fund; \
 		npm run build:renderer; \
 		npm run build:electron'
 	$(MAKE) fix-owner

@@ -204,7 +204,9 @@ func TestDataSinkRoutesOutput(t *testing.T) {
 	m.SetDataSink(sinkFunc(func(tabID string, data []byte) {
 		mu.Lock()
 		defer mu.Unlock()
-		got = append(got, rec{tabID: tabID, data: data})
+		// The engine recycles pump buffers once the sink returns
+		// (TerminalDataSink ownership contract), so copy before retaining.
+		got = append(got, rec{tabID: tabID, data: append([]byte(nil), data...)})
 	}))
 
 	tabID, err := m.Connect(rigPasswordSession(rig.Addr(), user, password))

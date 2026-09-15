@@ -377,3 +377,62 @@ func TestManagerCloseAll(t *testing.T) {
 		t.Fatalf("events after CloseAll: %d → %d", before, got)
 	}
 }
+
+// TestManagerRefreshesDfOnCadence verifies plan Phase 4.2: only every
+// dfRefreshTicks-th exec carries the full `df -h` listing; the lighter ticks
+// reuse the cached dfText in the payload.
+func TestManagerRefreshesDfOnCadence(t *testing.T) {
+	emit := &recEmitter{}
+	m := newTestManager(t, &fakeDialer{tabIDs: map[string]bool{"t1": true}}, emit)
+	m.Interval = 10 * time.Millisecond
+
+	var mu sync.Mutex
+	var scripts []string
+	m.exec = func(_ context.Context, _ *ssh.Client, script string) ([]byte, error) {
+		mu.Lock()
+		scripts = append(scripts, script)
+		mu.Unlock()
+		return []byte(sampleOut1), nil
+	}
+
+	if err := m.Start("t1"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer m.Stop("t1")
+
+	need := dfRefreshTicks + 2
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(scripts)
+		mu.Unlock()
+		if n >= need {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	mu.Lock()
+	got := append([]string(nil), scripts...)
+	mu.Unlock()
+	if len(got) < need {
+		t.Fatalf("only %d execs, want ≥ %d", len(got), need)
+	}
+	for i, script := range got {
+		full := strings.Contains(script, "DFH_START")
+		wantFull := i%dfRefreshTicks == 0
+		if full != wantFull {
+			t.Fatalf("exec %d full=%v, want %v", i, full, wantFull)
+		}
+	}
+
+	// The lighter ticks still ship the cached listing: the second payload
+	// (first light tick) must carry the dfText from the first full tick.
+	evs := emit.snapshot()
+	if len(evs) < 2 {
+		t.Fatalf("got %d events, want ≥ 2", len(evs))
+	}
+	if !strings.Contains(evs[1].DfText, "overlay") {
+		t.Fatalf("light tick dfText = %q, want the cached listing", evs[1].DfText)
+	}
+}

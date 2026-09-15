@@ -506,9 +506,23 @@ func (l *liveConn) fail(err error) {
 // SSH channel window applies remote backpressure meanwhile), which keeps
 // memory flat and input responsive under output floods.
 func (l *liveConn) pump() {
+	// The data sink is installed once at boot, before any tab connects, so
+	// capture it here instead of taking the manager lock on every flush.
+	l.m.mu.Lock()
+	sink := l.m.dataSink
+	l.m.mu.Unlock()
+
+	// Double-buffered accumulation: `pending` is what the reader appends to,
+	// `spare` is the free buffer the flusher swaps in before handing the
+	// filled one to the sink. The sink contract copies/serializes the data
+	// before returning (termws.AppendFrame copies; the fallback
+	// base64-encodes), after which the filled buffer becomes the spare again.
+	// This keeps the sustained-output path allocation-free while guaranteeing
+	// a buffer is never visible to the reader and the flusher at once.
 	var (
 		mu           sync.Mutex
-		pending      []byte
+		pending      = make([]byte, 0, batchBytes)
+		spare        = make([]byte, 0, batchBytes)
 		burstStarted bool
 		lastEmit     time.Time // when terminal:data was last emitted (zero: none yet)
 	)
@@ -569,15 +583,13 @@ func (l *liveConn) pump() {
 			return
 		}
 		data := pending
-		pending = nil
+		pending = spare[:0]
+		spare = nil
 		lastEmit = time.Now()
 		mu.Unlock()
 		// Plan P005: with a raw-data sink wired, output goes there directly
 		// (blocking = transport flow control); otherwise the legacy
 		// terminal:data emitter path is used (headless tests unchanged).
-		l.m.mu.Lock()
-		sink := l.m.dataSink
-		l.m.mu.Unlock()
 		if sink != nil {
 			sink.OnTerminalData(l.tabID, data)
 		} else {
@@ -586,6 +598,10 @@ func (l *liveConn) pump() {
 				Data:  base64.StdEncoding.EncodeToString(data),
 			})
 		}
+		// The sink has consumed `data`; reclaim its array as the spare.
+		mu.Lock()
+		spare = data[:0]
+		mu.Unlock()
 		select {
 		case drained <- struct{}{}:
 		default:

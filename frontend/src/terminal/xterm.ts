@@ -78,6 +78,10 @@ interface Entry {
 
 const pool = new Map<string, Entry>();
 
+// Module-level codec: user input is encoded on every keystroke, so the
+// encoder is allocated once per app session rather than per event.
+const textEncoder = new TextEncoder();
+
 /** Transmit raw terminal input to the backend. Plan P005: keystrokes ride the
  *  terminal WebSocket (a plain macrotask that stays responsive even under
  *  output floods); before the socket is up, fall back to the rpc service
@@ -99,7 +103,7 @@ function flushInput(tabID: string, e: Entry): void {
     }
     const str = e.inputBuf;
     e.inputBuf = "";
-    sendBytes(tabID, new TextEncoder().encode(str));
+    sendBytes(tabID, textEncoder.encode(str));
 }
 
 /** The grid's CSS cell height, read from the public DOM. Both the default and
@@ -230,7 +234,7 @@ function refitForDpiChange(): void {
 }
 
 /** True when WebGL would run on a software rasterizer (llvmpipe, SwiftShader…). */
-function isSoftwareWebGL(): boolean {
+function probeSoftwareWebGL(): boolean {
     try {
         const c = document.createElement("canvas");
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -247,6 +251,19 @@ function isSoftwareWebGL(): boolean {
     } catch {
         return true;
     }
+}
+
+/** Memoized result of probeSoftwareWebGL. The GPU stack does not change
+ *  mid-session, so the canvas + WebGL context are created once per app
+ *  session instead of once per tab (create() runs for every new tab). */
+let softwareWebGL: boolean | null = null;
+
+/** True when WebGL would run on a software rasterizer (memoized). */
+function isSoftwareWebGL(): boolean {
+    if (softwareWebGL === null) {
+        softwareWebGL = probeSoftwareWebGL();
+    }
+    return softwareWebGL;
 }
 
 /**
@@ -445,13 +462,13 @@ export const TermPool = {
             if (cc !== null) {
                 e.preventDefault();
                 e.stopPropagation();
-                sendBytes(tabID, new TextEncoder().encode(cc));
+                sendBytes(tabID, textEncoder.encode(cc));
                 return false;
             }
             // e.code is layout-invariant (Backspace is Backspace on every
             // layout); same semantics as the pre-P008 e.key check.
             if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Backspace") {
-                sendBytes(tabID, new TextEncoder().encode("\x17"));
+                sendBytes(tabID, textEncoder.encode("\x17"));
                 return false;
             }
             return true;

@@ -36,6 +36,31 @@ import (
 // path (the /terminal sink is authoritative), so the queue stays low-rate.
 const eventBuffer = 4096
 
+// blockingConcurrency bounds concurrent executions of the allow-listed
+// long-running RPC methods per client. A multi-GB SFTP transfer or a dial
+// timeout must not starve the rest of the surface, but a flooding client must
+// not spawn unbounded goroutines either — readLoop waits for a slot, so the
+// goroutine count stays bounded.
+const blockingConcurrency = 4
+
+// blockingMethods is the allow-list of RPC methods known to block for the
+// whole duration of a transfer/dial (api/sftp_service.go, sessionservice.go).
+// They are dispatched on bounded goroutines so the read loop keeps serving
+// fast calls; every other method stays fully sequential. The client matches
+// responses by id, so completion order is irrelevant.
+var blockingMethods = map[string]struct{}{
+	"SftpService.Upload":            {},
+	"SftpService.Download":          {},
+	"SftpService.DownloadThenSave":  {},
+	"SessionService.TestConnection": {},
+}
+
+// isBlockingMethod reports whether (svc, method) is on the async allow-list.
+func isBlockingMethod(svc, method string) bool {
+	_, ok := blockingMethods[svc+"."+method]
+	return ok
+}
+
 // Server owns the loopback listener, the per-run token, the RPC service
 // registry and the connected /rpc clients. It implements api.Emitter.
 type Server struct {
@@ -182,10 +207,11 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 		return // Accept already wrote the error response
 	}
 	nc := &rpcClient{
-		srv:  s,
-		ws:   c,
-		out:  make(chan []byte, eventBuffer),
-		done: make(chan struct{}),
+		srv:         s,
+		ws:          c,
+		out:         make(chan []byte, eventBuffer),
+		done:        make(chan struct{}),
+		blockingSem: make(chan struct{}, blockingConcurrency),
 	}
 	s.addClient(nc)
 	go nc.writeLoop()
@@ -245,15 +271,16 @@ func (s *Server) Close() error {
 }
 
 // rpcClient is one accepted /rpc connection. readLoop handles request frames
-// sequentially and writes responses inline; writeLoop drains the buffered
-// event queue. coder/websocket serializes concurrent writes, so events never
-// block responses on the socket.
+// sequentially, except for the allow-listed blocking methods which run on
+// bounded goroutines (blockingSem); writeLoop is the single socket writer and
+// drains both response and event frames.
 type rpcClient struct {
-	srv       *Server
-	ws        *websocket.Conn
-	out       chan []byte
-	done      chan struct{}
-	closeOnce sync.Once
+	srv         *Server
+	ws          *websocket.Conn
+	out         chan []byte
+	done        chan struct{}
+	blockingSem chan struct{}
+	closeOnce   sync.Once
 }
 
 func (c *rpcClient) readLoop() {
@@ -269,16 +296,41 @@ func (c *rpcClient) readLoop() {
 		if err := json.Unmarshal(data, &req); err != nil {
 			continue // malformed frame: no request id to answer
 		}
-		result, callErr := c.srv.Invoke(req.Svc, req.Method, req.Args)
-		frame, err := encodeResponse(req.ID, result, callErr)
-		if err != nil {
-			log.Printf("bridge: marshal response %d: %v", req.ID, err)
+		if isBlockingMethod(req.Svc, req.Method) {
+			if !c.dispatchAsync(req) {
+				return // client closed while waiting for a worker slot
+			}
 			continue
 		}
-		if err := c.ws.Write(context.Background(), websocket.MessageText, frame); err != nil {
-			return
-		}
+		c.respond(req)
 	}
+}
+
+// respond invokes one request and queues its response on the single writer.
+func (c *rpcClient) respond(req rpcRequest) {
+	result, callErr := c.srv.Invoke(req.Svc, req.Method, req.Args)
+	frame, err := encodeResponse(req.ID, result, callErr)
+	if err != nil {
+		log.Printf("bridge: marshal response %d: %v", req.ID, err)
+		return
+	}
+	c.enqueue(frame)
+}
+
+// dispatchAsync runs an allow-listed blocking method on a bounded goroutine so
+// it cannot stall the read loop. It returns false when the client closed while
+// waiting for a slot (readLoop then exits).
+func (c *rpcClient) dispatchAsync(req rpcRequest) bool {
+	select {
+	case c.blockingSem <- struct{}{}:
+	case <-c.done:
+		return false
+	}
+	go func() {
+		defer func() { <-c.blockingSem }()
+		c.respond(req)
+	}()
+	return true
 }
 
 func (c *rpcClient) writeLoop() {
@@ -295,8 +347,9 @@ func (c *rpcClient) writeLoop() {
 	}
 }
 
-// enqueue queues one event frame, blocking while the client's buffer is full
-// (lifecycle events are never dropped) and returning once the client closes.
+// enqueue queues one server→client frame (response or event) on the single
+// writer, blocking while the client's buffer is full (lifecycle events are
+// never dropped) and returning once the client closes.
 func (c *rpcClient) enqueue(frame []byte) {
 	select {
 	case c.out <- frame:

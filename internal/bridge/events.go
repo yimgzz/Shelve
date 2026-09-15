@@ -25,7 +25,20 @@ func (s *Server) Emit(event string, payload any) {
 		log.Printf("bridge: marshal event %q: %v", event, err)
 		return
 	}
+	// The single-client case is the norm (single-window app): deliver it
+	// without allocating a fan-out slice.
 	s.mu.Lock()
+	if len(s.clients) <= 1 {
+		var only *rpcClient
+		for c := range s.clients {
+			only = c
+		}
+		s.mu.Unlock()
+		if only != nil {
+			only.enqueue(frame)
+		}
+		return
+	}
 	clients := make([]*rpcClient, 0, len(s.clients))
 	for c := range s.clients {
 		clients = append(clients, c)

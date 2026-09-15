@@ -21,6 +21,12 @@ files:
   - "package.json"
   - "!node_modules/**"
 
+# Only the English Chromium resource pack ships. The app's own UI is
+# English-only (AGENTS.md §7); the remaining Chromium strings fall back to
+# en-US regardless of the OS locale. Drops ~46 MB of unused locales/*.pak.
+electronLanguages:
+  - "en-US"
+
 # E2-D4: the Go backend is a plain child process shipped next to the app,
 # OUTSIDE the asar. main.ts resolves it at
 # process.resourcesPath/backend/shelve-backend.
@@ -56,3 +62,7 @@ linux:
 appImage:
   license: null
   executableArgs: []
+  # xz compresses far better than the legacy FUSE2 default (gzip) at the cost
+  # of a much slower package step. The legacy toolset forwards
+  # `-comp xz -Xdict-size 100% -b 1048576`.
+  compression: "xz"

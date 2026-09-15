@@ -58,6 +58,11 @@ const (
 	DefaultInterval        = 2 * time.Second
 	DefaultExecTimeout     = 5 * time.Second
 	maxConsecutiveFailures = 5
+	// dfRefreshTicks is how many ticks pass between full `df -h` listings
+	// (plan Phase 4.2). The other ticks run the core script only and reuse
+	// the cached listing; every mount's df output is otherwise re-fetched and
+	// re-serialized into JSON every 2 s for no visible benefit.
+	dfRefreshTicks = 5
 )
 
 // Dialer opens a DEDICATED SSH connection chain for a tab's monitoring.
@@ -225,16 +230,29 @@ func (m *Manager) tick(ctx context.Context, tabID string) {
 	var (
 		prev   *rawSample
 		prevAt time.Time
+		dfText string // cached full `df -h` listing (plan Phase 4.2)
+		ticks  int
 	)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
+		// Full `df -h` listing every dfRefreshTicks ticks; core-only script
+		// in between, reusing the cached listing (payload shape unchanged,
+		// tooltip may lag by up to dfRefreshTicks ticks).
+		full := ticks%dfRefreshTicks == 0
+		script := collectScriptLight
+		if full {
+			script = collectScript
+		}
 		execCtx, cancel := context.WithTimeout(ctx, timeout)
-		out, err := m.runExec(execCtx, tabID, collectScript)
+		out, err := m.runExec(execCtx, tabID, script)
 		cancel()
+		ticks++
 		switch {
 		case err != nil:
 			// A Stop/restart canceled ctx while the exec was in flight
@@ -256,6 +274,11 @@ func (m *Manager) tick(ctx context.Context, tabID string) {
 			if perr != nil {
 				break // malformed output: skip this tick
 			}
+			if full {
+				dfText = cur.DfText
+			} else {
+				cur.DfText = dfText
+			}
 			failures = 0
 			now := time.Now()
 			p := buildPayload(tabID, cur, prev, now.Sub(prevAt))
@@ -265,7 +288,7 @@ func (m *Manager) tick(ctx context.Context, tabID string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-ticker.C:
 		}
 	}
 }

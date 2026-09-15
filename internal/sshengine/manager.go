@@ -149,6 +149,11 @@ type Emitter interface {
 // root when a dedicated transport is wired; nil keeps the legacy emitter
 // path (headless tests unchanged). It MAY block — blocking is the intended
 // transport flow control that propagates backpressure to the pump.
+//
+// Ownership contract: the slice is only valid for the duration of the call.
+// Implementations must copy or serialize it before returning (termws copies
+// into a frame; the base64 fallback encodes immediately) — the pump recycles
+// the backing array for the next batch.
 type TerminalDataSink interface {
 	OnTerminalData(tabID string, data []byte)
 }

@@ -30,7 +30,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
-import { TerminalService } from "../../bindings/shelve/internal/wailsvc";
+import { TerminalService } from "../rpc";
 import type { TerminalSettings } from "../store";
 import { currentThemeTokens } from "../ui/theme";
 import { copyText, readText } from "../ui/clipboard";
@@ -74,7 +74,7 @@ const pool = new Map<string, Entry>();
 
 /** Transmit raw terminal input to the backend. Plan P005: keystrokes ride the
  *  terminal WebSocket (a plain macrotask that stays responsive even under
- *  output floods); before the socket is up, fall back to the Wails service
+ *  output floods); before the socket is up, fall back to the rpc service
  *  call. Shared by typed input and the custom key handler so Ctrl+C and
  *  Shift+Backspace take exactly the same path as ordinary keystrokes. */
 function sendBytes(tabID: string, bytes: Uint8Array): void {

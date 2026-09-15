@@ -1,21 +1,23 @@
 // terminal/ws.ts — plan P005: a WebSocket transport for terminal I/O,
-// bypassing the Wails event bridge (which starves keyboard input via its
+// bypassing the event bridge (which starves keyboard input via its
 // promise-chain delivery and churns goroutines/threads under output
 // floods). Browser WebSocket message handlers are ordinary macrotasks, so
 // keydown stays responsive even mid-flood; input rides the same socket in
 // the opposite direction.
 //
-// The webview page loads from the wails:// custom URI scheme, which cannot
-// carry WebSockets, so the socket lives on a dedicated loopback listener
-// started by the Go side (internal/termws). This module discovers its
-// address with a plain GET /termws-port on the wails:// asset handler and
-// connects to ws://127.0.0.1:<port>/terminal.
+// The socket lives on the backend's loopback listener (internal/termws,
+// mounted at /terminal by internal/bridge). Phase E3: this module resolves
+// its token-gated URL through window.shelve.bridgeEndpoint() — the same
+// {addr, token} the /rpc client uses — and connects to
+// ws://<addr>/terminal?token=….
 //
 // Frame format (shared with internal/termws/frame.go):
 //
 //	[u8 tabIDLen][tabID ASCII][u32 payloadLen BE][payload bytes]
 //
 // Payloads above MAX_PAYLOAD are split into several frames by the sender.
+
+import { resolveEndpoint } from "../rpc/endpoint";
 
 const MAX_TABID_LEN = 64;
 const MAX_PAYLOAD = 256 * 1024;
@@ -72,23 +74,13 @@ function handleMessage(ev: MessageEvent): void {
     outputHandler(id, view.subarray(off, off + size));
 }
 
-/** Discover the loopback terminal WebSocket address via GET /termws-port. */
+/** Resolve the token-gated loopback terminal WebSocket URL (phase E3). */
 async function resolveTerminalWsUrl(): Promise<string> {
-    const ctl = new AbortController();
-    const timer = window.setTimeout(() => ctl.abort(), 5000);
-    try {
-        const resp = await fetch("/termws-port", { signal: ctl.signal });
-        if (!resp.ok) {
-            throw new Error(`termws-port: HTTP ${resp.status}`);
-        }
-        const addr = (await resp.text()).trim();
-        if (!addr) {
-            throw new Error("termws-port: empty address");
-        }
-        return `ws://${addr}/terminal`;
-    } finally {
-        window.clearTimeout(timer);
+    const { addr, token } = await resolveEndpoint();
+    if (!addr) {
+        throw new Error("terminal ws: empty bridge address");
     }
+    return `ws://${addr}/terminal?token=${encodeURIComponent(token)}`;
 }
 
 function connect(): void {
@@ -153,7 +145,7 @@ export function isTerminalWsActive(): boolean {
 
 /**
  * Send raw terminal input over the socket. Returns false when the socket is
- * not open — callers fall back to the Wails service call.
+ * not open — callers fall back to the rpc service call.
  */
 export function sendInput(tabID: string, bytes: Uint8Array): boolean {
     if (!isTerminalWsActive()) {

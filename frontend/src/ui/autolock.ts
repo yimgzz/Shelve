@@ -11,7 +11,7 @@
 // rule: main.ts / long-lived modules subscribe once; per-mount component
 // listeners are removed on unmount).
 
-import { VaultService } from "../../bindings/shelve/internal/wailsvc";
+import { VaultService } from "../rpc";
 import { store } from "../store";
 import { toast } from "../components/toasts";
 

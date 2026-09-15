@@ -10,7 +10,7 @@
 // app shortcuts) is identified by `KeyboardEvent.code`; all TEXT input keeps
 // the layout and flows through xterm's keypress/composition path untouched.
 //
-// Pure module: no DOM side effects, no wails/bindings imports — usable from
+// Pure module: no DOM side effects, no rpc/bindings imports — usable from
 // both ui/ and terminal/.
 
 /** Per-code Shift rule for Ctrl chords (D3/D4):

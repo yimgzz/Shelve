@@ -7,7 +7,7 @@
 // (Connect/Edit/Duplicate/Move to…/Delete), F2 inline rename, inline new
 // folder. Expand/collapse is component-local (not persisted in v1).
 
-import { SessionService } from "../../bindings/shelve/internal/wailsvc";
+import { SessionService } from "../rpc";
 import { store, type NodeDTO, type SearchResultDTO, type StoreState } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { openSessionEditor } from "./session-editor";
@@ -371,7 +371,7 @@ function makeInlineRenameInput(id: string, kind: string, value: string): HTMLEle
 }
 
 async function renameSession(id: string, newName: string): Promise<void> {
-    const dto = (await SessionService.Session(id)) as unknown as import("../store").SessionDTO;
+    const dto = await SessionService.Session(id);
     await SessionService.UpdateSession({
         id: dto.id,
         folderId: dto.folderId,
@@ -427,7 +427,7 @@ function startRename(id: string, kind: string, value: string): void {
 }
 
 async function editSession(id: string): Promise<void> {
-    const dto = (await SessionService.Session(id)) as unknown as import("../store").SessionDTO;
+    const dto = await SessionService.Session(id);
     await openSessionEditor({ mode: "edit", parentID: dto.folderId, initial: dto });
 }
 
@@ -609,7 +609,7 @@ async function queryResults(host: HTMLElement, q: string): Promise<void> {
         console.time(`search(${q})`);
     }
     try {
-        const results = (await SessionService.Search(q)) as unknown as SearchResultDTO[];
+        const results = await SessionService.Search(q);
         if (store.getState().searchQ.trim() !== q) {
             return; // query changed while awaiting
         }

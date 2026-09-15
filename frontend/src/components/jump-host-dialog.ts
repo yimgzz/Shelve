@@ -9,7 +9,7 @@
 // sessions (A8-style destructive-op UX). Passwords never appear in the
 // list or read DTOs (master plan §8).
 
-import { AppService, JumpHostService } from "../../bindings/shelve/internal/wailsvc";
+import { JumpHostService } from "../rpc";
 import { openDialog, type DialogHandle } from "../ui/dialog";
 import { store, type SavedJumpHostDTO, type SavedJumpHostInput } from "../store";
 import { confirmDialog } from "./confirm";
@@ -60,7 +60,7 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
 
     // Legacy fallback: WebKitGTK file inputs expose only the basename
     // (no File.path), so this is used solely when the native binding is
-    // unavailable. AppService.PickFile returns the full path.
+    // unavailable. window.shelve.pickFile returns the full path.
     const file = document.createElement("input");
     file.type = "file";
     file.style.display = "none";
@@ -70,7 +70,7 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
     browse.textContent = "Browse…";
     browse.addEventListener("click", async () => {
         try {
-            const picked = await AppService.PickFile();
+            const picked = await window.shelve.pickFile();
             if (picked) {
                 input.value = picked;
             }

@@ -8,7 +8,7 @@
 import { store } from "../store";
 import type { Tab, TabState, TerminalSettings } from "../store";
 import { TermPool } from "../terminal/xterm";
-import { TerminalService } from "../../bindings/shelve/internal/wailsvc";
+import { TerminalService } from "../rpc";
 
 let paneHost: HTMLElement | null = null;
 let paneEl: HTMLElement | null = null;

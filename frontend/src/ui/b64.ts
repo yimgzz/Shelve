@@ -1,6 +1,6 @@
 // ui/b64.ts — base64<->bytes helpers (Phase 4c task 1).
 //
-// The Wails IPC carries terminal I/O as base64 strings (master plan §5):
+// The rpc transport carries terminal I/O as base64 strings (master plan §5):
 // the engine emits `terminal:data` payloads as b64 (Go side encodes
 // batched output), and `TerminalService.Write` expects b64 input. These
 // two single helpers keep the encoding in one place for the data pump

@@ -11,7 +11,7 @@
 // trigger Start/Stop churn, so transitions happen ONLY when the monitored
 // tabID or the visibility flag changes.
 
-import { MonitorService } from "../../bindings/shelve/internal/wailsvc";
+import { MonitorService } from "../rpc";
 import { store, type MonitorMetrics } from "../store";
 import { toast } from "./toasts";
 

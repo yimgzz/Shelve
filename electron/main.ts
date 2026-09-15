@@ -5,18 +5,25 @@
 //   * spawn the E1 Go backend, read its one-line stdout handshake
 //     ({"event":"ready","addr":"127.0.0.1:PORT","token":"…"}) and provision it
 //     to the renderer through the preload bridge;
-//   * open one sandboxed, context-isolated BrowserWindow showing the E2
-//     placeholder page (the real frontend lands in E3);
+//   * open one sandboxed, context-isolated BrowserWindow showing the Vite
+//     renderer (frontend/dist/index.html, or SHELVE_DEV_URL in dev);
+//   * provide the reviewed native surface (single-file picker, clipboard,
+//     debounced window geometry) over IPC;
 //   * own the backend lifecycle: bounded SIGTERM → SIGKILL on quit, error
 //     dialog + quit if it dies unexpectedly (no orphan).
 //
 // Stdio is lifecycle only (E2-D5): stdout is the handshake, stderr is inherited
 // logs. No application data crosses stdio.
-import { BrowserWindow, Menu, app, dialog, ipcMain } from "electron";
+import { BrowserWindow, Menu, app, clipboard, dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+// The IPC payloads are declared once for main + preload + renderer in
+// frontend/src/rpc/ipc.ts (type-only import: erased from the bundle).
+import type { BridgeEndpoint, WindowState } from "../frontend/src/rpc/ipc";
 
 // ------------------------------------------------------------------ config ---
 
@@ -28,11 +35,12 @@ const HANDSHAKE_TIMEOUT_MS = 10_000;
 const MAX_STDOUT_BUFFER = 64 * 1024;
 const DEFAULT_WIDTH = 1280;
 const DEFAULT_HEIGHT = 800;
-
-interface BridgeEndpoint {
-    addr: string;
-    token: string;
-}
+// Mirror of the BrowserWindow minimums (master plan A7): the persisted
+// geometry is clamped to these before it is handed to the renderer.
+const MIN_WIDTH = 960;
+const MIN_HEIGHT = 540;
+// Debounce for window:state pushes on resize/move (master plan A7).
+const WINDOW_STATE_DEBOUNCE_MS = 300;
 
 // Main-process diagnostics go to stderr (inherited from the shell / Makefile).
 // The per-run token is never logged.
@@ -69,9 +77,10 @@ function backendPath(): string {
         : path.join(app.getAppPath(), "bin", "shelve-backend");
 }
 
-// E2 only: placeholder content; E3 switches this to frontend/dist/index.html.
+// E3: the real renderer bundle built by Vite (base "./" so the relative
+// assets resolve under file://). Shipped at frontend/dist by electron-builder.
 function rendererFile(): string {
-    return path.join(app.getAppPath(), "electron", "placeholder.html");
+    return path.join(app.getAppPath(), "frontend", "dist", "index.html");
 }
 
 // The dev Vite URL is honored only for an unpackaged app, and only for a
@@ -244,13 +253,41 @@ async function shutdownBackend(): Promise<void> {
 
 // ------------------------------------------------------------------ window ---
 
+/**
+ * Push debounced geometry to the renderer on resize/move (master plan A7).
+ * The renderer merges it into settings and persists through the single Go
+ * writer, so main never touches settings.json itself.
+ */
+function wireWindowState(w: BrowserWindow): void {
+    let timer: NodeJS.Timeout | null = null;
+    const send = (): void => {
+        if (w.isDestroyed()) {
+            return;
+        }
+        const [width, height] = w.getSize();
+        const state: WindowState = {
+            width: Math.max(MIN_WIDTH, width),
+            height: Math.max(MIN_HEIGHT, height),
+        };
+        w.webContents.send("window:state", state);
+    };
+    const schedule = (): void => {
+        if (timer) {
+            clearTimeout(timer);
+        }
+        timer = setTimeout(send, WINDOW_STATE_DEBOUNCE_MS);
+    };
+    w.on("resize", schedule);
+    w.on("move", schedule);
+}
+
 function createWindow(): BrowserWindow {
     const { width, height } = readWindowSize();
     const w = new BrowserWindow({
         width,
         height,
-        minWidth: 960,
-        minHeight: 540,
+        minWidth: MIN_WIDTH,
+        minHeight: MIN_HEIGHT,
         backgroundColor: "#06070f",
         show: false,
         autoHideMenuBar: true,
@@ -271,6 +308,27 @@ function createWindow(): BrowserWindow {
     });
 
     const devURL = devRendererURL();
+    const appPageURL = devURL ?? pathToFileURL(rendererFile()).toString();
+
+    // The renderer displays untrusted remote content (terminal output can
+    // print clickable URLs). A link click must NEVER open a window that
+    // inherits this preload — it exposes the per-run bridge token, which
+    // grants full /rpc + /terminal access (master plan §8.11). Deny in-app
+    // windows, hand http(s) to the OS browser, and block navigation away
+    // from the app's own page.
+    w.webContents.setWindowOpenHandler(({ url }) => {
+        if (url.startsWith("https:") || url.startsWith("http:")) {
+            void shell.openExternal(url);
+        }
+        return { action: "deny" };
+    });
+    w.webContents.on("will-navigate", (event, url) => {
+        if (!url.startsWith(appPageURL)) {
+            event.preventDefault();
+            log(`blocked navigation to ${url}`);
+        }
+    });
+
     if (devURL) {
         void w.loadURL(devURL);
     } else {
@@ -285,6 +343,7 @@ function createWindow(): BrowserWindow {
     );
 
     w.once("ready-to-show", () => w.show());
+    wireWindowState(w);
     return w;
 }
 
@@ -302,13 +361,51 @@ function focusWindow(): void {
 // ------------------------------------------------------------------- IPC ---
 
 function registerIpc(): void {
+    // Defense in depth (§8.11): only this window's renderer may use the IPC
+    // surface. The window-open/navigation guards keep untrusted pages out of
+    // the app; this makes any that slipped through fail closed.
+    const trusted = (event: IpcMainInvokeEvent): void => {
+        if (!win || win.isDestroyed() || event.sender !== win.webContents) {
+            throw new Error("unauthorized renderer");
+        }
+    };
+
     // Gates the renderer until the backend handshake exists: rejects (the
     // HTTP-503 equivalent over IPC) before ready.
-    ipcMain.handle("bridge:endpoint", () => {
+    ipcMain.handle("bridge:endpoint", (event) => {
+        trusted(event);
         if (!endpoint) {
             throw new Error("bridge not ready");
         }
         return endpoint;
+    });
+
+    // System clipboard (main-process module) for ui/clipboard.ts.
+    ipcMain.handle("clipboard:readText", (event) => {
+        trusted(event);
+        return clipboard.readText();
+    });
+    ipcMain.handle("clipboard:writeText", (event, text: unknown) => {
+        trusted(event);
+        clipboard.writeText(typeof text === "string" ? text : String(text ?? ""));
+    });
+
+    // Native single-file picker: the SSH key path fields (session editor,
+    // credential and jump-host dialogs). Single file, full path, "" on
+    // cancel — identical to the old AppService.PickFile behavior.
+    ipcMain.handle("dialog:pickFile", async (event) => {
+        trusted(event);
+        if (!win || win.isDestroyed()) {
+            return "";
+        }
+        const result = await dialog.showOpenDialog(win, {
+            title: "Select an SSH private key",
+            properties: ["openFile"],
+        });
+        if (result.canceled) {
+            return "";
+        }
+        return result.filePaths[0] ?? "";
     });
 }
 

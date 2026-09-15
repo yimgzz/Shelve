@@ -3,7 +3,7 @@
 // [About]. Lock is the real vault lock: confirm only when tabs are `ready`
 // (their connections would be dropped); otherwise it locks immediately.
 
-import { AppService, VaultService } from "../../bindings/shelve/internal/wailsvc";
+import { AppService, VaultService } from "../rpc";
 import { store } from "../store";
 import { openContextMenu } from "./context-menu";
 import { openSettingsDialog } from "./settings-dialog";

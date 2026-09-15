@@ -346,4 +346,15 @@ func TestOriginPolicy(t *testing.T) {
 		t.Fatalf("null origin rejected: %v", err)
 	}
 	defer c2.Close(websocket.StatusNormalClosure, "")
+
+	// The Electron renderer's loadFile page origin ("file://") must be
+	// accepted: Chromium serializes file:// pages this way and
+	// coder/websocket cannot match an origin without a host.
+	c3, _, err := websocket.Dial(ctx, base+"/terminal", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{"file://"}},
+	})
+	if err != nil {
+		t.Fatalf("file:// origin rejected: %v", err)
+	}
+	defer c3.Close(websocket.StatusNormalClosure, "")
 }

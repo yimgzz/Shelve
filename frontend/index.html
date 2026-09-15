@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <!-- FOUC guard (master plan §6; plan P001): set the theme family AND
          variant from the cached values before first paint so no theme flash
-         occurs on reload. ui/theme.ts keeps both caches in sync. -->
+         occurs on reload. ui/theme.ts keeps both caches in sync.
+         The Content-Security-Policy is injected by the vite.config.ts
+         `shelve:csp-inline-script-hash` plugin, which hashes this inline
+         script (script-src 'self' 'sha256-…'); there is no blanket
+         script-src 'unsafe-inline'. -->
     <script>
         (function () {
             try {

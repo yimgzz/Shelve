@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,16 +154,19 @@ func (s *Server) handlePort(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
-	// Origin check (master plan §8.9): the webview's page origin is the
-	// wails:// custom scheme (host part varies by build — wails://* covers
-	// it), and loopback origins cover the coder test client / dev servers.
-	// WebKitGTK may serialize the custom-scheme page origin as the literal
-	// header "null" (opaque); coder/websocket cannot match that value
-	// (url.Parse("null") has no host and authenticateOrigin rejects it), so
-	// strip it first. Everything else that is not one of the patterns —
-	// e.g. any http(s):// web page origin (DNS rebinding / CSRF) — is
-	// rejected by Accept below.
-	if r.Header.Get("Origin") == "null" {
+	// Origin check (master plan §8.9): the page origin of the shell may be
+	// the custom scheme (host part varies by build — wails://* covers it),
+	// the Electron renderer loading a local file, or a loopback dev server.
+	// coder/websocket rejects origins it cannot parse into a host, so strip
+	// the two opaque forms first:
+	//   * "null"    — how WebKitGTK may serialize the page origin;
+	//   * "file://" — how Chromium serializes a loadFile page origin
+	//                 (Electron's renderer).
+	// Everything else that is not one of the patterns — e.g. any
+	// http(s):// web page origin (DNS rebinding / CSRF) — is rejected by
+	// Accept below; the bridge's per-run token is the actual gate.
+	switch origin := r.Header.Get("Origin"); {
+	case origin == "null", strings.HasPrefix(origin, "file://"):
 		r.Header.Del("Origin")
 	}
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{

@@ -1,15 +1,43 @@
-// electron/preload.ts — the renderer's complete main-process surface (E2 task 3).
+// electron/preload.ts — the renderer's complete main-process surface
+// (phase E2/E3; master plan §8.11).
 //
 // Bundled to CommonJS (dist-electron/preload.cjs) because ESM preload scripts
-// are unsupported in sandboxed renderers. Phase E2 exposes only
-// `bridgeEndpoint()`; E3 adds clipboard, pickFile, windowState, onThemeChange
-// and quit. Every addition is reviewed against master plan §8 (no secrets, no
-// Node in the renderer).
-import { contextBridge, ipcRenderer } from "electron";
+// are unsupported in sandboxed renderers. The surface is deliberately tiny
+// and reviewed: the backend endpoint, the clipboard, the native single-file
+// picker and the debounced window geometry. No Node, no arbitrary IPC, no
+// secrets (the per-run token rides `bridgeEndpoint()` only, never a log).
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+
+// The IPC payloads are declared once for main + preload + renderer in
+// frontend/src/rpc/ipc.ts (type-only import: erased from the bundle).
+import type { BridgeEndpoint, WindowState } from "../frontend/src/rpc/ipc";
 
 contextBridge.exposeInMainWorld("shelve", {
     // The per-run loopback endpoint ({addr, token}) printed by the Go backend
     // on stdout. The token is never logged or persisted; it rides this IPC
     // call only and then the loopback query string of the WebSocket upgrades.
-    bridgeEndpoint: () => ipcRenderer.invoke("bridge:endpoint"),
+    bridgeEndpoint: (): Promise<BridgeEndpoint> => ipcRenderer.invoke("bridge:endpoint"),
+
+    // System clipboard via the Electron main process (works regardless of
+    // secure-context restrictions on the web Clipboard API).
+    clipboard: {
+        readText: (): Promise<string> => ipcRenderer.invoke("clipboard:readText"),
+        writeText: (text: string): Promise<void> => ipcRenderer.invoke("clipboard:writeText", text),
+    },
+
+    // Native single-file picker; resolves "" on cancel (the old
+    // AppService.PickFile contract).
+    pickFile: (): Promise<string> => ipcRenderer.invoke("dialog:pickFile"),
+
+    // Debounced window geometry from the main process; the renderer merges it
+    // into settings and persists through AppService.SaveSettings (A7).
+    windowState: {
+        onChange: (cb: (state: WindowState) => void): (() => void) => {
+            const listener = (_event: IpcRendererEvent, state: WindowState): void => cb(state);
+            ipcRenderer.on("window:state", listener);
+            return () => {
+                ipcRenderer.removeListener("window:state", listener);
+            };
+        },
+    },
 });

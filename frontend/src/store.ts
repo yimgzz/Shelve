@@ -1,7 +1,7 @@
 // store.ts — tiny typed pub/sub store (master plan §5).
 //
 // RULE: components subscribe to the store; they never call
-// `Events.On` directly. main.ts is the single owner of the Wails event
+// `events.on` directly. main.ts is the single owner of the rpc event
 // bus and routes every event here via set(). This keeps one source of
 // truth and prevents listener growth across lock/unlock cycles.
 //
@@ -15,150 +15,39 @@
 //
 // The store also owns the few user actions that mutate backend state
 // and must reconcile async results with the UI (connectSession,
-// closeTab): those bridge the Wails service bindings and the reactive
+// closeTab): those bridge the rpc service proxies and the reactive
 // state in one place so components stay presentation-only.
 
-import { CredentialService, JumpHostService, SessionService, TerminalService } from "../bindings/shelve/internal/wailsvc";
+import { CredentialService, JumpHostService, SessionService, TerminalService } from "./rpc";
+import type {
+    CredentialDTO,
+    NodeDTO,
+    SavedJumpHostDTO,
+    SessionDTO,
+    Settings,
+} from "./rpc/types";
 import { toast } from "./components/toasts";
+
+// The wire contract lives in ONE place: rpc/types.ts mirrors the Go json
+// tags. These re-exports keep every existing `type X from "../store"` import
+// working without a second, drift-prone copy of the same shape.
+export type {
+    CredentialDTO,
+    CredentialInput,
+    JumpHostDTO,
+    NodeDTO,
+    SavedJumpHostDTO,
+    SavedJumpHostInput,
+    SearchResultDTO,
+    SessionDTO,
+    Settings,
+    SftpEntryDTO,
+    TerminalSettings,
+    WindowSettings,
+} from "./rpc/types";
 
 export type VaultState = "create" | "locked" | "unlocked";
 export type TabState = "connecting" | "ready" | "error" | "closed";
-
-export interface WindowSettings {
-    width: number;
-    height: number;
-    leftWidth: number;
-    /** Persisted SFTP right-panel width (0/absent → normalized to 320). */
-    sftpWidth: number;
-}
-
-export interface TerminalSettings {
-    fontFamily: string;
-    fontSize: number;
-    scrollback: number;
-}
-
-export interface Settings {
-   theme: string; // "system" | "light" | "dark" — the mode
-   /** Concrete palette id ("" = family default). Plan P001. */
-   themeVariant: string;
-   autoLockMinutes: number;
-    sftpBrowserEnabled: boolean;
-    /** Bottom-bar system monitor (plan P004). Defaults to ON. */
-    monitoringEnabled: boolean;
-    terminal: TerminalSettings;
-    textEditorCommand: string;
-    /** Global SFTP browser start path ("~" default). Plan P002. */
-    sftpInitialPath: string;
-    window: WindowSettings;
-}
-
-/** Session-tree node (secret-free read view, master plan §5). */
-export interface NodeDTO {
-    kind: "folder" | "session";
-    id: string;
-    name: string;
-    children: NodeDTO[];
-}
-
-/** Jump host read view. */
-export interface JumpHostDTO {
-    host: string;
-    port: number;
-    user: string;
-    authType: number;
-    hasPassword: boolean;
-    keyPath?: string;
-    /** Bastion-style hop (plan P009): last handshake, target-embedding. */
-    bastion?: boolean;
-}
-
-/** Session read view snapshot (stored per tab). */
-export interface SessionDTO {
-    id: string;
-    folderId: string;
-    name: string;
-    host: string;
-    port: number;
-    user: string;
-    authType: number;
-    hasPassword: boolean;
-    keyPath?: string;
-    jumpHosts: JumpHostDTO[];
-    extraArgs: string;
-    /** Per-session SFTP browser start path ("" = global default). Plan P002. */
-    sftpInitialPath?: string;
-    /**
-     * Optional reference to a named credential (plan P003). While set,
-     * the backend resolves User+Auth from the credential at connect/test
-     * time; the inline fields remain the fallback snapshot.
-     */
-    credentialId?: string;
-    /**
-     * Optional reference to a saved jump host (plan P006). While set, the
-     * backend replaces the whole inline jump chain with the saved host's
-     * hop at connect/test time; the inline rows remain the fallback
-     * snapshot.
-     */
-    jumpHostRef?: string;
-}
-
-/** Saved-credential read view (secret-free, plan P003 §4.3). */
-export interface CredentialDTO {
-    id: string;
-    name: string;
-    user: string;
-    authType: number;
-    hasPassword: boolean;
-    keyPath?: string;
-}
-
-/** Saved-credential write draft (password only flows INTO the vault). */
-export interface CredentialInput {
-    id?: string;
-    name: string;
-    user: string;
-    authType: number;
-    password?: string;
-    keyPath?: string;
-}
-
-/** Saved-jump-host read view (secret-free, plan P006). */
-export interface SavedJumpHostDTO {
-    id: string;
-    name: string;
-    host: string;
-    port: number;
-    user: string;
-    authType: number;
-    hasPassword: boolean;
-    keyPath?: string;
-    /** Bastion-style host (plan P009): last handshake, target-embedding. */
-    bastion?: boolean;
-}
-
-/** Saved-jump-host write draft (password only flows INTO the vault). */
-export interface SavedJumpHostInput {
-    id?: string;
-    name: string;
-    host: string;
-    port: number;
-    user: string;
-    authType: number;
-    password?: string;
-    keyPath?: string;
-    /** Bastion-style host (plan P009): last handshake, target-embedding. */
-    bastion?: boolean;
-}
-
-/** One flat live-search result (master plan §2 A9). */
-export interface SearchResultDTO {
-    id: string;
-    name: string;
-    host: string;
-    user: string;
-    folderPath: string;
-}
 
 export interface Tab {
     id: string;
@@ -177,16 +66,7 @@ export interface ForwardDTO {
     error?: string;
 }
 
-/** One SFTP listing row (mirrors wailsvc.SftpEntryDTO; master plan §5). */
-export interface SftpEntryDTO {
-    name: string;
-    isDir: boolean;
-    size: number;
-    /** RFC3339 string (Go time.Time over the wire). */
-    modTime: string;
-    /** Display hint for the row icon (📄 vs 📦); does not gate editing. */
-    textLike: boolean;
-}
+/** One SFTP listing row (SftpEntryDTO is defined in rpc/types.ts). */
 
 /** Cached latest state of one in-flight transfer (Phase 5c, sftp:progress). */
 export interface SftpTransfer {
@@ -344,7 +224,7 @@ class Store {
     /** Re-fetch the session tree into the store (called after mutations). */
     async refreshTree(): Promise<void> {
         try {
-            const tree = (await SessionService.Tree()) as unknown as NodeDTO[];
+            const tree = await SessionService.Tree();
             this.set({ tree });
         } catch (err) {
             toast("error", String(err));
@@ -357,7 +237,7 @@ class Store {
      */
     async refreshCredentials(): Promise<void> {
         try {
-            const credentials = (await CredentialService.List()) as unknown as CredentialDTO[];
+            const credentials = await CredentialService.List();
             this.set({ credentials });
         } catch (err) {
             toast("error", String(err));
@@ -370,7 +250,7 @@ class Store {
      */
     async refreshSavedJumpHosts(): Promise<void> {
         try {
-            const savedJumpHosts = (await JumpHostService.List()) as unknown as SavedJumpHostDTO[];
+            const savedJumpHosts = await JumpHostService.List();
             this.set({ savedJumpHosts });
         } catch (err) {
             toast("error", String(err));
@@ -396,7 +276,7 @@ class Store {
     async connectSession(sessionID: string): Promise<void> {
         let dto: SessionDTO;
         try {
-            dto = (await SessionService.Session(sessionID)) as unknown as SessionDTO;
+            dto = await SessionService.Session(sessionID);
         } catch (err) {
             toast("error", String(err));
             return;

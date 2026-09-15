@@ -4,7 +4,7 @@
 // password shows an inline error + CSS shake. On success the vault
 // emits vault:state-changed and main.ts swaps to the app shell.
 
-import { VaultService } from "../../bindings/shelve/internal/wailsvc";
+import { VaultService } from "../rpc";
 
 export type UnlockMode = "create" | "locked";
 

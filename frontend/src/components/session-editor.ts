@@ -8,7 +8,7 @@
 // runs against the UNSAVED draft via SessionService.TestConnection
 // (host-key/key-passphrase prompt modals may appear mid-test = correct).
 
-import { AppService, SessionService } from "../../bindings/shelve/internal/wailsvc";
+import { SessionService } from "../rpc";
 import { openDialog, type DialogHandle } from "../ui/dialog";
 import { store, type SessionDTO, type JumpHostDTO, type CredentialDTO, type SavedJumpHostDTO } from "../store";
 import { toast } from "./toasts";
@@ -33,7 +33,7 @@ export interface JumpHostInput {
     port: number;
     user: string;
     authType: number;
-    // Present-but-maybe-undefined, matching the Wails-generated model.
+    // Present-but-maybe-undefined, matching the rpc DTO model.
     password: string | undefined;
     keyPath: string | undefined;
     /** Bastion-style hop (plan P009): last handshake, target-embedding. */
@@ -41,7 +41,7 @@ export interface JumpHostInput {
 }
 
 export interface SessionInput {
-    // The Wails-generated SessionInput model declares id/sftpInitialPath/
+    // The rpc SessionInput model declares id/sftpInitialPath/
     // credentialId as present-but-maybe-undefined members, so the local
     // draft type matches ("" = absent/global-default).
     id: string;
@@ -113,7 +113,7 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
 
     // Legacy fallback: WebKitGTK file inputs expose only the basename
     // (no File.path), so this is used solely when the native binding is
-    // unavailable. AppService.PickFile returns the full path.
+    // unavailable. window.shelve.pickFile returns the full path.
     const file = document.createElement("input");
     file.type = "file";
     file.style.display = "none";
@@ -123,7 +123,7 @@ function pathRow(value: string): { input: HTMLInputElement; row: HTMLElement; er
     browse.textContent = "Browse…";
     browse.addEventListener("click", async () => {
         try {
-            const picked = await AppService.PickFile();
+            const picked = await window.shelve.pickFile();
             if (picked) {
                 input.value = picked;
             }

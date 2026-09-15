@@ -1,10 +1,13 @@
-# electron-builder configuration (master plan §5, §7; phase E2).
+# electron-builder configuration (master plan §5, §7; phase E5).
 #
-# E2 wires only the unpacked Linux build used by `make build` / `make run`:
-# `electron-builder --linux dir` -> bin/linux-unpacked/shelve. The AppImage
-# target and the final artifact metadata land in E5.
-appId: "dev.shelve.app"
-productName: "shelve"
+# E2 wired the unpacked Linux build used by `make build` / `make run`
+# (`electron-builder --linux dir` -> bin/linux-unpacked/shelve). E5 adds the
+# AppImage target (`make appimage` -> bin/shelve-<version>-x86_64.AppImage) and
+# the final artifact metadata. Linux is the only target.
+appId: "io.shelve.app"
+productName: "Shelve"
+executableName: "shelve"
+copyright: "(c) 2026, Shelve"
 
 directories:
   output: "bin"
@@ -18,13 +21,38 @@ files:
   - "package.json"
   - "!node_modules/**"
 
-# E2-D4: the Go backend is a plain child process shipped next to the app.
-# main.ts resolves it at process.resourcesPath/backend/shelve-backend.
+# E2-D4: the Go backend is a plain child process shipped next to the app,
+# OUTSIDE the asar. main.ts resolves it at
+# process.resourcesPath/backend/shelve-backend.
 extraResources:
   - from: "bin/shelve-backend"
     to: "backend/shelve-backend"
 
+asar: true
+# No native modules: never rebuild anything against the Electron ABI.
+npmRebuild: false
+
 linux:
-  executableName: "shelve"
-  category: "Network"
-  synopsis: "Local-first SSH session manager"
+  target:
+    - "AppImage"
+  # electron-builder appends the trailing ";": Network;Utility;
+  category: "Network;Utility"
+  icon: "build/icon.png"
+  # Keep the installed `shelve.desktop` name in sync with Electron's app_id /
+  # WM_CLASS (`desktopName` in package.json), so panels associate the running
+  # window with this entry.
+  syncDesktopName: true
+  artifactName: "shelve-${version}-${arch}.AppImage"
+  # The desktop entry's Comment is derived from `description`.
+  synopsis: "Lightweight local SSH session manager"
+  description: "Local-first SSH session manager with an encrypted vault."
+
+# The app is GPL/private; do not embed a EULA into the AppImage. The desktop
+# Exec gets NO forced `--no-sandbox`: electron-builder would otherwise bake it
+# into `Exec=AppRun --no-sandbox %U` for the legacy AppImage toolset, which
+# would disable the Chromium sandbox for every desktop launch. With an empty
+# arg list, AppRun's own `unshare -Ur` probe (and main.ts) decides, so the
+# sandbox stays on where the host supports it (phase E5 task 2).
+appImage:
+  license: null
+  executableArgs: []

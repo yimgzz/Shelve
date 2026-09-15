@@ -103,21 +103,51 @@ dev: ensure-image node-deps ## Hot-reload dev session in the container (X11); El
 
 # ----------------------------------------------------------------- build ---
 
-.PHONY: build
-build: ensure-image ## Release build in the container -> bin/linux-unpacked/shelve
+# Shared payload pipeline for `build` and `appimage`: keeping it in one place
+# means the shipped AppImage cannot drift from the `--linux dir` build that
+# `make run` exercises. The two targets differ only in the electron-builder
+# target they invoke.
+.PHONY: payload
+payload: ensure-image ## Build the Go backend + renderer + Electron bundles (shared by build/appimage)
 	$(DOCKER_RUN) $(IMAGE) sh -c '\
 		set -e; \
 		go build -o bin/shelve-backend ./cmd/shelve-backend; \
 		npm ci --no-audit --no-fund; \
 		npm run build:renderer; \
-		npm run build:electron; \
-		npx electron-builder --linux dir'
+		npm run build:electron'
+	$(MAKE) fix-owner
+
+.PHONY: build
+build: payload ## Release build in the container -> bin/linux-unpacked/shelve
+	$(DOCKER_RUN) $(IMAGE) npx electron-builder --linux dir
 	$(MAKE) fix-owner
 
 .PHONY: run
 run: ## Run the packaged app on the host (needs the Electron/Chromium runtime libs)
 	@test -x bin/linux-unpacked/$(APP) || { echo "bin/linux-unpacked/$(APP) not found - run 'make build' first" >&2; exit 1; }
+	@if ldd ./bin/linux-unpacked/$(APP) 2>/dev/null | grep -q "not found"; then \
+		echo "missing Electron/Chromium runtime libraries:" >&2; \
+		ldd ./bin/linux-unpacked/$(APP) | grep "not found" >&2; \
+		echo "install the host runtime libs listed in README.md (Prerequisites), e.g. on Debian/Ubuntu/ALT:" >&2; \
+		echo "  $$(grep -v '^#' $(ROOT)/scripts/host-runtime-libs.txt | tr '\n' ' ')" >&2; \
+		exit 1; \
+	fi
 	./bin/linux-unpacked/$(APP)
+
+# ------------------------------------------------------------- appimage ---
+
+.PHONY: appimage
+appimage: payload ## Build the self-contained AppImage in the container -> bin/shelve-<version>-x86_64.AppImage
+	$(DOCKER_RUN) $(IMAGE) npx electron-builder --linux AppImage
+	$(MAKE) fix-owner
+	@echo "AppImage ready: $$(ls -1 bin/shelve-*.AppImage 2>/dev/null | head -1)"
+
+.PHONY: appimage-check
+appimage-check: ## Verify the AppImage payload + dependency self-containment (scripts/verify-appimage.sh)
+	./scripts/verify-appimage.sh
+
+.PHONY: package
+package: appimage ## Alias of appimage
 
 .PHONY: clean
 clean: ## Remove build outputs

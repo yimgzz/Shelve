@@ -3,9 +3,10 @@
 Stash your shells in style!
 
 A lightweight, fast, fully local SSH session manager. Go backend
-(`golang.org/x/crypto/ssh`) + Wails v3 frontend (vanilla TypeScript + Vite).
-Sessions live in an encrypted vault (Argon2id + AES-256-GCM) under
-`$XDG_CONFIG_HOME/shelve`; no cloud, no telemetry, no accounts.
+(`golang.org/x/crypto/ssh`) + Electron (Chromium) shell with a vanilla
+TypeScript + Vite renderer. Sessions live in an encrypted vault (Argon2id +
+AES-256-GCM) under `$XDG_CONFIG_HOME/shelve`; no cloud, no telemetry, no
+accounts.
 
 **Status:** v1.1 — feature-complete (Phases 1–5d done, final gate closed) plus
 post-v1 refinements (terminal mouse behavior P003, system monitor P004). The
@@ -19,52 +20,62 @@ by default). Roadmap: `plans/` (master plan + phase plans).
 ## Prerequisites
 
 - **Docker** — the only host tool required for development & builds.
-  No Go, Node, GTK or WebKit packages are needed on the host for
-  `make dev` / `make build` / `make test` / `make lint`.
-- To run the built binary directly on the host (`make run`): the host
-  distro's GTK4 + WebKitGTK 6.0 **runtime** libraries
-  (e.g. `gtk-4`, `webkitgtk-6.0` on ALT).
+  No Go or Node packages are needed on the host for `make dev` / `make build` /
+  `make appimage` / `make test` / `make lint`.
+- To run the unpacked build directly on the host (`make run`): the
+  **Electron/Chromium runtime libraries**. On a stock desktop most are present
+  already; on a minimal install add (Debian/Ubuntu/ALT package names):
+  `libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 libgtk-3-0
+  libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3
+  libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libxss1 libxtst6
+  libx11-xcb1 libxext6 libxrender1 libxi6 libxcursor1 libxshmfence1 fontconfig
+  libsecret-1-0`. No GTK4/WebKit runtime is needed (the old WebKit-based stack
+  is gone). The authoritative list is `scripts/host-runtime-libs.txt` (shared
+  with the `make run` hint and the AppImage smoke test).
+- The **AppImage bundles Chromium and its own runtime libraries**, so it needs
+  no distro packages beyond the stock desktop libraries listed above (see
+  [Packaging](#packaging-appimage)).
 
 ## Development workflow
 
 | Command | Action |
 |---|---|
 | `make dev-image` | Build the `shelve-dev` toolchain image (lazy: `dev`/`build` do it automatically) |
-| `make dev` | `wails3 dev` in the container — hot reload; the window opens on your desktop |
-| `make build` | Release build in the container → `bin/shelve` |
-| `make run` | Run the built binary on the host (X11) |
+| `make dev` | Container hot-reload (Vite + Electron over X11); the window opens on your desktop |
+| `make build` | Release build in the container → `bin/linux-unpacked/shelve` (+ `bin/shelve-backend`) |
+| `make run` | Run the unpacked build on the host (needs the Electron runtime libs) |
 | `make test` | Go unit tests in the container |
 | `make test-race` | Go unit tests with the race detector |
 | `make test-integration` | SFTP/SSH integration tests via testcontainers (needs the Docker socket; builds `docker/sshd`) |
-| `make lint` | `gofmt` + `go vet` (container) + frontend `tsc --noEmit` |
-| `make appimage` | Build a self-contained AppImage in the container → `bin/shelve-<arch>.AppImage` |
-| `make appimage-check` | Verify the AppImage payload + dependency self-containment (`scripts/verify-appimage.sh`) |
-| `make clean` | Remove `bin/`, `frontend/dist/`, `frontend/bindings/` |
-| `make wails-init` | Re-merge the pinned Wails template (recreates frontend/build scaffolding) |
+| `make lint` | `gofmt` + `go vet` (container) + renderer & Electron `tsc --noEmit` |
+| `make appimage` | Build a self-contained AppImage in the container → `bin/shelve-<version>-x86_64.AppImage` |
+| `make appimage-check` | Verify the AppImage payload + self-containment (`scripts/verify-appimage.sh`) |
+| `make package` | Alias of `make appimage` |
+| `make clean` | Remove `bin/`, `frontend/dist/`, `dist-electron/`, `node_modules/` |
 
 `make dev` details:
 
 - X11 forwarding: mounts `/tmp/.X11-unix`, passes `DISPLAY` (and
   `XAUTHORITY` if `~/.Xauthority` exists). Works on X11 and on Wayland via
   XWayland — no native Wayland socket forwarding in v1.
-- `--network host` so the app can reach real SSH hosts.
+- `--network host` so the app can reach real SSH hosts and the Vite dev server.
 - `~/.config/shelve` (created 0700) is mounted into the
   container so the real vault/settings persist across runs.
 - Hot reload: frontend edits → Vite reloads the UI without a rebuild;
-  Go edits → the app is rebuilt and restarted.
+  Electron main/preload edits → the bundle is rebuilt and Electron restarts.
 
 If the window fails to open under `make dev`:
 
 1. Temporarily allow local X clients and retry: `xhost +local:`
    (revoke with `xhost -local:` afterwards).
-2. On some desktops the in-container window still cannot start (GTK/DBus
+2. On some desktops the in-container window still cannot start (display/DBus
    session restrictions inside the container, sandbox/namespace limits).
    In that case use the host-run workflow — it is fully supported and is
    the reliable path:
 
    ```
-   make build   # compile in the container -> bin/shelve
-   make run     # launch the binary on the host (window on your desktop)
+   make build   # compile in the container -> bin/linux-unpacked/shelve
+   make run     # launch it on the host (window on your desktop)
    ```
 
 ## Development notes
@@ -73,13 +84,19 @@ If the window fails to open under `make dev`:
   sessions (e.g. a 300-session fixture for search/performance smoke tests).
   Build and run it inside the container, pointing it at a scratch config dir;
   it never touches your real vault unless you tell it to.
+- **Process model:** the Electron main process spawns the Go backend
+  (`bin/shelve-backend`) as a child process. The backend prints a one-line
+  JSON handshake (`{"event":"ready","addr":"127.0.0.1:PORT","token":"…"}`) on
+  stdout; main hands that loopback endpoint + per-run token to the sandboxed
+  renderer. Application data crosses the loopback RPC/terminal WebSocket —
+  never stdio, never the renderer's Node.
 - **In-container window limitation vs `make run`:** `make dev` runs the app
   *inside* the container. On some desktops (observed: GNOME/XWayland on ALT
-  Linux) the in-container window cannot start due to GTK/DBus session
-  restrictions inside the container plus WebKit sandbox namespace limits. In
-  that case the always-supported workflow is `make build` + `make run` (build
-  in the container, run the binary on the host). The in-container hot-reload
-  loop is then not available — but UI phases are QA'd via the host-run binary.
+  Linux) the in-container window cannot start due to display/DBus session
+  restrictions and sandbox/namespace limits inside the container. In that case
+  the always-supported workflow is `make build` + `make run` (build in the
+  container, run the app on the host). The in-container hot-reload loop is then
+  not available — but UI phases are QA'd via the host-run build.
 - **Settings** (gear menu → Settings): theme, auto-lock minutes, SFTP browser
   toggle, system-monitor toggle, terminal font/size/scrollback, and the
   text-editor command are saved to `settings.json`. Theme and terminal
@@ -106,41 +123,50 @@ If the window fails to open under `make dev`:
 ## Packaging (AppImage)
 
 `make appimage` produces a self-contained AppImage at
-`bin/shelve-<arch>.AppImage` (e.g. `bin/shelve-x86_64.AppImage`). Everything
-runs inside the `shelve-dev` container — the host needs Docker only.
-linuxdeploy / AppRun are downloaded at build time (network required during
-packaging) and cached in the gitignored `build/linux/appimage/build/` scratch
-dir.
+`bin/shelve-<version>-x86_64.AppImage` (e.g. `bin/shelve-0.1.0-x86_64.AppImage`).
+Everything runs inside the `shelve-dev` container — the host needs Docker only.
+The packaging metadata lives in `electron-builder.yml`; artifacts land in
+`bin/` (gitignored).
 
-What is bundled (via `wails3 generate appimage`, pinned Wails v3.0.0-beta.20):
+What is bundled (via `electron-builder --linux AppImage`):
 
-- the release binary (`-tags production`);
-- the GTK4 + WebKitGTK 6.0 runtime libraries, the WebKit helper processes
-  (`WebKitWebProcess`, `WebKitNetworkProcess`, injected bundle), GLib schemas,
-  GDK pixbuf loaders, Pango/Cairo/etc. — end users need **no** GTK/WebKit
-  packages;
-- the desktop entry (at the AppDir root — the upstream linuxdeploy layout) and
-  the app icon.
+- the Electron runtime with its bundled Chromium: the `shelve` executable, the
+  Chromium `*.so` set (`libEGL`, `libGLESv2`, `libffmpeg`, `libvk_swiftshader`,
+  `libvulkan`), locales, ICU and the V8 snapshot;
+- the app payload in `resources/app.asar` (main/preload + the Vite renderer)
+  and the Go backend at `resources/backend/shelve-backend`, **outside** the
+  asar;
+- the desktop entry (`shelve.desktop`) and `.DirIcon`.
 
-Deliberately *not* bundled (provided by any stock desktop): glibc, libstdc++,
-the X11/Wayland client libs, the font stack (freetype/harfbuzz/fontconfig), and
-the GPU drivers (GL/EGL/drm/gbm — these must stay host-provided).
+Deliberately *not* bundled (provided by the host desktop): glibc/libstdc++, the
+GTK3/X11/Wayland client libraries, the font stack, and the GPU drivers
+(GL/EGL/drm/gbm — these must stay host-provided). The AppImage needs **no**
+GTK4/WebKit packages; Electron ships its own Chromium and links only the stock
+desktop libraries listed in [Prerequisites](#prerequisites).
 
 ```sh
-make appimage             # -> bin/shelve-x86_64.AppImage
-make appimage-check       # headless payload + dependency verification
-./bin/shelve-x86_64.AppImage
+make appimage             # -> bin/shelve-<version>-x86_64.AppImage
+make appimage-check       # headless payload + self-containment verification
+./bin/shelve-0.1.0-x86_64.AppImage
 ```
 
-- Requires FUSE 2/3 on the target system; without FUSE use
-  `./bin/shelve-x86_64.AppImage --appimage-extract-and-run`.
-- **Target platform:** the bundle is built on Debian 13 (trixie), so the floor
-  is glibc ≥ 2.39 with `CXXABI_1.3.15` in libstdc++ (Debian 13 / Ubuntu 24.04 /
-  Fedora 40 class). Older distros should keep using `make build` + `make run`;
-  the dev host itself (ALT Linux, glibc 2.38) is below this floor and cannot
-  execute the AppImage.
-- DEB/RPM/Flatpak remain out of scope (packaging phase cancelled; ad-hoc only —
-  see master plan §10).
+- The AppImage uses FUSE to mount itself. Without FUSE (containers, locked-down
+  hosts) use
+  `./bin/shelve-0.1.0-x86_64.AppImage --appimage-extract-and-run`.
+- **Target platform:** built on Debian 13 (trixie); the floor is glibc ≥ 2.39
+  plus the Electron runtime libraries of any recent desktop. Older hosts should
+  keep using `make build` + `make run`.
+- **Renderer sandbox:** the renderer runs with `contextIsolation`, no Node
+  access, and a minimal reviewed preload. The Chromium process sandbox needs a
+  root-owned setuid `chrome-sandbox`, which a read-only AppImage mount cannot
+  provide; when the environment cannot support it (an AppImage on a host
+  without unprivileged user namespaces, or an explicit `--no-sandbox`) the app
+  appends `--no-sandbox --disable-gpu-sandbox` and logs the choice. This does
+  not change the security model: the vault stays encrypted, secrets never leave
+  it, and the loopback RPC/terminal socket stays token-gated. Override with
+  `SHELVE_SANDBOX=1` (force on) or `SHELVE_SANDBOX=0` (force off).
+- DEB/RPM/Flatpak and Windows/macOS targets are out of scope (Linux-only
+  delivery; see master plan §7).
 
 ## SFTP browser
 
@@ -235,8 +261,9 @@ mechanism for a lost master password: keep a safe backup of your
   (temp file + rename) and uses the AAD tag `dsmsv1`.
 - **No plaintext credentials on disk:** `vault.json` is the only store of
   secrets; `settings.json` and `known_hosts` are guaranteed by tests to contain
-  none. Credentials are never sent across the Wails IPC — the SFTP panel passes
-  only file *paths*, and Go streams the bytes (large files never cross IPC).
+  none. Credentials never cross the renderer transport (the loopback RPC and
+  terminal WebSocket) — the SFTP panel passes only file *paths*, and Go streams
+  the bytes (large files never cross the transport).
 - **Memory hygiene:** the master password and derived key are zeroized after
   use; keys are never logged and errors never include password/key material.
 - **Host keys:** app-managed `known_hosts` with TOFU — you must approve a new
@@ -248,8 +275,10 @@ mechanism for a lost master password: keep a safe backup of your
 - **Temp files:** SFTP edit temp copies are `0600` under `tmp/` and are swept
   on lock, exit, and at startup (stale sweep).
 - **Network:** the app makes no network calls except to the SSH hosts you
-  configure and local port-forward sockets on `127.0.0.1`. No telemetry, no
-  update checks, no crash reporting.
+  configure and loopback listeners on `127.0.0.1` (the backend RPC/terminal
+  WebSocket, bound to an ephemeral port and gated by a per-run token, plus
+  local port-forward sockets). No telemetry, no update checks, no crash
+  reporting.
 - **Corrupt vault:** the app refuses to unlock a vault it cannot decrypt and
   never auto-overwrites it — keep backups of `vault.json`.
 
@@ -329,15 +358,25 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
 
 ## Pinned versions
 
-- Wails v3 CLI: **v3.0.0-beta.20** — `Dockerfile.dev` (`WAILS3_VERSION`)
-  and `go.mod` (module `shelve`, `github.com/wailsapp/wails/v3`).
-- Base image: `golang:1.25-trixie` (Debian 13, GTK 4.18, WebKitGTK 6.0/2.52,
-  Node 20).
+- **Electron 42.10.0** (exact pin in `package.json`; Chromium 140 / Node 24) —
+  the same major VSCode pins, so the Chromium rendering/DPI behavior matches.
+- Go **1.25**; base image `golang:1.25-trixie` (Debian 13) with Node 24 LTS.
+- Renderer: TypeScript 5 + Vite 8, `@xterm/xterm` 5.5 with the fit / webgl /
+  web-links / search addons. Root `package.json` is the only JS manifest.
+- Backend: module `shelve`, `golang.org/x/crypto/ssh`, `github.com/pkg/sftp`,
+  `github.com/oklog/ulid/v2`.
 
 ## Layout
 
-`main.go` + `internal/` packages per the master plan (§5): `app` (composition
-root), `config` (XDG paths, settings.json), `model`, `store`, `vault`,
-`sshx`, `sshengine`, `sftp`, `wailsvc` (the only Go code besides `main.go`
-touching the Wails API). Frontend under `frontend/` (bindings generated into
-`frontend/bindings/`, gitignored).
+- `electron/` — `main.ts` (main process: backend lifecycle, window, native
+  IPC, GPU/DPI) and `preload.ts` (the minimal reviewed renderer bridge).
+- `cmd/shelve-backend/` — the standalone Go backend; `cmd/seed/` — the QA
+  vault fixture generator.
+- `internal/` — `app` (composition root), `config` (XDG paths, settings.json),
+  `model`, `store`, `vault`, `sshx`, `sshengine`, `sftp`, `monitor`
+  (domain layer), plus `api` (services/DTOs), `bridge` (loopback RPC/events/
+  token) and `termws` (terminal WebSocket).
+- `frontend/` — `src/rpc` (backend client) + the UI; Vite output in
+  `frontend/dist/` (gitignored). `dist-electron/` (gitignored) holds the
+  esbuild main/preload bundles.
+- `electron-builder.yml`, `Dockerfile.dev`, `build/icon.png`, `scripts/`.

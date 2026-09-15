@@ -180,8 +180,93 @@ function configureLinuxDisplayBackend(): void {
     }
 }
 
+// ------------------------------------------------------- sandbox (E5) ---
+// The Chromium sandbox helper (`chrome-sandbox`) must be root-owned setuid
+// 4755; an AppImage mounts read-only and FUSE strips setuid, so the packaged
+// app falls back to `--no-sandbox` + `--disable-gpu-sandbox` where the
+// environment cannot support the sandbox (VSCode's documented fallback).
+// `webPreferences.sandbox: true` is kept in every case — this decision is only
+// about the OS-level Chromium sandbox, not the renderer's own isolation
+// (contextIsolation + the minimal preload stay in force — master plan §8.11).
+const SANDBOX_ON_VALUES = new Set(["1", "true", "on", "yes"]);
+const SANDBOX_OFF_VALUES = new Set(["0", "false", "off", "no"]);
+
+/**
+ * Unprivileged user namespaces are how Chromium's sandbox works without a
+ * setuid helper. Debian/Ubuntu expose a dedicated sysctl that can disable them
+ * independently of the upstream limit, so when that file exists it decides;
+ * otherwise fall back to the portable `user.max_user_namespaces` limit
+ * (0 disables user namespaces entirely).
+ */
+function unprivilegedUsernsAvailable(): boolean {
+    try {
+        return readFileSync("/proc/sys/kernel/unprivileged_userns_clone", "utf8").trim() !== "0";
+    } catch {
+        // Not Debian/Ubuntu — consult the upstream limit below.
+    }
+    try {
+        const max = Number.parseInt(readFileSync("/proc/sys/user/max_user_namespaces", "utf8").trim(), 10);
+        return Number.isFinite(max) && max > 0;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Decide whether to append the packaged-AppImage sandbox fallback. Precedence:
+ *   1. `SHELVE_SANDBOX=1` forces the sandbox on (the `--no-sandbox` /
+ *      `--disable-gpu-sandbox` switches are removed from Chromium's command
+ *      line);
+ *   2. `SHELVE_SANDBOX=0` forces it off;
+ *   3. an explicit `--no-sandbox` on the command line;
+ *   4. an AppImage run on a host without unprivileged user namespaces.
+ * Otherwise the sandbox is left untouched (Electron/Chromium default).
+ */
+function resolveSandbox(): void {
+    const raw = (process.env.SHELVE_SANDBOX ?? "").trim().toLowerCase();
+    const forcedOn = SANDBOX_ON_VALUES.has(raw);
+    const forcedOff = SANDBOX_OFF_VALUES.has(raw);
+    if (raw.length > 0 && !forcedOn && !forcedOff) {
+        log(`sandbox: ignoring unknown SHELVE_SANDBOX=${raw}`);
+    }
+
+    if (forcedOn) {
+        // `process.argv` is only Node's view; Chromium's zygote reads the native
+        // command line, so clear the switches through Electron's API.
+        app.commandLine.removeSwitch("no-sandbox");
+        app.commandLine.removeSwitch("disable-gpu-sandbox");
+        log("sandbox: enabled (SHELVE_SANDBOX)");
+        return;
+    }
+
+    let disable = false;
+    let reason = "";
+    if (forcedOff) {
+        disable = true;
+        reason = "SHELVE_SANDBOX";
+    } else if (hasArgvSwitch("no-sandbox")) {
+        disable = true;
+        reason = "--no-sandbox";
+    } else if (process.env.APPIMAGE && !unprivilegedUsernsAvailable()) {
+        disable = true;
+        reason = "AppImage without unprivileged user namespaces";
+    }
+
+    if (disable) {
+        app.commandLine.appendSwitch("no-sandbox");
+        app.commandLine.appendSwitch("disable-gpu-sandbox");
+        log(`sandbox: disabled (${reason})`);
+    } else {
+        log("sandbox: enabled");
+    }
+}
+
 /** The complete VSCode-parity command line (E4 T1/T2). */
 function configureCommandLine(): void {
+    // Sandbox decision first: it may append --no-sandbox / --disable-gpu-sandbox
+    // (or strip --no-sandbox when forced on) before Chromium's zygote starts.
+    resolveSandbox();
+
     // The ONLY off-switch for hardware acceleration (VSCode parity): there is
     // no forced-software path, and no --disable-gpu is ever appended.
     if (hasArgvSwitch("disable-gpu") || hasArgvSwitch("disable-hardware-acceleration")) {

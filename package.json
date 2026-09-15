@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Local-first SSH session manager (Electron shell + Go backend)",
+  "desktopName": "shelve.desktop",
   "main": "dist-electron/main.cjs",
   "scripts": {
     "build:renderer": "vite build frontend --mode production",

@@ -1,56 +1,38 @@
 #!/usr/bin/env bash
-# verify-appimage.sh — plan P004 T3: headless verification of the shelve AppImage.
+# verify-appimage.sh — phase E5: headless verification of the Shelve AppImage.
 #
 # Checks:
-#   1. The artifact extracts cleanly (--appimage-extract, FUSE not required).
-#   2. Required payload is bundled: binary, GTK4 + WebKitGTK 6.0 runtime libs,
-#      WebKit helper processes, GLib schemas, GDK pixbuf loader cache, desktop
-#      entry, AppRun, .DirIcon.
-#   3. Dependency self-containment (master plan §12 #1): inside a pristine
-#      debian:13-slim container (no GTK packages) every GTK/WebKit-stack
-#      dependency of usr/bin/shelve must resolve inside the AppDir via
-#      LD_LIBRARY_PATH. A small allowlist covers linuxdeploy's *intentional*
-#      exclusions — desktop-base libs present on any stock desktop (X11/Wayland,
-#      font stack) and graphics-driver libs (GL/EGL/drm/gbm) that must come from
-#      the host GPU stack (master plan §11: AppImage bundles the app runtime so
-#      end users need no distro packages beyond a stock desktop).
-#   4. Desktop entry sanity (Exec=/Icon=/StartupWMClass present). StartupWMClass
-#      must equal Wails' runtime GtkApplication id ("org.wails." + lowercased
-#      app name, hardcoded in linux_cgo.go) so panels associate the running
-#      window with this entry and display Name=shelve instead of the WM_CLASS
-#      fallback. Note: wails3 v3.0.0-beta.20 places the .desktop file at the
-#      AppDir ROOT (upstream linuxdeploy layout); usr/share/applications is
-#      intentionally left empty.
+#   1. The artifact extracts cleanly (--appimage-extract; FUSE not required).
+#   2. Required payload is present: the `shelve` Electron binary, the bundled
+#      Chromium `.so` set, `chrome-sandbox`, the desktop entry + icon, the app
+#      payload in `resources/app.asar`, and the Go backend at
+#      `resources/backend/shelve-backend` (executable, OUTSIDE the asar).
+#   3. The Go backend is NOT inside app.asar (parsed from the asar header).
+#   4. No `docker/sshd` integration-test fixture strings leaked into the
+#      payload (master plan §8: no test credentials ship).
+#   5. Best-effort smoke: in a pristine `debian:13-slim` with only the
+#      documented Electron runtime libraries (NOT GTK4/WebKit), run the AppImage
+#      under xvfb and assert the backend reaches its "backend ready" handshake
+#      without a missing-library error. Skipped cleanly when the container
+#      cannot install xvfb (no network) or is missing bash.
 #
 # Usage: ./scripts/verify-appimage.sh [path-to-AppImage]
-# Default artifact: bin/shelve-<arch>.AppImage derived from the host arch.
+# Default artifact: the newest bin/shelve-*.AppImage.
 #
 # Requires: docker on the host (the host needs Docker only — master plan §7).
-# On first run the debian:13-slim image is pulled (~30 MB).
 
-set -euo pipefail
+set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # ---------------------------------------------------------------------------
 # Resolve the artifact
 # ---------------------------------------------------------------------------
-detect_arch() {
-    case "$(uname -m)" in
-        x86_64 | amd64) echo "x86_64" ;;
-        aarch64 | arm64) echo "aarch64" ;;
-        *) echo "unknown" ;;
-    esac
-}
+DEFAULT_IMG="$(ls -1 "$ROOT"/bin/shelve-*.AppImage 2>/dev/null | head -1)"
+APPIMAGE="${1:-$DEFAULT_IMG}"
 
-DEFAULT_IMG="$ROOT/bin/shelve-$(detect_arch).AppImage"
-# Prefer the versioned artifact (primary output since appimagetool requires
-# <name>-<version>.AppImage); fall back to the bare alias.
-VERSIONED_IMG="$(ls "$ROOT"/bin/shelve-*-$(detect_arch).AppImage 2>/dev/null | head -1)"
-APPIMAGE="${1:-${VERSIONED_IMG:-$DEFAULT_IMG}}"
-
-if [ ! -f "$APPIMAGE" ]; then
-    echo "error: AppImage not found: $APPIMAGE" >&2
+if [ -z "${APPIMAGE:-}" ] || [ ! -f "$APPIMAGE" ]; then
+    echo "error: AppImage not found: ${APPIMAGE:-<none>}" >&2
     echo "hint: run 'make appimage' first, or pass the artifact path explicitly." >&2
     exit 1
 fi
@@ -69,7 +51,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 echo "==> Extracting (--appimage-extract)..."
 (
-    cd "$WORK"
+    cd "$WORK" || exit 1
     "$APPIMAGE" --appimage-extract >/dev/null
 )
 APPDIR="$WORK/squashfs-root"
@@ -78,131 +60,184 @@ if [ ! -d "$APPDIR" ]; then
     exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# Required payload paths
-# ---------------------------------------------------------------------------
-echo "==> Checking bundled payload..."
 FAIL=0
 
-for rel in \
-    usr/bin/shelve \
-    usr/lib/libgtk-4.so.1 \
-    usr/lib/libwebkitgtk-6.0.so.4 \
-    usr/share/glib-2.0/schemas/gschemas.compiled \
-    shelve.desktop \
-    AppRun \
-    .DirIcon \
-    ; do
-    if [ -e "$APPDIR/$rel" ]; then
-        echo "  ok   $rel"
-    else
+# ---------------------------------------------------------------------------
+# Required payload: electron-builder places the linux-unpacked tree, the
+# desktop entry and AppRun at the AppDir root.
+# ---------------------------------------------------------------------------
+echo "==> Checking bundled payload..."
+
+check() { # rel [exec]
+    local rel="$1" mod="${2:-}"
+    if [ ! -e "$APPDIR/$rel" ]; then
         echo "  MISS $rel" >&2
         FAIL=1
-    fi
-done
-
-# WebKit helper processes: wails3 preserves their system path, so accept
-# either usr/libexec/webkit2gtk-6.0/ or usr/lib/<triplet>/webkitgtk-6.0/.
-for helper in WebKitWebProcess WebKitNetworkProcess libwebkitgtkinjectedbundle.so; do
-    if find "$APPDIR" -name "$helper" -print -quit | grep -q .; then
-        echo "  ok   $helper (found under usr/)"
-    else
-        echo "  MISS $helper" >&2
+    elif [ "$mod" = exec ] && [ ! -x "$APPDIR/$rel" ]; then
+        echo "  MISS $rel (not executable)" >&2
         FAIL=1
+    else
+        echo "  ok   $rel"
     fi
+}
+
+check AppRun exec
+check shelve exec
+check chrome-sandbox
+check chrome_crashpad_handler
+check resources/app.asar
+check resources/backend/shelve-backend exec
+check shelve.desktop
+check .DirIcon
+
+# Chromium's bundled runtime libs (proves Electron's Chromium ships, so the
+# host needs no GTK4/WebKit stack; master plan §12 #6).
+for lib in \
+    libEGL.so \
+    libGLESv2.so \
+    libffmpeg.so \
+    libvk_swiftshader.so \
+    libvulkan.so.1 \
+    ; do
+    check "$lib"
 done
 
-# GDK pixbuf loaders + cache (bundled by the linuxdeploy gtk plugin).
-if find "$APPDIR/usr/lib" -path '*/gdk-pixbuf-2.0/*/loaders.cache' -print -quit | grep -q .; then
-    echo "  ok   gdk-pixbuf loaders.cache"
-else
-    echo "  MISS gdk-pixbuf loaders.cache" >&2
-    FAIL=1
-fi
+# Chromium data files + at least one locale.
+for data in \
+    icudtl.dat \
+    resources.pak \
+    chrome_100_percent.pak \
+    snapshot_blob.bin \
+    v8_context_snapshot.bin \
+    locales/en-US.pak \
+    ; do
+    check "$data"
+done
 
-# Desktop entry sanity (AppDir root per wails3/linuxdeploy layout).
-# StartupWMClass must match Wails' hardcoded GtkApplication id
-# ("org.wails." + lowercased app name) or panels show the WM_CLASS fallback
-# name instead of Name=shelve.
+# Desktop entry sanity: the launcher needs Exec/Icon/Name; StartupWMClass links
+# the running window to the entry.
 DESKTOP="$APPDIR/shelve.desktop"
 if [ -f "$DESKTOP" ] \
     && grep -qE '^Exec=' "$DESKTOP" \
     && grep -qE '^Icon=' "$DESKTOP" \
-    && grep -qE '^StartupWMClass=org\.wails\.shelve$' "$DESKTOP"; then
-    echo "  ok   desktop entry (Exec/Icon/StartupWMClass, AppDir root)"
+    && grep -qE '^Name=' "$DESKTOP" \
+    && grep -qE '^StartupWMClass=' "$DESKTOP"; then
+    echo "  ok   desktop entry (Exec/Icon/Name/StartupWMClass)"
 else
-    echo "  MISS valid desktop entry at $DESKTOP (need Exec, Icon and StartupWMClass=org.wails.shelve)" >&2
+    echo "  MISS valid desktop entry $DESKTOP" >&2
     FAIL=1
 fi
 
 # ---------------------------------------------------------------------------
-# Zero-dependency ldd check in a pristine container (no GTK installed)
+# The Go backend must live OUTSIDE the asar. app.asar is a 16-byte header with
+# a uint32LE JSON size at offset 12, then the JSON file table at offset 16.
 # ---------------------------------------------------------------------------
-PLATFORM_ARGS=()
-case "$(basename "$APPIMAGE")" in
-    *aarch64*) PLATFORM_ARGS=(--platform linux/arm64) ;;
-esac
+echo "==> Checking the backend is outside app.asar..."
+ASAR="$APPDIR/resources/app.asar"
+ASAR_SIZE="$(od -An -tu4 -j12 -N4 "$ASAR" 2>/dev/null | tr -d '[:space:]')"
+if [ -n "$ASAR_SIZE" ] && [ "$ASAR_SIZE" -gt 0 ] 2>/dev/null; then
+    ASAR_HEADER="$(dd if="$ASAR" bs=1 skip=16 count="$ASAR_SIZE" 2>/dev/null)"
+    if printf '%s' "$ASAR_HEADER" | grep -q 'shelve-backend'; then
+        echo "  FAIL the Go backend is bundled inside app.asar" >&2
+        FAIL=1
+    else
+        echo "  ok   no backend entry in the asar header"
+    fi
+    if printf '%s' "$ASAR_HEADER" | grep -q 'dist-electron' \
+        && printf '%s' "$ASAR_HEADER" | grep -q 'frontend'; then
+        echo "  ok   main/preload + renderer present in the asar"
+    else
+        echo "  FAIL asar is missing the main/preload or renderer payload" >&2
+        FAIL=1
+    fi
+else
+    echo "  FAIL could not read the app.asar header" >&2
+    FAIL=1
+fi
 
-echo "==> ldd check in debian:13-slim (no GTK installed)..."
-# Allowlist split into two groups:
-#  - glibc/kernel artifacts that linuxdeploy deliberately never bundles;
-#  - linuxdeploy's intentional desktop-base exclusions: X11/Wayland/GL/font
-#    stack present on any stock desktop (master §12 #1 target platform) plus
-#    host-provided graphics drivers (GL/EGL/drm/gbm) which must NOT be bundled.
-# Every GTK/WebKit-stack dependency NOT in this list MUST resolve in the AppDir.
-ALLOW="libc.so.6 libm.so.6 libpthread.so.0 libdl.so.2 librt.so.1 \
-libutil.so.1 libresolv.so.2 libnsl.so.1 libcrypt.so.1 libgcc_s.so.1 \
-ld-linux-x86-64.so.2 ld-linux-aarch64.so.1 \
-libX11.so.6 libX11-xcb.so.1 libxcb.so.1 libwayland-client.so.0 \
-libGL.so.1 libEGL.so.1 libGLX.so.0 libOpenGL.so.0 libdrm.so.2 libgbm.so.1 \
-libfontconfig.so.1 libfreetype.so.6 libharfbuzz.so.0 libfribidi.so.0 \
-libexpat.so.1 libasound.so.2 libcom_err.so.2 libgpg-error.so.0 \
-libz.so.1 libstdc++.so.6"
+# ---------------------------------------------------------------------------
+# No integration-test credentials / fixtures in the shipped payload.
+# ---------------------------------------------------------------------------
+echo "==> Scanning for test-fixture leakage..."
+LEAK=0
+for needle in "hello root text" "hello nested markdown" "nested deep file" "dsm-fake-editor"; do
+    if grep -rlaF --exclude-dir=locales --exclude=LICENSES.chromium.html -- "$needle" "$APPDIR" >/dev/null 2>&1; then
+        echo "  FAIL test fixture string present: $needle" >&2
+        LEAK=1
+    fi
+done
+if [ "$LEAK" -eq 0 ]; then
+    echo "  ok   no docker/sshd fixture strings in the payload"
+else
+    FAIL=1
+fi
 
-LDD_OUT="$(
-    docker run --rm "${PLATFORM_ARGS[@]}" \
-        -v "$APPDIR":/opt/app:ro \
-        -e LD_LIBRARY_PATH=/opt/app/usr/lib \
-        debian:13-slim \
-        ldd /opt/app/usr/bin/shelve 2>&1 || true
-)"
+# ---------------------------------------------------------------------------
+# Best-effort smoke: pristine debian:13-slim + xvfb + the documented Electron
+# runtime libraries. This proves the AppImage needs no GTK4/WebKit stack and
+# reaches the Go backend handshake. The container gets a read-only mount of the
+# artifact and writes its app config to /tmp.
+# ---------------------------------------------------------------------------
+echo "==> Smoke run in debian:13-slim + xvfb (best-effort)..."
+SMOKE_IMAGE="debian:13-slim"
+LIBS_FILE="$ROOT/scripts/host-runtime-libs.txt"
+if [ ! -f "$LIBS_FILE" ]; then
+    echo "error: runtime-library list not found: $LIBS_FILE" >&2
+    exit 1
+fi
+if ! docker image inspect "$SMOKE_IMAGE" >/dev/null 2>&1; then
+    docker pull -q "$SMOKE_IMAGE" >/dev/null 2>&1 || true
+fi
 
-while IFS= read -r line; do
-    case "$line" in
-        *"not found"*)
-            missing="$(printf '%s' "${line%% *}" | tr -d '[:space:]')"
-            if echo " $ALLOW " | grep -q " $missing "; then
-                echo "  ok   $missing (system allowlist, not bundled by design)"
-            else
-                echo "  FAIL $line" >&2
-                FAIL=1
-            fi
-            ;;
-        *"=>"*"/"*)
-            lib="${line#*=> }"
-            lib="${lib%% *}"
-            base="$(basename "$lib")"
-            case "$lib" in
-                /opt/app/usr/lib/*)
-                    echo "  ok   $base (bundled)"
-                    ;;
-                *)
-                    if echo " $ALLOW " | grep -q " $base "; then
-                        echo "  ok   $base (system allowlist)"
-                    else
-                        echo "  FAIL $lib resolves outside the AppDir" >&2
-                        FAIL=1
-                    fi
-                    ;;
-            esac
-            ;;
-    esac
-done <<<"$LDD_OUT"
+if ! docker image inspect "$SMOKE_IMAGE" >/dev/null 2>&1; then
+    echo "  skip: cannot obtain $SMOKE_IMAGE (no docker/network)"
+else
+    SMOKE_OUT="$(docker run --rm \
+        -v "$APPIMAGE":/opt/shelve.AppImage:ro \
+        -v "$LIBS_FILE":/tmp/host-runtime-libs.txt:ro \
+        -e HOME=/tmp -e XDG_CONFIG_HOME=/tmp/shelve-config \
+        "$SMOKE_IMAGE" bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            command -v apt-get >/dev/null 2>&1 || exit 43
+            apt-get update -qq >/dev/null 2>&1 || exit 42
+            # The Electron/Chromium runtime set comes from the mounted
+            # scripts/host-runtime-libs.txt (single source with the Makefile/README).
+            apt-get install -y -qq --no-install-recommends \
+                xvfb xauth $(grep -v "^#" /tmp/host-runtime-libs.txt) \
+                >/dev/null 2>&1 || exit 42
+            command -v xvfb-run >/dev/null 2>&1 || exit 43
+            mkdir -p /tmp/shelve-config
+            timeout 60 xvfb-run -a /opt/shelve.AppImage \
+                --appimage-extract-and-run --no-sandbox --disable-gpu \
+                > /tmp/smoke.log 2>&1 || true
+            cat /tmp/smoke.log
+            echo "__SHELVE_SMOKE_DONE__"
+            exit 0
+        ' 2>&1)"
+    SMOKE_RC=$?
+
+    if printf '%s' "$SMOKE_OUT" | grep -q "__SHELVE_SMOKE_DONE__"; then
+        if printf '%s' "$SMOKE_OUT" | grep -qiE "error while loading shared libraries|cannot open shared object"; then
+            echo "  FAIL missing shared library in the pristine container:" >&2
+            printf '%s\n' "$SMOKE_OUT" | grep -iE "error while loading shared libraries|cannot open shared object" >&2
+            FAIL=1
+        elif printf '%s' "$SMOKE_OUT" | grep -q "backend ready at"; then
+            echo "  ok   reached the backend-ready handshake without GTK4/WebKit"
+        else
+            echo "  FAIL the app never logged 'backend ready at'" >&2
+            printf '%s\n' "$SMOKE_OUT" | tail -n 20 >&2
+            FAIL=1
+        fi
+    else
+        echo "  skip: container could not install/run xvfb (rc=$SMOKE_RC)"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Result
 # ---------------------------------------------------------------------------
-if [ "$FAIL" = 1 ]; then
+if [ "$FAIL" -ne 0 ]; then
     echo "==> VERIFY FAILED" >&2
     exit 1
 fi

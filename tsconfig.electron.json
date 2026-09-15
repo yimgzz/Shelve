@@ -1,29 +1,24 @@
 {
   "compilerOptions": {
-    "allowJs": true,
-
     "noEmit": true,
     "skipLibCheck": true,
 
     "module": "ESNext",
-    "target": "ESNext",
+    "target": "ES2022",
     "moduleResolution": "bundler",
-    "resolveJsonModule": true,
+    "esModuleInterop": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
 
-    "lib": [
-      "DOM",
-      "DOM.Iterable",
-      "ESNext",
-    ],
+    "lib": ["ES2022"],
+    "types": ["node"],
 
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": false,
-    "noImplicitAny": false,
+    "noImplicitAny": true,
     "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
+    "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "stubs"]
+  "include": ["electron"]
 }

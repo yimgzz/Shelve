@@ -289,3 +289,15 @@ func toSftpEntryDTOs(entries []sftp.Entry) []SftpEntryDTO {
 	}
 	return out
 }
+
+// ImportResultDTO summarizes an applied configuration import (plan
+// config-export-import §3). It is secret-free: counts only, never a name,
+// password or key path.
+type ImportResultDTO struct {
+	Mode               string `json:"mode"` // "merge" | "replace"
+	Folders            int    `json:"folders"`
+	Sessions           int    `json:"sessions"`
+	Credentials        int    `json:"credentials"`
+	SavedJumpHosts     int    `json:"savedJumpHosts"`
+	RemappedReferences int    `json:"remappedReferences"`
+}

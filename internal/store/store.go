@@ -166,7 +166,6 @@ func (s *Store) Load(payload []byte) error {
 	s.sessions = map[string]model.Session{}
 	s.credentials = map[string]model.Credential{}
 	s.savedJumpHosts = map[string]model.SavedJumpHost{}
-	order := map[string][]string{}
 
 	for _, f := range p.Folders {
 		s.folders[f.ID] = f
@@ -205,66 +204,7 @@ func (s *Store) Load(payload []byte) error {
 		}
 	}
 
-	known := func(id string) bool {
-		_, ok := s.folders[id]
-		if ok {
-			return true
-		}
-		_, ok = s.sessions[id]
-		return ok
-	}
-	keep := func(ids []string) []string {
-		out := make([]string, 0, len(ids))
-		seen := map[string]bool{}
-		for _, id := range ids {
-			if !seen[id] && known(id) {
-				seen[id] = true
-				out = append(out, id)
-			}
-		}
-		return out
-	}
-
-	order[""] = keep(p.Root)
-	for id := range s.folders {
-		order[id] = nil
-	}
-	for _, f := range p.Folders {
-		if _, ok := s.folders[f.ID]; ok {
-			order[f.ID] = keep(f.Children)
-		}
-	}
-
-	// Defensive: nodes referenced nowhere are recovered into the root
-	// (sessions: into their declared folder when it exists) instead of
-	// being silently lost.
-	placed := map[string]bool{}
-	for _, ids := range order {
-		for _, id := range ids {
-			placed[id] = true
-		}
-	}
-	for id, sess := range s.sessions {
-		if placed[id] {
-			continue
-		}
-		parent := sess.FolderID
-		if parent != "" {
-			if _, ok := s.folders[parent]; !ok {
-				parent = ""
-			}
-		}
-		order[parent] = append(order[parent], id)
-		placed[id] = true
-	}
-	var orphans []string
-	for id := range s.folders {
-		if !placed[id] {
-			orphans = append(orphans, id)
-		}
-	}
-	sort.Strings(orphans)
-	order[""] = append(order[""], orphans...)
+	order := buildOrder(p, s.folders, s.sessions)
 
 	// Normalize membership fields from the order lists.
 	for parent, ids := range order {
@@ -288,6 +228,79 @@ func (s *Store) Load(payload []byte) error {
 
 	s.order = order
 	return nil
+}
+
+// buildOrder reconstructs the ordered-ID graph from a payload's Root and
+// Folder.Children (the single source of truth for placement), SHARED by Load
+// and Merge so the two can never drift: unknown or duplicate IDs are dropped,
+// a session referenced nowhere is recovered into its declared folder when that
+// folder exists (else the root), and folders referenced nowhere are recovered
+// into the root in sorted order. folders/sessions are the entity maps keyed by
+// ID; the returned map uses "" for the root. Membership fields
+// (ParentID/FolderID) are NOT rewritten here — callers normalize them from the
+// returned order lists.
+func buildOrder(p model.Payload, folders map[string]model.Folder, sessions map[string]model.Session) map[string][]string {
+	known := func(id string) bool {
+		if _, ok := folders[id]; ok {
+			return true
+		}
+		_, ok := sessions[id]
+		return ok
+	}
+	keep := func(ids []string) []string {
+		out := make([]string, 0, len(ids))
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if !seen[id] && known(id) {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+		return out
+	}
+
+	order := map[string][]string{}
+	order[""] = keep(p.Root)
+	for id := range folders {
+		order[id] = nil
+	}
+	for _, f := range p.Folders {
+		if _, ok := folders[f.ID]; ok {
+			order[f.ID] = keep(f.Children)
+		}
+	}
+
+	// Defensive: nodes referenced nowhere are recovered into the root
+	// (sessions: into their declared folder when it exists) instead of
+	// being silently lost.
+	placed := map[string]bool{}
+	for _, ids := range order {
+		for _, id := range ids {
+			placed[id] = true
+		}
+	}
+	for id, sess := range sessions {
+		if placed[id] {
+			continue
+		}
+		parent := sess.FolderID
+		if parent != "" {
+			if _, ok := folders[parent]; !ok {
+				parent = ""
+			}
+		}
+		order[parent] = append(order[parent], id)
+		placed[id] = true
+	}
+	var orphans []string
+	for id := range folders {
+		if !placed[id] {
+			orphans = append(orphans, id)
+		}
+	}
+	sort.Strings(orphans)
+	order[""] = append(order[""], orphans...)
+	return order
 }
 
 // ----------------------------------------------------------------- crud ---

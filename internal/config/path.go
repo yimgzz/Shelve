@@ -62,8 +62,22 @@ func WriteFile(name string, data []byte) error {
 
 // WriteFileAtomic writes data to dir/name via a temp file in dir + rename,
 // mode 0600. The target is never truncated in place: on any failure the
-// previous file is left untouched (master plan §8.7).
+// previous file is left untouched (master plan §8.7). It also re-asserts 0700
+// on dir, so it is meant for the app's own config directory.
 func WriteFileAtomic(dir, name string, data []byte) error {
+	return writeFileAtomic(dir, name, data, true)
+}
+
+// WriteFileAtomicOutside is WriteFileAtomic for a user-chosen directory outside
+// the config dir (configuration export): the file is still written atomically
+// with 0600, but an existing directory's permission mode is left untouched
+// (re-asserting 0700 on e.g. /tmp would fail, and on the user's own folders it
+// would silently tighten them). A missing directory is created 0700.
+func WriteFileAtomicOutside(dir, name string, data []byte) error {
+	return writeFileAtomic(dir, name, data, false)
+}
+
+func writeFileAtomic(dir, name string, data []byte, chmodDir bool) error {
 	if err := os.MkdirAll(dir, DirPerm); err != nil {
 		return err
 	}
@@ -91,6 +105,9 @@ func WriteFileAtomic(dir, name string, data []byte) error {
 	}
 	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
 		return err
+	}
+	if !chmodDir {
+		return nil
 	}
 	return os.Chmod(dir, DirPerm)
 }

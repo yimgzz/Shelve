@@ -18,7 +18,7 @@
 // closeTab): those bridge the rpc service proxies and the reactive
 // state in one place so components stay presentation-only.
 
-import { CredentialService, JumpHostService, SessionService, TerminalService } from "./rpc";
+import { AppService, CredentialService, JumpHostService, SessionService, TerminalService } from "./rpc";
 import type {
     CredentialDTO,
     NodeDTO,
@@ -27,6 +27,8 @@ import type {
     Settings,
 } from "./rpc/types";
 import { toast } from "./components/toasts";
+import { initTheme } from "./ui/theme";
+import { applyZoomLevel } from "./ui/zoom";
 
 // The wire contract lives in ONE place: rpc/types.ts mirrors the Go json
 // tags. These re-exports keep every existing `type X from "../store"` import
@@ -153,6 +155,40 @@ export interface StoreState {
 export const DEFAULT_LEFT_WIDTH = 320;
 export const DEFAULT_SFTP_WIDTH = 320;
 
+/**
+ * Map an arbitrary backend settings object onto our Settings shape (the single
+ * normalization point: boot in main.ts and import reconciliation here).
+ */
+export function normalizeSettings(raw: Record<string, unknown>): Settings {
+    const win = (raw.window ?? {}) as Record<string, unknown>;
+    const term = (raw.terminal ?? {}) as Record<string, unknown>;
+    const ui = (raw.ui ?? {}) as Record<string, unknown>;
+    return {
+        theme: typeof raw.theme === "string" ? raw.theme : "system",
+        themeVariant: typeof raw.themeVariant === "string" ? raw.themeVariant : "",
+        autoLockMinutes: Number(raw.autoLockMinutes ?? 0),
+        sftpBrowserEnabled: Boolean(raw.sftpBrowserEnabled),
+        // Plan P004: presence-aware default ON (the backend also forces
+        // `true` when the key is absent, so `?? true` is belt-and-braces).
+        monitoringEnabled: Boolean(raw.monitoringEnabled ?? true),
+        terminal: {
+            fontFamily: String(term.fontFamily ?? "monospace"),
+            fontSize: Number(term.fontSize ?? 13),
+            scrollback: Number(term.scrollback ?? 10000),
+        },
+        textEditorCommand: String(raw.textEditorCommand ?? "xdg-open"),
+        sftpInitialPath: String(raw.sftpInitialPath ?? "~"),
+        window: {
+            width: Number(win.width ?? 1280),
+            height: Number(win.height ?? 800),
+            leftWidth: Number(win.leftWidth ?? 320) || 320,
+            sftpWidth: Number(win.sftpWidth ?? 320) || 320,
+        },
+        // E4 T7: user zoom, separate from OS DPI; absent -> 0 (no zoom).
+        ui: { zoomLevel: Number(ui.zoomLevel ?? 0) || 0 },
+    };
+}
+
 export const initialState: StoreState = {
     settings: {
         theme: "system",
@@ -160,7 +196,7 @@ export const initialState: StoreState = {
         autoLockMinutes: 0,
         // Phase 5d: the SFTP browser is on by default (mirrors the backend
         // default; AppService.GetSettings() at boot overrides with the
-        // persisted value via toSettings). Same rule for the plan-P004
+        // persisted value via normalizeSettings). Same rule for the plan-P004
         // system monitor.
         sftpBrowserEnabled: true,
         monitoringEnabled: true,
@@ -251,6 +287,38 @@ class Store {
         } catch (err) {
             toast("error", String(err));
         }
+    }
+
+    /**
+     * Reconcile the UI after a configuration import (plan
+     * config-export-import §6). Merge keeps live tabs and just refreshes the
+     * tree/credentials/jump hosts. Replace tears the local tab state down (the
+     * backend already disconnected the sessions), re-reads and applies the
+     * imported settings (theme + zoom, no reload), then refreshes everything.
+     */
+    async afterImport(mode: "merge" | "replace"): Promise<void> {
+        if (mode === "replace") {
+            this.set({
+                tabs: [],
+                activeTabID: null,
+                selectedID: null,
+                forwards: {},
+                sftpTransfers: {},
+                monitor: {},
+            });
+            try {
+                const raw = (await AppService.GetSettings()) as unknown as Record<string, unknown>;
+                const settings = normalizeSettings(raw);
+                this.set({ settings });
+                initTheme(settings.theme, settings.themeVariant);
+                applyZoomLevel(settings.ui.zoomLevel);
+            } catch (err) {
+                toast("error", String(err));
+            }
+        }
+        await this.refreshTree();
+        await this.refreshCredentials();
+        await this.refreshSavedJumpHosts();
     }
 
     /** Set the live search query (empty string restores the tree). */

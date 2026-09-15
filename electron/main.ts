@@ -739,6 +739,46 @@ function registerIpc(): void {
         }
         return result.filePaths[0] ?? "";
     });
+
+    // Configuration export: a save dialog defaulting to
+    // `shelve-config-<date>.shelve`. The path is the ONLY thing shared with
+    // the backend; file bytes never cross the transport (master plan A5).
+    ipcMain.handle("dialog:pickSaveFile", async (event, defaultName: unknown) => {
+        trusted(event);
+        if (!win || win.isDestroyed()) {
+            return "";
+        }
+        const name =
+            typeof defaultName === "string" && defaultName.trim().length > 0
+                ? defaultName.trim()
+                : "shelve-config.shelve";
+        const result = await dialog.showSaveDialog(win, {
+            title: "Export configuration",
+            defaultPath: name,
+            filters: [{ name: "Shelve configuration", extensions: ["shelve"] }],
+        });
+        if (result.canceled) {
+            return "";
+        }
+        return result.filePath ?? "";
+    });
+
+    // Configuration import: an open dialog filtered to `.shelve` files.
+    ipcMain.handle("dialog:pickOpenFile", async (event) => {
+        trusted(event);
+        if (!win || win.isDestroyed()) {
+            return "";
+        }
+        const result = await dialog.showOpenDialog(win, {
+            title: "Import configuration",
+            properties: ["openFile"],
+            filters: [{ name: "Shelve configuration", extensions: ["shelve"] }],
+        });
+        if (result.canceled) {
+            return "";
+        }
+        return result.filePaths[0] ?? "";
+    });
 }
 
 // ------------------------------------------------------------------ boot ---

@@ -9,6 +9,7 @@ import { openContextMenu } from "./context-menu";
 import { openSettingsDialog } from "./settings-dialog";
 import { openCredentialManager } from "./credential-dialog";
 import { openJumpHostManager } from "./jump-host-dialog";
+import { openExportDialog, openImportDialog } from "./transfer-dialog";
 import { confirmDialog } from "./confirm";
 import { toast } from "./toasts";
 import { openDialog } from "../ui/dialog";
@@ -19,6 +20,8 @@ export function openGearMenu(x: number, y: number): void {
         { label: "Settings…", action: () => openSettingsDialog() },
         { label: "Credentials…", action: () => void openCredentialManager() },
         { label: "Jump hosts…", action: () => void openJumpHostManager() },
+        { label: "Export configuration…", action: () => void openExportDialog() },
+        { label: "Import configuration…", action: () => void openImportDialog() },
         { label: "Lock vault…", action: () => void lockVault() },
         { label: "About", action: () => void showAbout() },
     ]);

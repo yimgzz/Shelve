@@ -13,6 +13,7 @@ import { call, off, on, ready } from "./client";
 import type {
     CredentialDTO,
     CredentialInput,
+    ImportResultDTO,
     NodeDTO,
     SavedJumpHostDTO,
     SavedJumpHostInput,
@@ -102,6 +103,11 @@ export interface MonitorServiceApi {
     Stop(tabID: string): Promise<void>;
 }
 
+export interface TransferServiceApi {
+    Export(path: string, password: string): Promise<void>;
+    Import(path: string, password: string, mode: "merge" | "replace"): Promise<ImportResultDTO>;
+}
+
 /**
  * Build a service proxy. The target is empty; every property read yields a
  * forwarding function, so `Service.Method(...)` maps to
@@ -127,6 +133,7 @@ export const JumpHostService = service<JumpHostServiceApi>("JumpHostService");
 export const TerminalService = service<TerminalServiceApi>("TerminalService");
 export const SftpService = service<SftpServiceApi>("SftpService");
 export const MonitorService = service<MonitorServiceApi>("MonitorService");
+export const TransferService = service<TransferServiceApi>("TransferService");
 
 /** The renderer's sole event bus (main.ts is the single subscriber owner). */
 export const events = { on, off, ready };

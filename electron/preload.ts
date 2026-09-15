@@ -30,6 +30,13 @@ contextBridge.exposeInMainWorld("shelve", {
     // AppService.PickFile contract).
     pickFile: (): Promise<string> => ipcRenderer.invoke("dialog:pickFile"),
 
+    // Configuration export/import pickers (plan config-export-import): a save
+    // dialog seeded with defaultName and an open dialog filtered to .shelve
+    // files. Both resolve "" on cancel; only paths cross the bridge.
+    pickSaveFile: (defaultName: string): Promise<string> =>
+        ipcRenderer.invoke("dialog:pickSaveFile", defaultName),
+    pickOpenFile: (): Promise<string> => ipcRenderer.invoke("dialog:pickOpenFile"),
+
     // Debounced window geometry from the main process; the renderer merges it
     // into settings and persists through AppService.SaveSettings (A7).
     windowState: {

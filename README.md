@@ -256,6 +256,28 @@ The session tree is kept in the encrypted vault. There is no recovery
 mechanism for a lost master password: keep a safe backup of your
 `vault.json`.
 
+## Backup & migrate
+
+**Gear menu → Export configuration…** writes everything — the session tree,
+credentials, saved jump hosts and settings — to a single encrypted `.shelve`
+file, protected by a passphrase you choose (independent of the master password).
+Use it to move to another machine or to keep a backup. The native save dialog
+defaults to `shelve-config-YYYY-MM-DD.shelve`; the file is written `0600`.
+
+**Gear menu → Import configuration…** reads such a file back:
+
+- **Merge** (default) assigns fresh IDs and drops the imported data under one new
+  folder named `Imported <date>`. Your existing sessions, credentials, jump hosts
+  and settings are untouched, and live terminals stay connected.
+- **Replace** overwrites the entire tree and settings with the file's contents.
+  Live connections are closed first, and the imported theme/zoom are re-applied
+  immediately.
+
+Both modes require the export passphrase; a wrong passphrase changes nothing.
+`known_hosts` is intentionally **not** part of an export — host-key trust is
+per-machine and is re-established on first connect. Keep both the `.shelve` file
+and its passphrase safe: there is no recovery.
+
 ## Security model
 
 - **Encryption:** AES-256-GCM (random 12-byte nonce per write) with a 32-byte
@@ -284,6 +306,11 @@ mechanism for a lost master password: keep a safe backup of your
   reporting.
 - **Corrupt vault:** the app refuses to unlock a vault it cannot decrypt and
   never auto-overwrites it — keep backups of `vault.json`.
+- **Configuration export:** an exported `.shelve` file is encrypted with its own
+  passphrase using the same Argon2id + AES-256-GCM scheme but a distinct AAD tag
+  (`dsmexp1`), so an export can never be opened as a vault or vice versa. The
+  passphrase is never written to disk, and import/export pass only file *paths*
+  over the loopback transport — no file bytes.
 
 ## Session card & Extra Args
 

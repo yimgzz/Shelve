@@ -8,7 +8,7 @@
 import { events, AppService, VaultService, SessionService } from "./rpc";
 import type { WindowState } from "./rpc/types";
 
-import { store, type Settings, type VaultState, type TabState } from "./store";
+import { store, normalizeSettings, type Settings, type VaultState, type TabState } from "./store";
 import { initTheme, onThemeApplied } from "./ui/theme";
 import { renderUnlockGate, type UnlockMode } from "./components/unlock";
 import { renderShell } from "./components/shell";
@@ -46,37 +46,6 @@ const EV = {
 };
 
 const root = document.getElementById("app-root")!;
-
-/** Map an arbitrary backend settings object onto our Settings shape. */
-function toSettings(raw: Record<string, unknown>): Settings {
-   const win = (raw.window ?? {}) as Record<string, unknown>;
-   const term = (raw.terminal ?? {}) as Record<string, unknown>;
-   const ui = (raw.ui ?? {}) as Record<string, unknown>;
-   return {
-       theme: typeof raw.theme === "string" ? raw.theme : "system",
-       themeVariant: typeof raw.themeVariant === "string" ? raw.themeVariant : "",
-       autoLockMinutes: Number(raw.autoLockMinutes ?? 0),
-        sftpBrowserEnabled: Boolean(raw.sftpBrowserEnabled),
-       // Plan P004: presence-aware default ON (the backend also forces
-       // `true` when the key is absent, so `?? true` is belt-and-braces).
-       monitoringEnabled: Boolean(raw.monitoringEnabled ?? true),
-       terminal: {
-            fontFamily: String(term.fontFamily ?? "monospace"),
-            fontSize: Number(term.fontSize ?? 13),
-            scrollback: Number(term.scrollback ?? 10000),
-        },
-        textEditorCommand: String(raw.textEditorCommand ?? "xdg-open"),
-        sftpInitialPath: String(raw.sftpInitialPath ?? "~"),
-        window: {
-            width: Number(win.width ?? 1280),
-            height: Number(win.height ?? 800),
-            leftWidth: Number(win.leftWidth ?? 320) || 320,
-            sftpWidth: Number(win.sftpWidth ?? 320) || 320,
-        },
-        // E4 T7: user zoom, separate from OS DPI; absent -> 0 (no zoom).
-        ui: { zoomLevel: Number(ui.zoomLevel ?? 0) || 0 },
-    };
-}
 
 /** Tear down every pooled terminal instance on vault lock (Phase 4c). */
 function destroyTerminals(): void {
@@ -391,7 +360,7 @@ async function boot(): Promise<void> {
 
     try {
         const settings = (await AppService.GetSettings()) as unknown as Record<string, unknown>;
-        const normalized = toSettings(settings);
+        const normalized = normalizeSettings(settings);
         store.set({ settings: normalized });
         initTheme(normalized.theme, normalized.themeVariant);
         // E4 T7: apply the persisted user zoom (independent of the OS scale).

@@ -172,7 +172,9 @@ Notes:
   bastion kbdint prefill (§6).
 - **No large file bytes over the transport (A5).** Uploads/downloads pass
   *paths*; Go streams the bytes. Only terminal I/O and small events cross the
-  loopback socket.
+  loopback socket. Configuration export/import is also path-only: the renderer
+  picks a file via `window.shelve.pickSaveFile()`/`pickOpenFile()` and calls
+  `TransferService.Export`/`Import` with the chosen path.
 
 ## 5. Architecture
 
@@ -219,9 +221,12 @@ Errors are the Go error string; the TS client rejects with `new Error(msg)`.
   `PickLocalFiles`, `Upload`, `Download`, `DownloadThenSave`, `EditRemoteText`,
   `CancelEdit`.
 - **MonitorService**: `Start`, `Stop`.
+- **TransferService**: `Export`, `Import` (encrypted `.shelve` configuration
+  export/import; Merge/Replace modes; paths only).
 
 Native file picking is `window.shelve.pickFile()` in the main process, not a
-service method.
+service method; configuration export/import use `pickSaveFile()`/`pickOpenFile()`
+and pass the resulting path to `TransferService`.
 
 ### Event contract (backend → renderer, over `/rpc`)
 
@@ -273,7 +278,11 @@ queue blocks the emitter rather than dropping a lifecycle event.
    bastion hop's stored password may cross it inside
    `vault:kbdint-prompt.payload.prefill` only, solely to prefill masked
    keyboard-interactive inputs; never persisted, logged, or cached. Kbdint
-   answers typed by the user are never stored or cached.
+   answers typed by the user are never stored or cached. User-entered secrets
+   also necessarily reach the backend over the same token-gated loopback
+   listener — the master password (`VaultService.CreateVault`/`Unlock`) and the
+   configuration export/import passphrase (`TransferService`) — and are never
+   persisted, logged, echoed in errors, or returned.
 2. Argon2id params fixed (m=64 MiB, t=3, p=4, 16 B salt, 32 B key);
    AES-256-GCM, random 12 B nonce per write, AAD `"dsmsv1"`.
 3. Memory hygiene: master password and derived key **zeroized** after use;

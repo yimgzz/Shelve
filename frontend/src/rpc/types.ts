@@ -159,6 +159,16 @@ export interface VaultStatus {
     unlocked: boolean;
 }
 
+/** Result of a configuration import (ImportResultDTO, secret-free counts). */
+export interface ImportResultDTO {
+    mode: "merge" | "replace";
+    folders: number;
+    sessions: number;
+    credentials: number;
+    savedJumpHosts: number;
+    remappedReferences: number;
+}
+
 // ------------------------------------------------------------ settings ---
 
 /** Terminal appearance/behaviour (config.TerminalSettings). */
@@ -214,6 +224,10 @@ export interface ShelveNative {
     };
     /** Native single-file picker; resolves "" when cancelled. */
     pickFile(): Promise<string>;
+    /** Native save dialog for configuration export; resolves "" when cancelled. */
+    pickSaveFile(defaultName: string): Promise<string>;
+    /** Native open dialog for configuration import; resolves "" when cancelled. */
+    pickOpenFile(): Promise<string>;
     /** Window geometry changes (debounced in main); returns an unsubscribe. */
     windowState: {
         onChange(cb: (state: WindowState) => void): () => void;

@@ -48,6 +48,7 @@ type App struct {
 	terminalService   *api.TerminalService
 	sftpService       *api.SftpService
 	monitorService    *api.MonitorService
+	transferService   *api.TransferService
 	emitter           *api.LateEmitter
 }
 
@@ -137,6 +138,7 @@ func New() (*App, error) {
 		terminalService:   api.NewTerminalService(st, v, engine),
 		sftpService:       api.NewSftpService(v, sftpMgr),
 		monitorService:    api.NewMonitorService(v, monMgr),
+		transferService:   api.NewTransferService(st, v, engine, Version),
 	}, nil
 }
 
@@ -178,6 +180,11 @@ func (a *App) SftpService() *api.SftpService {
 // MonitorService returns the system-monitor service.
 func (a *App) MonitorService() *api.MonitorService {
 	return a.monitorService
+}
+
+// TransferService returns the configuration export/import service.
+func (a *App) TransferService() *api.TransferService {
+	return a.transferService
 }
 
 // TerminalWS returns the plan P005 terminal I/O WebSocket server. The

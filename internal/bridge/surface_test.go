@@ -35,6 +35,7 @@ func TestServiceSurfaceGolden(t *testing.T) {
 		"TerminalService":   {"Connect", "Disconnect", "Write", "Resize", "Reconnect"},
 		"SftpService":       {"IsActive", "List", "Mkdir", "Rename", "Remove", "PickLocalFiles", "Upload", "Download", "DownloadThenSave", "EditRemoteText", "CancelEdit"},
 		"MonitorService":    {"Start", "Stop"},
+		"TransferService":   {"Export", "Import"},
 	}
 
 	if len(s.services) != len(want) {

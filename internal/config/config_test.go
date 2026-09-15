@@ -75,6 +75,38 @@ func TestWriteFileCreates0600Content(t *testing.T) {
 	}
 }
 
+// TestWriteFileAtomicOutsidePreservesDirMode covers the configuration-export
+// path: the file is written atomically 0600, but the target directory's mode is
+// left untouched (unlike WriteFileAtomic, which re-asserts 0700).
+func TestWriteFileAtomicOutsidePreservesDirMode(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomicOutside(dir, "cfg.shelve", []byte("data")); err != nil {
+		t.Fatalf("WriteFileAtomicOutside: %v", err)
+	}
+
+	fi, err := os.Stat(filepath.Join(dir, "cfg.shelve"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != FilePerm {
+		t.Fatalf("file perms = %o, want %o", fi.Mode().Perm(), FilePerm)
+	}
+	di, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if di.Mode().Perm() != 0o755 {
+		t.Fatalf("dir perms = %o, want 755 (untouched)", di.Mode().Perm())
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "cfg.shelve"))
+	if err != nil || string(data) != "data" {
+		t.Fatalf("content = %q, %v", data, err)
+	}
+}
+
 func TestWriteFileAtomicRenameFailureLeavesStateIntact(t *testing.T) {
 	isolatedXDG(t)
 	dir := t.TempDir()

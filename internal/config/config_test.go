@@ -434,7 +434,7 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 	}
 	for k := range m {
 		switch k {
-		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "monitoringEnabled",
+		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "sftpPanelSide", "monitoringEnabled",
 			"terminal", "textEditorCommand", "sftpInitialPath", "window", "ui":
 		default:
 			t.Fatalf("unexpected settings key %q", k)
@@ -537,5 +537,55 @@ func TestUISettingsZoomLevel(t *testing.T) {
 				t.Fatalf("ui.zoomLevel = %d, want %d", got.UI.ZoomLevel, tc.want)
 			}
 		})
+	}
+}
+
+// TestSftpPanelSide (plan sftp-panel-side): the dock side defaults to "left",
+// an explicit "right" survives a save/load round trip, and an unknown/absent
+// value normalizes to "left".
+func TestSftpPanelSide(t *testing.T) {
+	if d := DefaultSettings(); d.SftpPanelSide != SftpPanelSideLeft {
+		t.Fatalf("default sftpPanelSide = %q, want %q", d.SftpPanelSide, SftpPanelSideLeft)
+	}
+
+	// Missing settings.json → left.
+	isolatedXDG(t)
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load (missing file): %v", err)
+	}
+	if got.SftpPanelSide != SftpPanelSideLeft {
+		t.Fatalf("missing-file sftpPanelSide = %q, want %q", got.SftpPanelSide, SftpPanelSideLeft)
+	}
+
+	// Explicit "right" survives a round trip.
+	isolatedXDG(t)
+	s := DefaultSettings()
+	s.SftpPanelSide = SftpPanelSideRight
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.SftpPanelSide != SftpPanelSideRight {
+		t.Fatalf("round-trip sftpPanelSide = %q, want %q", got.SftpPanelSide, SftpPanelSideRight)
+	}
+
+	// Unknown value → left.
+	isolatedXDG(t)
+	if err := os.MkdirAll(Path(), DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(File(SettingsFileName), []byte(`{"sftpPanelSide":"sideways"}`), FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	got, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.SftpPanelSide != SftpPanelSideLeft {
+		t.Fatalf("unknown sftpPanelSide = %q, want %q", got.SftpPanelSide, SftpPanelSideLeft)
 	}
 }

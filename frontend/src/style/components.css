@@ -930,6 +930,34 @@
     overflow: hidden;
 }
 
+/* ---------- Left-docked SFTP switcher (plan sftp-panel-side) ---------- */
+/* Slim fixed row at the top of the left column; holds the single toggle that
+   swaps the tree and the browser. Present only while docked left. */
+.left-view-switch {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-panel);
+}
+
+.left-tree-view,
+.left-sftp-view {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* The top-of-column toggle is the one control back to the tree while docked
+   left, so the SFTP panel's header × is redundant there. */
+body.sftp-left .sftp-close {
+    display: none;
+}
+
 .sftp-hint {
     flex: none;
     padding: 8px 12px;

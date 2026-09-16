@@ -25,6 +25,7 @@ import type {
     SavedJumpHostDTO,
     SessionDTO,
     Settings,
+    SftpPanelSide,
 } from "./rpc/types";
 import { toast } from "./components/toasts";
 import { initTheme } from "./ui/theme";
@@ -44,6 +45,7 @@ export type {
     SessionDTO,
     Settings,
     SftpEntryDTO,
+    SftpPanelSide,
     TerminalSettings,
     WindowSettings,
 } from "./rpc/types";
@@ -107,13 +109,16 @@ export interface StoreState {
     settings: Settings;
     vaultState: VaultState;
     /**
-     * SFTP right-panel open state (ephemeral, like tabs — A3). Defaults to
-     * true; the store auto-opens it when a ready tab becomes active while
-     * the setting is on. The session tree is always visible; this flag only
-     * controls the right-hand SFTP column.
+     * SFTP panel open state (ephemeral, like tabs — A3). Defaults to false so
+     * the left-docked default shows the session tree. In right mode the store
+     * auto-opens it when a ready tab becomes active while the setting is on;
+     * in left mode the user toggles it from the top of the left column. When
+     * docked right it only controls the right-hand SFTP column; when docked
+     * left it switches the left column between the tree and the browser.
      */
     sftpPanelOpen: boolean;
-    /** Current SFTP right-panel width in px (mirrors window.sftpWidth live). */
+    /** Current right-docked SFTP panel width in px (mirrors window.sftpWidth
+     * live); unused while the panel is docked left. */
     sftpPanelWidth: number;
     tree: NodeDTO[];
     selectedID: string | null;
@@ -156,6 +161,16 @@ export const DEFAULT_LEFT_WIDTH = 320;
 export const DEFAULT_SFTP_WIDTH = 320;
 
 /**
+ * Normalize an arbitrary dock-side value (config.Settings.SftpPanelSide): only
+ * an explicit "right" keeps the browser on the right; anything else
+ * (absent/unknown) falls back to "left". The single renderer-side copy of the
+ * rule (Go normalize() keeps its own copy at the persistence boundary).
+ */
+export function normalizeSftpPanelSide(value: unknown): SftpPanelSide {
+    return value === "right" ? "right" : "left";
+}
+
+/**
  * Map an arbitrary backend settings object onto our Settings shape (the single
  * normalization point: boot in main.ts and import reconciliation here).
  */
@@ -168,6 +183,9 @@ export function normalizeSettings(raw: Record<string, unknown>): Settings {
         themeVariant: typeof raw.themeVariant === "string" ? raw.themeVariant : "",
         autoLockMinutes: Number(raw.autoLockMinutes ?? 0),
         sftpBrowserEnabled: Boolean(raw.sftpBrowserEnabled),
+        // Dock side (plan sftp-panel-side): only an explicit "right" keeps the
+        // browser on the right; anything else (absent/unknown) is "left".
+        sftpPanelSide: normalizeSftpPanelSide(raw.sftpPanelSide),
         // Plan P004: presence-aware default ON (the backend also forces
         // `true` when the key is absent, so `?? true` is belt-and-braces).
         monitoringEnabled: Boolean(raw.monitoringEnabled ?? true),
@@ -199,6 +217,7 @@ export const initialState: StoreState = {
         // persisted value via normalizeSettings). Same rule for the plan-P004
         // system monitor.
         sftpBrowserEnabled: true,
+        sftpPanelSide: "left",
         monitoringEnabled: true,
         terminal: { fontFamily: "monospace", fontSize: 13, scrollback: 10000 },
         textEditorCommand: "xdg-open",
@@ -209,7 +228,7 @@ export const initialState: StoreState = {
         ui: { zoomLevel: 0 },
     },
     vaultState: "locked",
-    sftpPanelOpen: true,
+    sftpPanelOpen: false,
     sftpPanelWidth: DEFAULT_SFTP_WIDTH,
     tree: [],
     selectedID: null,
@@ -374,8 +393,15 @@ class Store {
         const { tabs, settings } = this.state;
         const tab = tabs.find((t) => t.id === tabID);
         const patch: Partial<StoreState> = { activeTabID: tabID };
-        // Auto-open the SFTP right panel when activating a ready tab.
-        if (tab && tab.state === "ready" && settings.sftpBrowserEnabled) {
+        // Auto-open the SFTP panel when activating a ready tab — only when it
+        // is docked right. Left-docked keeps the tree as the default view (the
+        // user toggles to the browser); see plan sftp-panel-side.
+        if (
+            tab &&
+            tab.state === "ready" &&
+            settings.sftpBrowserEnabled &&
+            settings.sftpPanelSide === "right"
+        ) {
             patch.sftpPanelOpen = true;
         }
         this.set(patch);
@@ -579,8 +605,8 @@ class Store {
      * late event for a tab the user already closed and must be ignored (the
      * bridge writes responses and events from separate goroutines, so the
      * Disconnect response can overtake its own terminal:status "closed"
-     * event). Auto-opens the SFTP right panel when the active tab turns ready
-     * and the setting is on.
+     * event). Auto-opens the SFTP panel when the active tab turns ready and
+     * the setting is on — right-docked only (plan sftp-panel-side).
      */
     setTabState(tabID: string, state: TabState, message?: string): void {
         const { tabs, activeTabID, settings } = this.state;
@@ -592,7 +618,12 @@ class Store {
                 t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t,
             ),
         };
-        if (state === "ready" && tabID === activeTabID && settings.sftpBrowserEnabled) {
+        if (
+            state === "ready" &&
+            tabID === activeTabID &&
+            settings.sftpBrowserEnabled &&
+            settings.sftpPanelSide === "right"
+        ) {
             patch.sftpPanelOpen = true;
         }
         this.set(patch);
@@ -606,10 +637,11 @@ export function hasReadyActiveTab(state: StoreState): boolean {
 }
 
 /**
- * Single source of truth for whether the SFTP right panel is visible
- * (master plan §6): the setting must be on AND the panel must be open AND
- * the active tab must be ready. The session tree is always visible; this
- * only governs the right-hand column (the left-panel hint rules are separate).
+ * Base predicate for whether the SFTP browser should be visible (master plan
+ * §6): the setting must be on AND the panel must be open AND the active tab
+ * must be ready. Side-agnostic — the shell decides which column it drives
+ * (the right-hand column, or the left column in place of the tree). The
+ * left-panel "connect first" hint rules are separate.
  */
 export function sftpPanelVisible(state: StoreState): boolean {
     if (!state.settings.sftpBrowserEnabled || !state.sftpPanelOpen) {

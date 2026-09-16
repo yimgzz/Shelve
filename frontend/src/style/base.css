@@ -6,7 +6,9 @@
    and the SFTP side column span both rows, so the bottom strip under the
    tree/SFTP sides shares --bg-panel with the status band (no bare --bg gap
    in a corner). The SFTP column and its splitter track collapse to 0 px
-   (--sftp-w / --sftp-gap) and display:none when the panel is hidden. */
+   (--sftp-w / --sftp-gap) and display:none when the panel is hidden.
+   body.sftp-left overrides the grid to 3 columns: the SFTP browser is docked
+   in the left column (replacing the tree), so there is no right SFTP track. */
 
 * {
     box-sizing: border-box;
@@ -94,6 +96,18 @@ body {
     background: var(--bg);
     position: relative;
     overflow: hidden;
+}
+
+/* Left-docked SFTP browser (plan sftp-panel-side): the browser replaces the
+   tree inside the left column, so the right SFTP track and its splitter are
+   not created. Three columns (left | split | terminal) with the existing
+   30 px status row under the terminal. */
+body.sftp-left {
+    grid-template-columns: var(--left-w, 320px) 4px minmax(0, 1fr);
+    grid-template-rows: 1fr 30px;
+    grid-template-areas:
+        "left split right"
+        "left split status";
 }
 
 .left-header {

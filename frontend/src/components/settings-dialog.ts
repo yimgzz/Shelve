@@ -1,16 +1,16 @@
 // components/settings-dialog.ts — the Settings modal (Phase 4d task 1;
 // master plan §6 Settings). Three groups: General (theme / auto-lock /
-// SFTP browser), Terminal (font family / size / scrollback) and Files
-// (text editor command). Theme applies LIVE via theme.applyTheme and
-// reverts on Cancel; Terminal options are applied live to existing xterm
-// instances on Save (TermPool.applySettings). Save writes the FULL
-// settings object (including window geometry) through AppService.
+// SFTP browser / SFTP panel position), Terminal (font family / size /
+// scrollback) and Files (text editor command). Theme applies LIVE via
+// theme.applyTheme and reverts on Cancel; Terminal options are applied live
+// to existing xterm instances on Save (TermPool.applySettings). Save writes
+// the FULL settings object (including window geometry) through AppService.
 
 import { AppService } from "../rpc";
 import { openDialog } from "../ui/dialog";
 import { applyTheme, type ThemeMode } from "../ui/theme";
 import { familyDefaultVariant, variantById, variantsForFamily } from "../ui/themes";
-import { store, type Settings } from "../store";
+import { store, normalizeSftpPanelSide, type Settings } from "../store";
 import { TermPool } from "../terminal/xterm";
 import { toast } from "./toasts";
 
@@ -169,10 +169,28 @@ export function openSettingsDialog(): void {
     sftpCheck.className = "settings-check";
     sftpCheck.checked = current.sftpBrowserEnabled;
     const sftpWrap = settingField("SFTP browser", sftpCheck, {
-        hint: "Shown in a right-side panel when a session is active.",
+        hint: "Available for the active session when a tab is ready.",
     });
     sftpWrap.classList.add("settings-check-wrap");
     general.appendChild(sftpWrap);
+
+    // SFTP panel position (plan sftp-panel-side): the dock side of the browser.
+    // Docked left it replaces the session tree in the left column (toggle at
+    // the top of the column); docked right it gets its own column.
+    const sftpSide = document.createElement("select");
+    sftpSide.className = "input";
+    for (const [value, label] of [["left", "Left"], ["right", "Right"]] as const) {
+        const opt = document.createElement("option");
+        opt.value = value;
+        opt.textContent = label;
+        opt.selected = current.sftpPanelSide === value;
+        sftpSide.appendChild(opt);
+    }
+    general.appendChild(
+        settingField("SFTP panel position", sftpSide, {
+            hint: "Where the SFTP browser is docked; on the left it replaces the session tree (toggle at the top of the column).",
+        }),
+    );
 
     // Plan P004: bottom-bar system monitor (hostname/CPU/RAM/net/uptime/df).
     const monCheck = document.createElement("input");
@@ -295,6 +313,7 @@ export function openSettingsDialog(): void {
                 themeVariant: selVariant,
                 autoLockMinutes: clamp(Math.floor(Number(autoLock.value) || 0), 0, 60 * 24),
                 sftpBrowserEnabled: sftpCheck.checked,
+                sftpPanelSide: normalizeSftpPanelSide(sftpSide.value),
                 monitoringEnabled: monCheck.checked,
                 terminal: {
                     fontFamily: fontFamily.value.trim() || "monospace",

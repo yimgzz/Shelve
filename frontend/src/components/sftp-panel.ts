@@ -1,9 +1,11 @@
-// components/sftp-panel.ts — SFTP browser in the right-hand column (Phases
-// 5c/5d; master plan §6 SFTP panel). Shown in a right-side panel beside the
-// terminal when settings.sftpBrowserEnabled is on AND the panel is open AND
-// the active tab is ready (the decision lives in store.ts via
-// sftpPanelVisible; the shell toggles the column's display). The session
-// tree is always visible on the left.
+// components/sftp-panel.ts — SFTP browser (Phases 5c/5d; master plan §6 SFTP
+// panel). Shown when settings.sftpBrowserEnabled is on AND the panel is open
+// AND the active tab is ready (the decision lives in store.ts via
+// sftpPanelVisible; the shell toggles the view). The browser is docked left
+// (replacing the session tree) or right (its own column beside the terminal)
+// per settings.sftpPanelSide (plan sftp-panel-side); the panel itself is
+// position-independent. While mounted but hidden (e.g. the default left-docked
+// tree view) it issues no listings — it loads lazily when it becomes visible.
 //
 // Header: [×] close + back button + editable path bar (Enter to
 // navigate, Esc/blur reverts), [Upload] [New folder] [Refresh]. List rows:
@@ -19,7 +21,7 @@
 // cache.
 
 import { SftpService } from "../rpc";
-import { store, type SftpEntryDTO } from "../store";
+import { store, sftpPanelVisible, type SftpEntryDTO } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { confirmDialog } from "./confirm";
 import { openDialog } from "../ui/dialog";
@@ -40,6 +42,12 @@ let errorMsg: string | null = null;
 let selected: string | null = null;
 let inlineCreate = false;
 let inlineRename: { name: string } | null = null;
+/**
+ * Last observed panel visibility (store.sftpPanelVisible). Gates lazy
+ * listing: a mounted but hidden browser (e.g. the default left-docked view
+ * showing the tree) issues no SFTP listings until it becomes visible.
+ */
+let panelVisible = false;
 
 let backBtn: HTMLButtonElement | null = null;
 let pathInput: HTMLInputElement | null = null;
@@ -126,14 +134,17 @@ export function renderSftpPanel(target: HTMLElement): void {
     selected = null;
     inlineCreate = false;
     inlineRename = null;
-    if (tabID) {
+    panelVisible = sftpPanelVisible(store.getState());
+    if (tabID && panelVisible) {
         void loadList();
     } else {
         entries = null;
     }
-    updateFooter();
-    renderPathBar();
-    renderList();
+    if (panelVisible) {
+        updateFooter();
+        renderPathBar();
+        renderList();
+    }
 }
 
 /** React to store changes: tab switch, transfer cache, other churn. */
@@ -141,10 +152,12 @@ function refresh(): void {
     if (!host) {
         return;
     }
-    const { activeTabID, tabs } = store.getState();
+    const st = store.getState();
+    const { activeTabID, tabs } = st;
     const t = tabs.find((x) => x.id === activeTabID);
     const ready = t && t.state === "ready" ? activeTabID! : "";
-    if (ready !== tabID) {
+    const tabChanged = ready !== tabID;
+    if (tabChanged) {
         // Active tab changed → reset navigation.
         tabID = ready;
         curPath = initialPath();
@@ -152,11 +165,20 @@ function refresh(): void {
         selected = null;
         inlineCreate = false;
         inlineRename = null;
-        if (ready) {
-            void loadList();
-        } else {
-            entries = null;
-        }
+        entries = null;
+    }
+    // Lazy listing: load only while the browser is actually visible, and only
+    // on a tab change or the hidden→visible transition. A hidden panel (e.g.
+    // the default left-docked tree view) therefore issues no SFTP listings.
+    // User navigation still calls loadList directly while visible.
+    const nowVisible = sftpPanelVisible(st);
+    const becameVisible = nowVisible && !panelVisible;
+    panelVisible = nowVisible;
+    if (nowVisible && (tabChanged || becameVisible)) {
+        void loadList();
+    }
+    if (!nowVisible) {
+        return;
     }
     updateFooter();
     // Don't clobber an in-progress edit (path bar or inline rows) during
@@ -191,12 +213,13 @@ function mkBtn(label: string, onClick: () => void): HTMLButtonElement {
 function buildStatic(target: HTMLElement): void {
     const header = document.createElement("div");
     header.className = "sftp-header";
-    // [×]: close the SFTP right panel. The session tree on the left is always
-    // visible; reopen it via the left toolbar's [SFTP] button or by switching
-    // to another ready tab (auto-open, store.ts).
+    // [×]: close the browser. Right docking only — the session tree on the
+    // left is always visible there and [SFTP] reopens the panel; while docked
+    // left this button is hidden (CSS) and the top-of-column toggle is the
+    // single control back to the tree.
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
-    closeBtn.className = "btn small icon-btn";
+    closeBtn.className = "btn small icon-btn sftp-close";
     closeBtn.textContent = "×";
     closeBtn.title = "Close SFTP browser";
     closeBtn.setAttribute("aria-label", "Close");

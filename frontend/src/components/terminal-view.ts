@@ -180,16 +180,20 @@ function reconcile(): void {
         return;
     }
 
-    // Create panes + pooled terminals for NEW tabs. Existing panes are
-    // already in the DOM and are skipped here.
+    // Create panes + pooled terminals for NEW tabs, and re-attach existing
+    // panes when the shell re-rendered into a fresh host (the shell wipes the
+    // root on a re-render, which detaches every old pane). The pooled xterm
+    // lives in the pane's xtermEl, so terminals persist across a re-mount.
     for (const tab of tabs) {
-        if (panes.has(tab.id)) {
-            continue;
+        let p = panes.get(tab.id);
+        if (!p) {
+            p = buildPane(tab);
+            panes.set(tab.id, p);
+            TermPool.create(tab.id, p.xtermEl, { settings: settings.terminal });
         }
-        const p = buildPane(tab);
-        paneEl.appendChild(p.el);
-        panes.set(tab.id, p);
-        TermPool.create(tab.id, p.xtermEl, { settings: settings.terminal });
+        if (p.el.parentElement !== paneEl) {
+            paneEl.appendChild(p.el);
+        }
     }
 
     // Visibility + overlays.
@@ -240,10 +244,14 @@ export function renderTerminalView(host: HTMLElement): void {
         unsub();
     }
     // A fresh mount must always run the first reconcile, even when the store
-    // contents are unchanged since the previous mount (same references).
+    // contents are unchanged since the previous mount (same references). Reset
+    // the active-tab memo too so a re-mounted shell re-focuses the active
+    // terminal (its pane was detached by the shell's root wipe).
     lastReconcileTabs = null;
     lastReconcileActive = null;
     lastReconcileTerm = null;
+    lastActive = null;
+    lastActiveState = null;
     unsub = store.subscribe(reconcile);
     reconcile();
 }

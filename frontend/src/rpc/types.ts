@@ -201,6 +201,8 @@ export interface Settings {
     themeVariant: string;
     autoLockMinutes: number;
     sftpBrowserEnabled: boolean;
+    /** Dock side of the SFTP browser (config.SftpPanelSide). */
+    sftpPanelSide: SftpPanelSide;
     monitoringEnabled: boolean;
     terminal: TerminalSettings;
     textEditorCommand: string;
@@ -208,6 +210,9 @@ export interface Settings {
     window: WindowSettings;
     ui: UISettings;
 }
+
+/** SFTP browser dock side (config.SftpPanelSide). */
+export type SftpPanelSide = "left" | "right";
 
 // ------------------------------------------------- native (preload) API ---
 

@@ -13,6 +13,12 @@ const (
 	ThemeDark   = "dark"
 )
 
+// SFTP dock-side values for Settings.SftpPanelSide.
+const (
+	SftpPanelSideLeft  = "left"
+	SftpPanelSideRight = "right"
+)
+
 // TerminalSettings holds terminal appearance/behaviour settings.
 type TerminalSettings struct {
 	FontFamily string `json:"fontFamily"`
@@ -45,6 +51,7 @@ type Settings struct {
 	ThemeVariant       string           `json:"themeVariant"` // "" = family default; concrete palette id
 	AutoLockMinutes    int              `json:"autoLockMinutes"`
 	SftpBrowserEnabled bool             `json:"sftpBrowserEnabled"`
+	SftpPanelSide      string           `json:"sftpPanelSide"`     // "left" | "right" — dock side
 	MonitoringEnabled  bool             `json:"monitoringEnabled"` // bottom-bar system monitor (plan P004)
 	Terminal           TerminalSettings `json:"terminal"`
 	TextEditorCommand  string           `json:"textEditorCommand"`
@@ -63,6 +70,7 @@ func DefaultSettings() Settings {
 		ThemeVariant:       "",
 		AutoLockMinutes:    0,
 		SftpBrowserEnabled: true,
+		SftpPanelSide:      SftpPanelSideLeft,
 		MonitoringEnabled:  true,
 		Terminal: TerminalSettings{
 			FontFamily: "monospace",
@@ -147,6 +155,13 @@ func (s *Settings) normalize() {
 	}
 	if s.SftpInitialPath == "" {
 		s.SftpInitialPath = "~"
+	}
+	// SftpPanelSide (plan sftp-panel-side): anything other than the two known
+	// sides (including an absent/empty value) falls back to the left default.
+	switch s.SftpPanelSide {
+	case SftpPanelSideLeft, SftpPanelSideRight:
+	default:
+		s.SftpPanelSide = SftpPanelSideLeft
 	}
 	if s.Terminal.FontFamily == "" {
 		s.Terminal.FontFamily = "monospace"

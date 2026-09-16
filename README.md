@@ -1,6 +1,6 @@
 # Shelve
 
-Stash your shells in style!
+Stash your shells in Shelve!
 
 A lightweight, fast, fully local SSH session manager. Go backend
 (`golang.org/x/crypto/ssh`) + Electron (Chromium) shell with a vanilla

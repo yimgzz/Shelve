@@ -35,6 +35,7 @@ import { initShortcuts } from "./ui/shortcuts";
 import { initAutoLock } from "./ui/autolock";
 import { initDpi, onDpiChanged } from "./ui/dpi";
 import { applyZoomLevel } from "./ui/zoom";
+import { initTitleBar } from "./ui/titlebar";
 
 // Event names (master plan §5; the backend constants live in
 // internal/api + internal/sshengine).
@@ -296,19 +297,32 @@ function applyWindowState(state: WindowState): void {
     });
 }
 
+/** Resolve when the document DOM is parsed (static markup exists). */
+async function whenDomReady(): Promise<void> {
+    if (document.readyState !== "loading") {
+        return;
+    }
+    await new Promise<void>((res) =>
+        document.addEventListener("DOMContentLoaded", () => res(), { once: true }),
+    );
+}
+
 /** Resolve when both the DOM and the backend bridge socket are ready. */
 async function whenReady(): Promise<void> {
-    const domReady =
-        document.readyState === "loading"
-            ? new Promise<void>((res) => document.addEventListener("DOMContentLoaded", () => res(), { once: true }))
-            : Promise.resolve();
-    await domReady;
+    await whenDomReady();
     // The bridge socket carries every service call and backend event; the
     // window can exist before the backend handshake, so ready() retries.
     await events.ready();
 }
 
 async function boot(): Promise<void> {
+    // The frameless title bar needs only the DOM and the preload flag, never
+    // the backend: enable it before the bridge handshake so a shown frameless
+    // window always has its window controls (the native OS-frame path is a
+    // no-op — initTitleBar checks the preload flag).
+    await whenDomReady();
+    initTitleBar();
+
     await whenReady();
 
     // Dev flag kept for dev tooling (search timing in tree.ts, dev notes);

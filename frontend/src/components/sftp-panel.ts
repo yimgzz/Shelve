@@ -7,9 +7,9 @@
 // position-independent. While mounted but hidden (e.g. the default left-docked
 // tree view) it issues no listings — it loads lazily when it becomes visible.
 //
-// Header: [×] close + back button + editable path bar (Enter to
-// navigate, Esc/blur reverts), [Upload] [New folder] [Refresh]. List rows:
-// icon / name / size / modified.
+// Header: [Sessions] (left-dock only) + [×] close + back button + editable path
+// bar (Enter to navigate, Esc/blur reverts), [Upload] [New folder] [Refresh].
+// List rows: icon / name / size / modified.
 // Double-click: dir → navigate, file → EditRemoteText (Edit as text).
 // Context menu: Edit as text / Download… / Upload to here… / New folder… /
 // Rename… / Delete…. "Edit as text" (EditRemoteText) downloads the file
@@ -211,10 +211,20 @@ function mkBtn(label: string, onClick: () => void): HTMLButtonElement {
 function buildStatic(target: HTMLElement): void {
     const header = document.createElement("div");
     header.className = "sftp-header";
+    // [Sessions]: return to the session tree. Left docking only — while docked
+    // right the tree is always visible and CSS hides this button, leaving [×]
+    // as the control that closes the browser.
+    const sessionsBtn = document.createElement("button");
+    sessionsBtn.type = "button";
+    sessionsBtn.className = "btn small sftp-sessions";
+    sessionsBtn.textContent = "Sessions";
+    sessionsBtn.title = "Show sessions";
+    sessionsBtn.setAttribute("aria-label", "Show sessions");
+    sessionsBtn.addEventListener("click", () => store.set({ sftpPanelOpen: false }));
     // [×]: close the browser. Right docking only — the session tree on the
     // left is always visible there and [SFTP] reopens the panel; while docked
-    // left this button is hidden (CSS) and the top-of-column toggle is the
-    // single control back to the tree.
+    // left this button is hidden (CSS) and the [Sessions] button is the single
+    // control back to the tree.
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "btn small icon-btn sftp-close";
@@ -264,7 +274,7 @@ function buildStatic(target: HTMLElement): void {
             pathInput.value = curPath;
         }
     });
-    header.append(closeBtn, backBtn, pathInput);
+    header.append(sessionsBtn, closeBtn, backBtn, pathInput);
 
     const toolbar = document.createElement("div");
     toolbar.className = "toolbar sftp-toolbar";

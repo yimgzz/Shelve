@@ -10,8 +10,10 @@
 import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from "electron";
 
 // The IPC payloads are declared once for main + preload + renderer in
-// frontend/src/rpc/ipc.ts (type-only import: erased from the bundle).
+// frontend/src/rpc/ipc.ts (type-only import: erased from the bundle; the
+// frameless flag constant is the one shared runtime value).
 import type { BridgeEndpoint, DisplayChanged, WindowState } from "../frontend/src/rpc/ipc";
+import { FRAMELESS_TITLEBAR_FLAG } from "../frontend/src/rpc/ipc";
 
 contextBridge.exposeInMainWorld("shelve", {
     // The per-run loopback endpoint ({addr, token}) printed by the Go backend
@@ -68,5 +70,15 @@ contextBridge.exposeInMainWorld("shelve", {
     zoom: {
         setLevel: (level: number): void => webFrame.setZoomLevel(level),
         getLevel: (): number => webFrame.getZoomLevel(),
+    },
+
+    // Custom title bar controls (frameless window). `frameless` is a sync flag
+    // passed by main through webPreferences.additionalArguments; the three
+    // controls are fire-and-forget window commands. No secrets, no Node objects.
+    titleBar: {
+        frameless: process.argv.includes(FRAMELESS_TITLEBAR_FLAG),
+        minimize: (): void => ipcRenderer.send("window:minimize"),
+        toggleMaximize: (): void => ipcRenderer.send("window:toggle-maximize"),
+        close: (): void => ipcRenderer.send("window:close"),
     },
 });

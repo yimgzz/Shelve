@@ -315,7 +315,7 @@
 /* ---------- Toasts ---------- */
 .toast-stack {
     position: fixed;
-    top: 12px;
+    top: calc(var(--titlebar-h) + 12px);
     right: 12px;
     z-index: 200;
     display: flex;
@@ -409,6 +409,25 @@
 }
 
 /* ---------- Search header ---------- */
+/* The search box and the collapse/expand action group share one row; the box
+   takes the remaining width (plan ui-ux-refinements §D). */
+.left-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.left-header .search-wrap {
+    flex: 1;
+    min-width: 0;
+}
+
+.tree-actions {
+    display: flex;
+    gap: 4px;
+    flex: none;
+}
+
 .search-wrap {
     position: relative;
     display: flex;
@@ -440,6 +459,24 @@
     display: block;
 }
 
+/* A folder's children block carries a vertical indent guide at the parent
+   chevron's centre (--guide-x set inline per depth by tree.ts). */
+.tree-children {
+    position: relative;
+}
+
+.tree-children::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--guide-x, 0);
+    width: 1px;
+    background: var(--border);
+    opacity: 0.6;
+    pointer-events: none;
+}
+
 .tree-row {
     display: flex;
     align-items: center;
@@ -469,6 +506,13 @@
     cursor: pointer;
     text-align: center;
     user-select: none;
+}
+
+/* Sessions have no chevron; this keeps their icon in the same column as a
+   folder icon at the same depth (tree indentation, plan §C). */
+.tree-row .chevron-spacer {
+    width: 12px;
+    flex: none;
 }
 
 .tree-row .tree-icon {
@@ -530,7 +574,6 @@
 .tab-strip {
     display: flex;
     overflow-x: auto;
-    scrollbar-width: thin;
 }
 
 .tab {
@@ -935,19 +978,9 @@
     overflow: hidden;
 }
 
-/* ---------- Left-docked SFTP switcher (plan sftp-panel-side) ---------- */
-/* Slim fixed row at the top of the left column; holds the single toggle that
-   swaps the tree and the browser. Present only while docked left. */
-.left-view-switch {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-panel);
-}
-
+/* ---------- Left-docked SFTP view (plan sftp-panel-side) ---------- */
+/* The browser replaces the tree inside the left column; the left toolbar
+   [SFTP] button and the panel-header [Sessions] button are the swap controls. */
 .left-tree-view,
 .left-sftp-view {
     flex: 1;
@@ -957,10 +990,18 @@
     overflow: hidden;
 }
 
-/* The top-of-column toggle is the one control back to the tree while docked
-   left, so the SFTP panel's header × is redundant there. */
+/* The panel-header [×] is right-dock only; while docked left the [Sessions]
+   button is the way back to the tree. Inverse visibility per side. */
 body.sftp-left .sftp-close {
     display: none;
+}
+
+.sftp-sessions {
+    display: none;
+}
+
+body.sftp-left .sftp-sessions {
+    display: inline-flex;
 }
 
 .sftp-hint {

@@ -9,7 +9,15 @@
 //
 // They live here (types only, no runtime code, no `Window` augmentation) so a
 // rename in main/preload can never drift silently from the renderer, which is
-// exactly the failure mode a redeclared copy would hide.
+// exactly the failure mode a redeclared copy would hide. The one exception is
+// FRAMELESS_TITLEBAR_FLAG: a shared runtime token both processes must agree on.
+
+/**
+ * Additional-argument token main passes to the sandboxed preload to signal the
+ * frameless title bar (see `webPreferences.additionalArguments`). Shared by
+ * electron/main.ts and electron/preload.ts so the two cannot drift.
+ */
+export const FRAMELESS_TITLEBAR_FLAG = "--shelve-frameless";
 
 /** The per-run loopback endpoint printed by the Go backend's handshake. */
 export interface BridgeEndpoint {
@@ -21,6 +29,8 @@ export interface BridgeEndpoint {
 export interface WindowState {
     width: number;
     height: number;
+    /** True while the window is maximized (custom title bar restore glyph). */
+    maximized: boolean;
 }
 
 /**

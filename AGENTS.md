@@ -163,7 +163,8 @@ Notes:
 - **The renderer↔main surface is the reviewed preload API only**
   (`electron/preload.ts` → `window.shelve`). Never enable `nodeIntegration`,
   never disable `contextIsolation`/`sandbox`, never add arbitrary `ipcRenderer`
-  passthrough.
+  passthrough. The window controls (frameless flag + `minimize`/`toggleMaximize`/
+  `close`) are part of that reviewed surface.
 - DTOs live in `internal/api/dto.go`; never expose internal structs. The RPC
   surface is reflection-based over the registered services and pinned by a
   **surface golden test** — keep the registry explicit.
@@ -193,7 +194,9 @@ Notes:
 - The renderer is sandboxed (`contextIsolation: true`, `nodeIntegration: false`,
   `sandbox: true`) and reaches native capabilities only through the reviewed
   preload API (bridge endpoint, file dialog, clipboard, window state, display
-  changes, zoom).
+  changes, zoom, window controls). The window is frameless by default and the
+  renderer draws the title bar; `SHELVE_TITLEBAR=native` restores the OS frame
+  and hides the bar.
 - No application data crosses stdio.
 
 ### RPC envelope
@@ -299,7 +302,9 @@ queue blocks the emitter rather than dropping a lifecycle event.
 10. Corrupt/undecryptable vault → refuse to unlock, never auto-overwrite.
 11. Renderer hardening: `contextIsolation`, `nodeIntegration: false`,
     `sandbox: true`, the minimal reviewed preload API, and a CSP (injected by
-    `vite.config.ts`). The AppImage sandbox fallback (`--no-sandbox` +
+    `vite.config.ts`). The window controls (frameless flag + three
+    sender-checked `window:*` commands) are part of that reviewed API; no
+    arbitrary IPC passthrough. The AppImage sandbox fallback (`--no-sandbox` +
     `--disable-gpu-sandbox` when user namespaces are unavailable; override with
     `SHELVE_SANDBOX=0|1`) does not change any of the above.
 12. The backend binds `127.0.0.1` only, inherits `XDG_CONFIG_HOME`, and exits on
@@ -321,6 +326,26 @@ queue blocks the emitter rather than dropping a lifecycle event.
   group-scoped Close Others / Close All Tabs / Close Tabs to the Right. Tabs
   drag within a group or onto another group's strip; `.group-splitter` dividers
   rebalance ephemeral widths (min 240 px, never persisted).
+- **Custom title bar:** the window is frameless by default (`frame: false`) with a
+  30 px renderer-drawn bar (`Shelve` label + drag region + minimize/maximize/
+  close, themed by the CSS tokens); maximize/restore is the `#tb-max` button
+  (the bar's drag region gets no double-click events).
+  `SHELVE_TITLEBAR=native` restores the OS frame and hides the bar. The controls
+  are part of the reviewed preload surface.
+- **SFTP dock side (`settings.sftpPanelSide`):** docked right the browser is its
+  own column (`×` closes, toolbar `[SFTP]` reopens); docked left (the default)
+  it replaces the tree in the left column — toolbar `[SFTP]` opens it and the
+  panel-header `[Sessions]` button returns to the tree (the panel `×` is hidden
+  on the left). Auto-open applies to **both** sides: a tab reaching `ready` (or
+  a ready tab being activated) opens the browser while the setting is on.
+- **Session tree:** 18 px indent per level, a chevron-width spacer on session
+  rows so icons align per depth, and a vertical indent guide per children block;
+  the search row carries `⊟` Collapse all / `⊞` Expand all (mirrored in the
+  empty-area context menu). Collapsed state stays ephemeral.
+- **Scrollbars:** one global thin, themed rule (`scrollbar-width: thin` +
+  `scrollbar-color` from `--scrollbar`/`--scrollbar-hover`, lazy `color-mix`
+  over `--text-dim`) covering the tree, SFTP list, tab strip, modal bodies and
+  the xterm viewport.
 - **Session card:** exactly one auth method (password XOR key path); Jump Hosts
   are structured fields; Extra Args uses a strict parser (`internal/sshx/args`).
   Key passphrases are prompted once per connection, cached only in memory.

@@ -246,6 +246,16 @@ export interface ShelveNative {
         setLevel(level: number): void;
         getLevel(): number;
     };
+    /**
+     * Custom (frameless) title bar controls. `frameless` is false when the app
+     * runs with SHELVE_TITLEBAR=native (the OS frame is drawn instead).
+     */
+    titleBar: {
+        frameless: boolean;
+        minimize(): void;
+        toggleMaximize(): void;
+        close(): void;
+    };
 }
 
 declare global {

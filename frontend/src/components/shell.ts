@@ -5,16 +5,18 @@
 // menu (Phase 4d) that opens Settings / Lock vault / About.
 //
 // SFTP dock side (settings.sftpPanelSide, plan sftp-panel-side): docked right
-// the browser is its own column beside the terminal (today's layout); docked
-// left (the default) it takes the tree's place inside the left column, with a
-// slim top-of-column toggle switching between the tree and the browser. The
-// store subscription installed at the end of renderShell re-renders the shell
-// when the side changes in Settings.
+// the browser is its own column beside the terminal; docked left (the default)
+// it takes the tree's place inside the left column. In both modes the toolbar
+// [SFTP] button opens the browser and, when docked left, the panel-header
+// [Sessions] button returns to the tree (plan ui-ux-refinements §B). The store
+// subscription installed at the end of renderShell re-renders the shell when
+// the side changes in Settings.
 
 import { AppService } from "../rpc";
 import {
     store,
     sftpPanelVisible,
+    sftpReopenVisible,
     hasReadyActiveTab,
     normalizeSftpPanelSide,
     DEFAULT_LEFT_WIDTH,
@@ -24,7 +26,7 @@ import {
 } from "../store";
 import { toast } from "./toasts";
 import { renderSearch } from "./search";
-import { renderTreeBody, openNewSession, openNewFolderAt } from "./tree";
+import { renderTreeBody, openNewSession, openNewFolderAt, collapseAllTree, expandAllTree } from "./tree";
 import { renderSftpPanel } from "./sftp-panel";
 import { openGearMenu } from "./gear";
 import { renderTerminalArea } from "./terminal-view";
@@ -96,23 +98,40 @@ function persistWindow(): void {
 
 /** Build the search header, toolbar, tree body and SFTP hint into `container`.
  *
- * In right mode this is the always-visible left panel; in left mode it is the
- * `.left-tree-view` wrapper that swaps with the SFTP view. The toolbar
- * `[SFTP]` reopen button only exists in right mode — left mode's
- * top-of-column toggle replaces it.
+ * Used by both dock sides. The toolbar `[SFTP]` reopen/open button is always
+ * created; the layout sync decides when it is visible (the setting is on, a
+ * ready tab exists and the browser is closed).
  *
  * Returns the hint element (whose display the layout keeps in sync) and the
- * optional `[SFTP]` button.
+ * `[SFTP]` button.
  */
-function buildTreeView(
-    container: HTMLElement,
-    withSftpButton: boolean,
-): { hint: HTMLElement; sftpBtn: HTMLButtonElement | null } {
+function buildTreeView(container: HTMLElement): { hint: HTMLElement; sftpBtn: HTMLButtonElement } {
     // Search header.
     const searchHost = document.createElement("div");
     searchHost.className = "left-header";
     container.appendChild(searchHost);
     renderSearch(searchHost);
+
+    // Collapse all / Expand all (plan §D): kept in the search row so the
+    // 240 px toolbar never clips the gear.
+    const treeActions = document.createElement("div");
+    treeActions.className = "tree-actions";
+    const collapseBtn = document.createElement("button");
+    collapseBtn.type = "button";
+    collapseBtn.className = "btn small icon-btn";
+    collapseBtn.textContent = "⊟";
+    collapseBtn.title = "Collapse all";
+    collapseBtn.setAttribute("aria-label", "Collapse all");
+    collapseBtn.addEventListener("click", collapseAllTree);
+    const expandBtn = document.createElement("button");
+    expandBtn.type = "button";
+    expandBtn.className = "btn small icon-btn";
+    expandBtn.textContent = "⊞";
+    expandBtn.title = "Expand all";
+    expandBtn.setAttribute("aria-label", "Expand all");
+    expandBtn.addEventListener("click", expandAllTree);
+    treeActions.append(collapseBtn, expandBtn);
+    searchHost.appendChild(treeActions);
 
     // Toolbar (+ Session / + Folder) — now active (Phase 4b).
     const toolbar = document.createElement("div");
@@ -128,19 +147,15 @@ function buildTreeView(
     btnNewFolder.textContent = "+ Folder";
     btnNewFolder.addEventListener("click", () => openNewFolderAt(""));
 
-    // [SFTP]: reopen button for right docking, where the browser has its own
-    // column. Visible only when the setting is on, a ready tab exists, and the
-    // panel is currently hidden (the session tree is always visible on the
-    // left). Left mode omits it; the column toggle handles the swap.
-    let sftpBtn: HTMLButtonElement | null = null;
-    if (withSftpButton) {
-        sftpBtn = document.createElement("button");
-        sftpBtn.type = "button";
-        sftpBtn.className = "btn small";
-        sftpBtn.textContent = "SFTP";
-        sftpBtn.title = "Open the SFTP browser for the active session";
-        sftpBtn.addEventListener("click", () => store.set({ sftpPanelOpen: true }));
-    }
+    // [SFTP]: open the browser for the active ready tab. Shown only when the
+    // setting is on, a ready tab exists and the panel is currently hidden (the
+    // layout sync sets its display); works on both dock sides.
+    const sftpBtn = document.createElement("button");
+    sftpBtn.type = "button";
+    sftpBtn.className = "btn small";
+    sftpBtn.textContent = "SFTP";
+    sftpBtn.title = "Open the SFTP browser for the active session";
+    sftpBtn.addEventListener("click", () => store.set({ sftpPanelOpen: true }));
 
     // Gear menu (Phase 4d): [Settings…] / [Lock vault…] / [About], anchored
     // to the button at the right edge of the toolbar (master plan §6).
@@ -157,11 +172,7 @@ function buildTreeView(
         const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
         openGearMenu(r.right - 8, r.bottom + 4);
     });
-    toolbar.append(btnNewSession, btnNewFolder);
-    if (sftpBtn) {
-        toolbar.appendChild(sftpBtn);
-    }
-    toolbar.append(spacer, gear);
+    toolbar.append(btnNewSession, btnNewFolder, sftpBtn, spacer, gear);
     container.appendChild(toolbar);
 
     // Tree / search body (scrollable).
@@ -212,37 +223,25 @@ export function renderShell(root: HTMLElement): void {
 
     let hintEl: HTMLElement;
     let sftpBtnEl: HTMLButtonElement | null = null;
-    let switchRowEl: HTMLElement | null = null;
-    let toggleBtnEl: HTMLButtonElement | null = null;
     let treeViewEl: HTMLElement | null = null;
     let sftpViewEl: HTMLElement | null = null;
 
     if (side === "right") {
         // Right docking keeps today's layout: the session tree owns the left
         // panel and the browser has its own right-hand column (built below).
-        const parts = buildTreeView(left, true);
+        const parts = buildTreeView(left);
         hintEl = parts.hint;
         sftpBtnEl = parts.sftpBtn;
     } else {
-        // Left docking: a slim header row holds the single toggle that swaps
-        // the tree and the browser inside this column.
-        const switcher = document.createElement("div");
-        switcher.className = "left-view-switch";
-        const toggle = document.createElement("button");
-        toggle.type = "button";
-        toggle.className = "btn small icon-btn";
-        toggle.addEventListener("click", () => {
-            store.set({ sftpPanelOpen: !store.getState().sftpPanelOpen });
-        });
-        switcher.appendChild(toggle);
-        left.appendChild(switcher);
-        switchRowEl = switcher;
-        toggleBtnEl = toggle;
-
+        // Left docking: the browser takes the tree's place inside this column.
+        // The toolbar [SFTP] and the panel-header [Sessions] buttons swap the
+        // two views (there is no separate top-of-column toggle any more).
         treeViewEl = document.createElement("div");
         treeViewEl.className = "left-tree-view";
         left.appendChild(treeViewEl);
-        hintEl = buildTreeView(treeViewEl, false).hint;
+        const parts = buildTreeView(treeViewEl);
+        hintEl = parts.hint;
+        sftpBtnEl = parts.sftpBtn;
 
         sftpViewEl = document.createElement("div");
         sftpViewEl.className = "left-sftp-view";
@@ -365,8 +364,7 @@ export function renderShell(root: HTMLElement): void {
             sftpSide.setAttribute("aria-hidden", panel ? "false" : "true");
             hintEl.style.display = st.settings.sftpBrowserEnabled && !readyTab ? "" : "none";
             if (sftpBtnEl) {
-                sftpBtnEl.style.display =
-                    st.settings.sftpBrowserEnabled && readyTab && !panel ? "" : "none";
+                sftpBtnEl.style.display = sftpReopenVisible(st) ? "" : "none";
             }
         };
         sftpLayoutUnsub = store.subscribe(applySftpLayout);
@@ -445,22 +443,9 @@ export function renderShell(root: HTMLElement): void {
                 sftpViewEl.style.display = panel ? "flex" : "none";
             }
             hintEl.style.display = enabled && !readyTab ? "" : "none";
-            // The switcher row is fixed (it must not appear/disappear as tabs
-            // connect); it is hidden only when the browser setting is off.
-            if (switchRowEl) {
-                switchRowEl.style.display = enabled ? "" : "none";
-            }
-            if (toggleBtnEl) {
-                const showSftp = !panel;
-                toggleBtnEl.textContent = showSftp ? "📁" : "☰";
-                toggleBtnEl.disabled = !readyTab;
-                const label = !readyTab
-                    ? "Connect to a session…"
-                    : showSftp
-                      ? "Show SFTP browser"
-                      : "Show sessions";
-                toggleBtnEl.title = label;
-                toggleBtnEl.setAttribute("aria-label", label);
+            // Toolbar [SFTP]: shared predicate with right docking.
+            if (sftpBtnEl) {
+                sftpBtnEl.style.display = sftpReopenVisible(st) ? "" : "none";
             }
         };
         sftpLayoutUnsub = store.subscribe(applySftpLayout);

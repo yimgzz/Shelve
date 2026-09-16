@@ -16,6 +16,8 @@ import { toast } from "./toasts";
 
 // Folders the user has collapsed (component-local; not persisted, v1).
 const collapsed = new Set<string>();
+// Indent step per tree depth (plan ui-ux-refinements §C).
+const INDENT = 18;
 let inlineCreate: { parentID: string } | null = null;
 let inlineRename: { id: string; kind: string; value: string } | null = null;
 
@@ -36,6 +38,26 @@ export function openNewSession(parentID: string): void {
 /** Start an inline "new folder" input row under parentID. */
 export function openNewFolderAt(parentID: string): void {
     inlineCreate = { parentID };
+    rerender();
+}
+
+/** Collapse every folder in the tree (search-header / context-menu action). */
+export function collapseAllTree(): void {
+    const walk = (nodes: NodeDTO[]): void => {
+        for (const n of nodes) {
+            if (n.kind === "folder") {
+                collapsed.add(n.id);
+                walk(n.children);
+            }
+        }
+    };
+    walk(store.getState().tree);
+    rerender();
+}
+
+/** Expand every folder in the tree (search-header / context-menu action). */
+export function expandAllTree(): void {
+    collapsed.clear();
     rerender();
 }
 
@@ -202,7 +224,7 @@ function makeFolderRow(node: NodeDTO, depth: number): HTMLElement {
 
     const row = document.createElement("div");
     row.className = "tree-row folder";
-    row.style.paddingLeft = `${8 + depth * 16}px`;
+    row.style.paddingLeft = `${8 + depth * INDENT}px`;
 
     const chevron = document.createElement("span");
     chevron.className = "chevron";
@@ -252,6 +274,8 @@ function makeFolderRow(node: NodeDTO, depth: number): HTMLElement {
     if (!isCollapsed) {
         const children = document.createElement("div");
         children.className = "tree-children";
+        // Vertical guide at the parent chevron's centre (plan §C).
+        children.style.setProperty("--guide-x", `${8 + depth * INDENT + 6}px`);
         if (inlineCreate && inlineCreate.parentID === node.id) {
             children.appendChild(makeInlineCreateRow(depth + 1));
         }
@@ -275,10 +299,14 @@ function renderNodesInner(host: HTMLElement, nodes: NodeDTO[], depth: number): v
 function makeSessionRow(node: NodeDTO, depth: number): HTMLElement {
     const row = document.createElement("div");
     row.className = "tree-row session";
-    row.style.paddingLeft = `${8 + depth * 16}px`;
+    row.style.paddingLeft = `${8 + depth * INDENT}px`;
     row.dataset.id = node.id;
     row.dataset.kind = "session";
 
+    // Sessions have no chevron; the spacer keeps the icon aligned with a
+    // folder icon at the same depth (plan §C).
+    const spacer = document.createElement("span");
+    spacer.className = "chevron-spacer";
     const icon = document.createElement("span");
     icon.className = "tree-icon";
     icon.textContent = "🖥";
@@ -286,7 +314,7 @@ function makeSessionRow(node: NodeDTO, depth: number): HTMLElement {
     name.className = "tree-name";
     name.textContent = node.name;
     name.title = node.name;
-    row.append(icon, name);
+    row.append(spacer, icon, name);
 
     row.classList.toggle("selected", store.getState().selectedID === node.id);
     row.addEventListener("click", () => store.selectNode(node.id));
@@ -306,7 +334,7 @@ function makeSessionRow(node: NodeDTO, depth: number): HTMLElement {
 function makeInlineCreateRow(depth: number): HTMLElement {
     const row = document.createElement("div");
     row.className = "tree-row inline-row";
-    row.style.paddingLeft = `${8 + depth * 16}px`;
+    row.style.paddingLeft = `${8 + depth * INDENT}px`;
     const input = document.createElement("input");
     input.type = "text";
     input.className = "input inline-input";
@@ -612,6 +640,8 @@ function onTreeEmptyContext(e: MouseEvent): void {
     openContextMenu(e.clientX, e.clientY, [
         { label: "New Session", action: () => openNewSession("") },
         { label: "New Folder", action: () => openNewFolderAt("") },
+        { label: "Collapse all", separatorBefore: true, action: collapseAllTree },
+        { label: "Expand all", action: expandAllTree },
     ]);
 }
 

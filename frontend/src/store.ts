@@ -123,11 +123,12 @@ export interface StoreState {
     vaultState: VaultState;
     /**
      * SFTP panel open state (ephemeral, like tabs — A3). Defaults to false so
-     * the left-docked default shows the session tree. In right mode the store
-     * auto-opens it when a ready tab becomes active while the setting is on;
-     * in left mode the user toggles it from the top of the left column. When
-     * docked right it only controls the right-hand SFTP column; when docked
-     * left it switches the left column between the tree and the browser.
+     * the left-docked default shows the session tree. The store auto-opens it
+     * when a tab becomes/activates ready while the browser setting is on, on
+     * BOTH dock sides (plan ui-ux-refinements §B); the toolbar [SFTP] and the
+     * panel-header [Sessions]/[×] buttons toggle it. When docked right it only
+     * controls the right-hand SFTP column; when docked left it switches the
+     * left column between the tree and the browser.
      */
     sftpPanelOpen: boolean;
     /** Current right-docked SFTP panel width in px (mirrors window.sftpWidth
@@ -451,14 +452,10 @@ class Store {
             i === groupIndex ? { ...g, activeTabID: tabID } : g,
         );
         const patch: Partial<StoreState> = { groups, activeGroupID: group.id };
-        // Auto-open the SFTP panel when activating a ready tab — only when it
-        // is docked right. Left-docked keeps the tree as the default view (the
-        // user toggles to the browser); see plan sftp-panel-side.
-        if (
-            tab.state === "ready" &&
-            this.state.settings.sftpBrowserEnabled &&
-            this.state.settings.sftpPanelSide === "right"
-        ) {
+        // Auto-open the SFTP panel when activating a ready tab (both dock
+        // sides — plan ui-ux-refinements §B). The tree/panel swap on the left
+        // is visible immediately; the [Sessions] button returns to the tree.
+        if (tab.state === "ready" && this.state.settings.sftpBrowserEnabled) {
             patch.sftpPanelOpen = true;
         }
         this.set(patch);
@@ -805,7 +802,7 @@ class Store {
      * bridge writes responses and events from separate goroutines, so the
      * Disconnect response can overtake its own terminal:status "closed"
      * event). Auto-opens the SFTP panel when the active tab turns ready and
-     * the setting is on — right-docked only (plan sftp-panel-side).
+     * the setting is on — both dock sides (plan ui-ux-refinements §B).
      */
     setTabState(tabID: string, state: TabState, message?: string): void {
         const loc = findTab(this.state, tabID);
@@ -830,8 +827,7 @@ class Store {
         if (
             state === "ready" &&
             tabID === activeTabID(this.state) &&
-            settings.sftpBrowserEnabled &&
-            settings.sftpPanelSide === "right"
+            settings.sftpBrowserEnabled
         ) {
             patch.sftpPanelOpen = true;
         }
@@ -909,6 +905,16 @@ export function sftpPanelVisible(state: StoreState): boolean {
         return false;
     }
     return hasReadyActiveTab(state);
+}
+
+/**
+ * True when the toolbar `[SFTP]` button should be visible: the browser setting
+ * is on, the active tab is ready and the panel is currently closed. Shared by
+ * both dock-side layout syncs (shell.ts) so their visibility rules cannot
+ * drift apart.
+ */
+export function sftpReopenVisible(state: StoreState): boolean {
+    return state.settings.sftpBrowserEnabled && hasReadyActiveTab(state) && !state.sftpPanelOpen;
 }
 
 export const store = new Store();

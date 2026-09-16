@@ -25,6 +25,7 @@ import {
     ipcMain,
     screen,
     shell,
+    type IpcMainEvent,
     type IpcMainInvokeEvent,
 } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -34,8 +35,10 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 // The IPC payloads are declared once for main + preload + renderer in
-// frontend/src/rpc/ipc.ts (type-only import: erased from the bundle).
+// frontend/src/rpc/ipc.ts (type-only import: erased from the bundle; the
+// frameless flag constant is the one shared runtime value).
 import type { BridgeEndpoint, DisplayChanged, WindowState } from "../frontend/src/rpc/ipc";
+import { FRAMELESS_TITLEBAR_FLAG } from "../frontend/src/rpc/ipc";
 
 // ------------------------------------------------------------------ config ---
 
@@ -56,6 +59,12 @@ const WINDOW_STATE_DEBOUNCE_MS = 300;
 // Debounce for display:changed pushes (E4 T3, mirroring VSCode's 100 ms
 // `Event.debounce` over the `screen` display events).
 const DISPLAY_DEBOUNCE_MS = 100;
+
+// Custom renderer-drawn title bar (frameless window). `SHELVE_TITLEBAR=native`
+// keeps the OS frame and hides the renderer bar (escape hatch for compositors
+// that manage frameless resize/move poorly).
+const FRAMELESS_TITLEBAR =
+    (process.env.SHELVE_TITLEBAR ?? "").trim().toLowerCase() !== "native";
 
 // Main-process diagnostics go to stderr (inherited from the shell / Makefile).
 // The per-run token is never logged.
@@ -521,6 +530,7 @@ function wireWindowState(w: BrowserWindow): void {
         const state: WindowState = {
             width: Math.max(MIN_WIDTH, width),
             height: Math.max(MIN_HEIGHT, height),
+            maximized: w.isMaximized(),
         };
         w.webContents.send("window:state", state);
     };
@@ -532,6 +542,10 @@ function wireWindowState(w: BrowserWindow): void {
     };
     w.on("resize", schedule);
     w.on("move", schedule);
+    // Maximize/restore keeps the same geometry but must update the renderer's
+    // restore glyph + tooltip (custom title bar).
+    w.on("maximize", schedule);
+    w.on("unmaximize", schedule);
 }
 
 // --------------------------------------------------------- display (E4) ---
@@ -604,9 +618,13 @@ function createWindow(): BrowserWindow {
         minHeight: MIN_HEIGHT,
         backgroundColor: "#06070f",
         show: false,
+        frame: !FRAMELESS_TITLEBAR,
         autoHideMenuBar: true,
         webPreferences: {
             preload: path.join(__dirname, "preload.cjs"),
+            // Documented way to pass a sync flag to a sandboxed preload (the
+            // renderer checks it to decide whether to show its title bar).
+            additionalArguments: FRAMELESS_TITLEBAR ? [FRAMELESS_TITLEBAR_FLAG] : [],
             // VSCode parity (windows.ts defaultBrowserWindowOptions +
             // windowImpl.ts): Electron's secure defaults, plus sandbox and the
             // two switches VSCode always sets; backgroundThrottling stays false
@@ -701,6 +719,34 @@ function registerIpc(): void {
             throw new Error("unauthorized renderer");
         }
     };
+
+    // The same trust rule for fire-and-forget `on` channels: `send` has no
+    // rejection channel, so an untrusted sender is ignored silently.
+    const trustedEvent = (event: IpcMainEvent): boolean =>
+        !!win && !win.isDestroyed() && event.sender === win.webContents;
+
+    // Custom title bar controls (frameless window). Fire-and-forget: no result
+    // is needed and a failure has no recovery path in the renderer.
+    ipcMain.on("window:minimize", (event) => {
+        if (trustedEvent(event) && win) {
+            win.minimize();
+        }
+    });
+    ipcMain.on("window:toggle-maximize", (event) => {
+        if (!trustedEvent(event) || !win) {
+            return;
+        }
+        if (win.isMaximized()) {
+            win.unmaximize();
+        } else {
+            win.maximize();
+        }
+    });
+    ipcMain.on("window:close", (event) => {
+        if (trustedEvent(event) && win) {
+            win.close();
+        }
+    });
 
     // Gates the renderer until the backend handshake exists: rejects (the
     // HTTP-503 equivalent over IPC) before ready.
@@ -848,6 +894,11 @@ if (wantGpuInfo) {
                 `gpu: enable-features=[${app.commandLine.getSwitchValue("enable-features")}] ` +
                     `disable-features=[${app.commandLine.getSwitchValue("disable-features")}] ` +
                     `max-active-webgl-contexts=${app.commandLine.getSwitchValue("max-active-webgl-contexts")}`,
+            );
+            log(
+                FRAMELESS_TITLEBAR
+                    ? "title bar: frameless (renderer-drawn); SHELVE_TITLEBAR=native restores the OS frame"
+                    : "title bar: native (OS frame)",
             );
             startBackend();
         })

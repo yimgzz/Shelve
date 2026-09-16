@@ -14,6 +14,15 @@
     box-sizing: border-box;
 }
 
+/* Custom title bar (plan ui-ux-refinements §A): 0 by default (native OS frame);
+   body.frameless raises it and the fixed .titlebar draws over the reserved
+   strip. box-sizing keeps the grid at 100vh - 30px. */
+:root {
+    --titlebar-h: 0px;
+    --scrollbar: color-mix(in srgb, var(--text-dim) 40%, transparent);
+    --scrollbar-hover: color-mix(in srgb, var(--text-dim) 65%, transparent);
+}
+
 html,
 body {
     margin: 0;
@@ -21,6 +30,7 @@ body {
 }
 
 body {
+    padding-top: var(--titlebar-h);
     display: grid;
     grid-template-columns: var(--left-w, 320px) 4px minmax(0, 1fr)
         var(--sftp-gap, 0px) var(--sftp-w, 0px);
@@ -37,6 +47,68 @@ body {
     font-size: 14px;
     line-height: 1.4;
     -moz-osx-font-smoothing: grayscale;
+}
+
+body.frameless {
+    --titlebar-h: 30px;
+}
+
+/* Renderer-drawn title bar (frameless mode only). Static markup in
+   index.html; hidden entirely with the native OS frame. */
+.titlebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--titlebar-h);
+    display: none;
+    align-items: center;
+    gap: 2px;
+    padding: 0 0 0 10px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    z-index: 90;
+    user-select: none;
+    -webkit-app-region: drag;
+}
+
+body.frameless .titlebar {
+    display: flex;
+}
+
+.titlebar-title {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.titlebar-spacer {
+    flex: 1;
+}
+
+.titlebar-btn {
+    -webkit-app-region: no-drag;
+    height: 100%;
+    min-width: 46px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+}
+
+.titlebar-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+
+.titlebar-btn.close:hover {
+    background: var(--error);
+    color: #fff;
 }
 
 #app-root {
@@ -196,4 +268,19 @@ input {
 
 button {
     cursor: pointer;
+}
+
+/* ---------- Scrollbars (plan ui-ux-refinements §E) ---------- */
+/* One global thin, theme-token-coloured scrollbar rule. Standard properties
+   disable ::-webkit-scrollbar styling in Chromium, so the two must not mix;
+   the lazy color-mix tokens re-resolve per theme variant. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
+}
+
+/* The xterm viewport is the terminal's own scroller (outside the normal
+   document flow); give it the same themed thumb. */
+.xterm-viewport {
+    scrollbar-color: var(--scrollbar) transparent;
 }

@@ -62,6 +62,19 @@ export interface Tab {
     exitStatus?: number;
 }
 
+/**
+ * One VS Code-style terminal group: its own tab strip plus one visible
+ * terminal. Groups are ephemeral frontend-only state (master plan A3);
+ * `activeTabID` is the visible pane inside the group and the global "active
+ * tab" is always the focused group's `activeTabID`.
+ */
+export interface TabGroup {
+    /** Ephemeral "grp-<counter36>". */
+    id: string;
+    tabs: Tab[];
+    activeTabID: string | null;
+}
+
 /** Port-forward lifecycle view cached per tab (Phase 4c, ssh:forward). */
 export interface ForwardDTO {
     spec: string;
@@ -123,8 +136,14 @@ export interface StoreState {
     tree: NodeDTO[];
     selectedID: string | null;
     searchQ: string;
-    tabs: Tab[];
-    activeTabID: string | null;
+    /**
+     * Terminal groups, left → right (VS Code editor groups). Each group owns
+     * its tab strip and one visible terminal; `activeGroupID` is the focused
+     * group. Ephemeral (A3): never persisted, not restored on relaunch.
+     */
+    groups: TabGroup[];
+    /** ID of the focused group (its active tab is the globally active tab). */
+    activeGroupID: string | null;
     leftPanelWidth: number;
     /**
      * Saved named credentials (plan P003): secret-free DTOs used by the
@@ -233,8 +252,8 @@ export const initialState: StoreState = {
     tree: [],
     selectedID: null,
     searchQ: "",
-    tabs: [],
-    activeTabID: null,
+    groups: [],
+    activeGroupID: null,
     leftPanelWidth: DEFAULT_LEFT_WIDTH,
     credentials: [],
     savedJumpHosts: [],
@@ -246,6 +265,12 @@ export const initialState: StoreState = {
 type Listener = (state: StoreState) => void;
 
 let tempCounter = 0;
+let groupCounter = 0;
+
+/** Ephemeral group id ("grp-<counter36>"); never persisted (A3). */
+function newGroupID(): string {
+    return `grp-${(groupCounter++).toString(36)}`;
+}
 
 class Store {
     private state: StoreState = initialState;
@@ -318,8 +343,8 @@ class Store {
     async afterImport(mode: "merge" | "replace"): Promise<void> {
         if (mode === "replace") {
             this.set({
-                tabs: [],
-                activeTabID: null,
+                groups: [],
+                activeGroupID: null,
                 selectedID: null,
                 forwards: {},
                 sftpTransfers: {},
@@ -352,9 +377,10 @@ class Store {
 
     /**
      * Open a terminal tab for a stored session (Phase 4b task 4): resolve
-     * the secret-free snapshot, optimistically create a "connecting" tab,
-     * then drive TerminalService.Connect; a returned Connect error marks the
-     * tab "error". `terminal:status` events keep the tab's state current.
+     * the secret-free snapshot, optimistically create a "connecting" tab in
+     * the focused group (creating the first group when none exists), then
+     * drive TerminalService.Connect; a returned Connect error marks the tab
+     * "error". `terminal:status` events keep the tab's state current.
      */
     async connectSession(sessionID: string): Promise<void> {
         let dto: SessionDTO;
@@ -365,16 +391,27 @@ class Store {
             return;
         }
         const tempId = `tab-pending-${(tempCounter++).toString(36)}`;
-        this.set({
-            tabs: [...this.state.tabs, { id: tempId, session: dto, state: "connecting" }],
-            activeTabID: tempId,
-        });
+        const tab: Tab = { id: tempId, session: dto, state: "connecting" };
+        const { groups, activeGroupID } = this.state;
+        const targetIndex = groups.findIndex((g) => g.id === activeGroupID);
+        let nextGroups: TabGroup[];
+        if (targetIndex === -1) {
+            // No focused group (no groups at all, or a stale id): create one.
+            const group: TabGroup = { id: newGroupID(), tabs: [tab], activeTabID: tempId };
+            nextGroups = [...groups, group];
+            this.set({ groups: nextGroups, activeGroupID: group.id });
+        } else {
+            nextGroups = groups.map((g, i) =>
+                i === targetIndex ? { ...g, tabs: [...g.tabs, tab], activeTabID: tempId } : g,
+            );
+            this.set({ groups: nextGroups, activeGroupID: groups[targetIndex].id });
+        }
         try {
             const tabID = await TerminalService.Connect(sessionID);
             // The user may have closed the optimistic tab while Connect was
             // still in flight (the temp id is clickable immediately). Tear the
             // now-orphaned backend session down instead of leaking it.
-            if (!this.state.tabs.some((t) => t.id === tempId)) {
+            if (!findTab(this.state, tempId)) {
                 try {
                     await TerminalService.Disconnect(tabID);
                 } catch {
@@ -388,19 +425,39 @@ class Store {
         }
     }
 
-    /** Activate (focus) a tab by ID. */
+    /**
+     * Focus a group (its active tab becomes the globally active tab). No-op
+     * when it is already focused; the terminal view reconciles focus/fit.
+     */
+    activateGroup(groupID: string): void {
+        if (this.state.activeGroupID === groupID) {
+            return;
+        }
+        if (!this.state.groups.some((g) => g.id === groupID)) {
+            return;
+        }
+        this.set({ activeGroupID: groupID });
+    }
+
+    /** Activate (focus) a tab by ID (and focus its group). */
     activateTab(tabID: string): void {
-        const { tabs, settings } = this.state;
-        const tab = tabs.find((t) => t.id === tabID);
-        const patch: Partial<StoreState> = { activeTabID: tabID };
+        const loc = findTab(this.state, tabID);
+        if (!loc) {
+            return;
+        }
+        const { group, groupIndex } = loc;
+        const tab = group.tabs[loc.tabIndex];
+        const groups = this.state.groups.map((g, i) =>
+            i === groupIndex ? { ...g, activeTabID: tabID } : g,
+        );
+        const patch: Partial<StoreState> = { groups, activeGroupID: group.id };
         // Auto-open the SFTP panel when activating a ready tab — only when it
         // is docked right. Left-docked keeps the tree as the default view (the
         // user toggles to the browser); see plan sftp-panel-side.
         if (
-            tab &&
             tab.state === "ready" &&
-            settings.sftpBrowserEnabled &&
-            settings.sftpPanelSide === "right"
+            this.state.settings.sftpBrowserEnabled &&
+            this.state.settings.sftpPanelSide === "right"
         ) {
             patch.sftpPanelOpen = true;
         }
@@ -412,12 +469,11 @@ class Store {
      * and activate a neighbour. No confirmation (master plan A3).
      */
     async closeTab(tabID: string): Promise<void> {
-        const { tabs, activeTabID } = this.state;
-        const idx = tabs.findIndex((t) => t.id === tabID);
-        if (idx === -1) {
+        const loc = findTab(this.state, tabID);
+        if (!loc) {
             return;
         }
-        const tab = tabs[idx];
+        const tab = loc.group.tabs[loc.tabIndex];
         if (tab.state !== "closed") {
             try {
                 await TerminalService.Disconnect(tabID);
@@ -425,11 +481,19 @@ class Store {
                 toast("error", String(err));
             }
         }
-        const remaining = tabs.filter((t) => t.id !== tabID);
-        let nextActive = activeTabID;
-        if (activeTabID === tabID) {
-            const neighbour = remaining[idx] ?? remaining[idx - 1] ?? null;
-            nextActive = neighbour ? neighbour.id : null;
+        const groups = this.state.groups.map((g) => ({ ...g, tabs: g.tabs.slice() }));
+        const group = groups[loc.groupIndex];
+        group.tabs.splice(loc.tabIndex, 1);
+        if (group.activeTabID === tabID) {
+            group.activeTabID =
+                group.tabs[loc.tabIndex]?.id ?? group.tabs[loc.tabIndex - 1]?.id ?? null;
+        }
+        let activeGroupID = this.state.activeGroupID;
+        if (group.tabs.length === 0) {
+            groups.splice(loc.groupIndex, 1);
+            if (activeGroupID === group.id) {
+                activeGroupID = groups[loc.groupIndex]?.id ?? groups[loc.groupIndex - 1]?.id ?? null;
+            }
         }
         const forwards = { ...this.state.forwards };
         delete forwards[tabID];
@@ -437,56 +501,71 @@ class Store {
         delete sftpTransfers[tabID];
         const monitor = { ...this.state.monitor };
         delete monitor[tabID];
-        this.set({ tabs: remaining, activeTabID: nextActive, forwards, sftpTransfers, monitor });
+        this.set({ groups, activeGroupID, forwards, sftpTransfers, monitor });
     }
 
     /**
-     * Close every tab except tabID (tab context menu "Close Others").
-     * Keeps tabID as the active tab.
+     * Close every tab except tabID in its group (tab context menu "Close
+     * Others"). Keeps tabID as the group's active tab.
      */
     async closeOtherTabs(tabID: string): Promise<void> {
-        const { tabs } = this.state;
-        const toClose = tabs.filter((t) => t.id !== tabID).map((t) => t.id);
+        const loc = findTab(this.state, tabID);
+        if (!loc) {
+            return;
+        }
+        const toClose = loc.group.tabs.filter((t) => t.id !== tabID).map((t) => t.id);
         if (toClose.length === 0) {
             return;
         }
-        await this.dropTabs(toClose, tabID);
+        await this.dropTabs(toClose, tabID, loc.group.id);
     }
 
-    /** Close every open tab (tab context menu "Close All Tabs"). */
-    async closeAllTabs(): Promise<void> {
-        const { tabs } = this.state;
-        if (tabs.length === 0) {
+    /** Close every tab in the clicked tab's group (tab context menu "Close All Tabs"). */
+    async closeAllTabs(tabID: string): Promise<void> {
+        const loc = findTab(this.state, tabID);
+        if (!loc) {
             return;
         }
-        await this.dropTabs(tabs.map((t) => t.id), null);
+        const ids = loc.group.tabs.map((t) => t.id);
+        if (ids.length === 0) {
+            return;
+        }
+        await this.dropTabs(ids, null, loc.group.id);
     }
 
     /**
-     * Close every tab to the right of tabID (tab context menu "Close Tabs
-     * to the Right"). The anchor tab stays; if the previously active tab
-     * was closed, tabID becomes active.
+     * Close every tab to the right of tabID within its group (tab context
+     * menu "Close Tabs to the Right"). The anchor tab stays; if the
+     * previously active tab was closed, tabID becomes active.
      */
     async closeTabsToRight(tabID: string): Promise<void> {
-        const { tabs } = this.state;
-        const idx = tabs.findIndex((t) => t.id === tabID);
-        if (idx === -1 || idx === tabs.length - 1) {
+        const loc = findTab(this.state, tabID);
+        if (!loc || loc.tabIndex === loc.group.tabs.length - 1) {
             return;
         }
-        await this.dropTabs(tabs.slice(idx + 1).map((t) => t.id), tabID);
+        await this.dropTabs(
+            loc.group.tabs.slice(loc.tabIndex + 1).map((t) => t.id),
+            tabID,
+            loc.group.id,
+        );
     }
 
     /**
-     * Shared batch close: disconnect each non-closed tab (a failure never
-     * aborts the rest — per-tab error toast, mirroring closeTab), drop the
-     * tabs plus their per-tab caches, then pick the next active tab.
-     * `anchorID` is the tab that survives (close-others / close-right) or
-     * null for close-all.
+     * Shared batch close scoped to one group: disconnect each non-closed tab
+     * (a failure never aborts the rest — per-tab error toast, mirroring
+     * closeTab), drop the tabs plus their per-tab caches, then pick the next
+     * active tab. `anchorID` is the tab that survives (close-others /
+     * close-right) or null for close-all. An emptied group is removed and
+     * `activeGroupID` falls back to a neighbouring group.
      */
-    private async dropTabs(ids: string[], anchorID: string | null): Promise<void> {
-        const { tabs, activeTabID } = this.state;
+    private async dropTabs(ids: string[], anchorID: string | null, groupID: string): Promise<void> {
+        const loc = this.state.groups.findIndex((g) => g.id === groupID);
+        if (loc === -1) {
+            return;
+        }
+        const source = this.state.groups[loc];
         for (const id of ids) {
-            const tab = tabs.find((t) => t.id === id);
+            const tab = source.tabs.find((t) => t.id === id);
             if (tab && tab.state !== "closed") {
                 try {
                     await TerminalService.Disconnect(id);
@@ -496,13 +575,24 @@ class Store {
             }
         }
         const closing = new Set(ids);
-        const remaining = tabs.filter((t) => !closing.has(t.id));
-        // Next active: close-all → none; a surviving active tab stays put;
-        // otherwise fall back to the anchor tab.
-        let nextActive: string | null = null;
-        if (anchorID !== null) {
-            const activeSurvives = remaining.some((t) => t.id === activeTabID);
-            nextActive = activeSurvives && activeTabID ? activeTabID : anchorID;
+        const groups = this.state.groups.map((g) => ({ ...g, tabs: g.tabs.slice() }));
+        const group = groups[loc];
+        const oldActiveIdx = group.tabs.findIndex((t) => t.id === group.activeTabID);
+        group.tabs = group.tabs.filter((t) => !closing.has(t.id));
+        let nextActive: string | null = group.activeTabID;
+        if (nextActive === null || closing.has(nextActive)) {
+            nextActive = group.tabs[oldActiveIdx]?.id ?? group.tabs[oldActiveIdx - 1]?.id ?? null;
+        }
+        if (anchorID !== null && !group.tabs.some((t) => t.id === nextActive)) {
+            nextActive = anchorID;
+        }
+        group.activeTabID = nextActive;
+        let activeGroupID = this.state.activeGroupID;
+        if (group.tabs.length === 0) {
+            groups.splice(loc, 1);
+            if (activeGroupID === group.id) {
+                activeGroupID = groups[loc]?.id ?? groups[loc - 1]?.id ?? null;
+            }
         }
         const forwards = { ...this.state.forwards };
         const sftpTransfers = { ...this.state.sftpTransfers };
@@ -512,27 +602,123 @@ class Store {
             delete sftpTransfers[id];
             delete monitor[id];
         }
-        this.set({ tabs: remaining, activeTabID: nextActive, forwards, sftpTransfers, monitor });
+        this.set({ groups, activeGroupID, forwards, sftpTransfers, monitor });
     }
 
     /**
-     * Reorder the tab strip (pure frontend state — tabs are ephemeral and
-     * never persisted, master plan A3). `toIndex` is clamped to range.
+     * Move a tab within or across groups (pure frontend state — tabs are
+     * ephemeral and never persisted, master plan A3). `toIndex` is clamped to
+     * the target group's range; a cross-group move focuses the target group
+     * and makes the moved tab active, and removes an emptied source group.
      */
-    moveTab(tabID: string, toIndex: number): void {
-        const { tabs } = this.state;
-        const from = tabs.findIndex((t) => t.id === tabID);
-        if (from === -1) {
+    moveTab(tabID: string, toGroupID: string, toIndex: number): void {
+        const loc = findTab(this.state, tabID);
+        if (!loc) {
             return;
         }
-        const clamped = Math.max(0, Math.min(tabs.length - 1, toIndex));
-        if (from === clamped) {
+        const tab = loc.group.tabs[loc.tabIndex];
+
+        if (loc.group.id === toGroupID) {
+            // Within-group reorder keeps the pre-split semantics (no focus
+            // change; a no-op drop is a no-op).
+            const from = loc.tabIndex;
+            const clamped = Math.max(0, Math.min(loc.group.tabs.length - 1, toIndex));
+            if (from === clamped) {
+                return;
+            }
+            const groups = this.state.groups.map((g, i) =>
+                i === loc.groupIndex ? { ...g, tabs: g.tabs.slice() } : g,
+            );
+            const tabs = groups[loc.groupIndex].tabs;
+            const [moved] = tabs.splice(from, 1);
+            tabs.splice(clamped, 0, moved);
+            this.set({ groups });
             return;
         }
-        const next = tabs.slice();
-        const [tab] = next.splice(from, 1);
-        next.splice(clamped, 0, tab);
-        this.set({ tabs: next });
+
+        const groups = this.state.groups.map((g) => ({ ...g, tabs: g.tabs.slice() }));
+        const source = groups[loc.groupIndex];
+        source.tabs.splice(loc.tabIndex, 1);
+        if (source.activeTabID === tabID) {
+            source.activeTabID =
+                source.tabs[loc.tabIndex]?.id ?? source.tabs[loc.tabIndex - 1]?.id ?? null;
+        }
+        if (source.tabs.length === 0) {
+            groups.splice(loc.groupIndex, 1);
+        }
+        const target = groups.find((g) => g.id === toGroupID);
+        if (!target) {
+            return;
+        }
+        const clamped = Math.max(0, Math.min(target.tabs.length, toIndex));
+        target.tabs.splice(clamped, 0, tab);
+        target.activeTabID = tab.id;
+        this.set({ groups, activeGroupID: target.id });
+    }
+
+    /**
+     * Split the clicked tab into a group on `direction` (tab context menu /
+     * VS Code chords). The destination is the adjacent group when one exists
+     * on that side, else a new group inserted there; the moved tab becomes the
+     * destination's active tab and the destination is focused. An emptied
+     * source group is removed. Outward splits of a solo tab in an edge group
+     * are no-ops (they would recreate an identical layout).
+     */
+    splitTab(tabID: string, direction: "left" | "right"): void {
+        const loc = findTab(this.state, tabID);
+        if (!loc) {
+            return;
+        }
+        const { groups } = this.state;
+        const { group, groupIndex } = loc;
+        const isRight = direction === "right";
+        if (isRight && groupIndex === groups.length - 1 && group.tabs.length === 1) {
+            return;
+        }
+        if (!isRight && groupIndex === 0 && group.tabs.length === 1) {
+            return;
+        }
+        const tab = group.tabs[loc.tabIndex];
+        // Resolve the adjacent group by identity before any removal shifts the
+        // indices.
+        const neighbour = isRight ? groups[groupIndex + 1] : groups[groupIndex - 1];
+
+        const next = groups.map((g) => ({ ...g, tabs: g.tabs.slice() }));
+        const source = next[groupIndex];
+        source.tabs.splice(loc.tabIndex, 1);
+        if (source.activeTabID === tabID) {
+            source.activeTabID =
+                source.tabs[loc.tabIndex]?.id ?? source.tabs[loc.tabIndex - 1]?.id ?? null;
+        }
+        const sourceEmptied = source.tabs.length === 0;
+        if (sourceEmptied) {
+            next.splice(groupIndex, 1);
+        }
+
+        let targetID: string;
+        if (neighbour) {
+            targetID = neighbour.id;
+        } else {
+            targetID = newGroupID();
+            const insertAt = isRight ? (sourceEmptied ? groupIndex : groupIndex + 1) : groupIndex;
+            next.splice(insertAt, 0, { id: targetID, tabs: [], activeTabID: null });
+        }
+        const target = next.find((g) => g.id === targetID);
+        if (!target) {
+            return;
+        }
+        target.tabs.push(tab);
+        target.activeTabID = tab.id;
+        this.set({ groups: next, activeGroupID: targetID });
+    }
+
+    /** Split the focused group's active tab (global chord handler). */
+    splitActiveTab(direction: "left" | "right"): void {
+        const group = activeGroup(this.state);
+        if (!group || !group.activeTabID) {
+            return;
+        }
+        this.splitTab(group.activeTabID, direction);
     }
 
     /** Cache an ssh:forward lifecycle event for a tab (latest state per spec). */
@@ -578,24 +764,37 @@ class Store {
 
     /** Mark a tab closed with an optional remote exit code (terminal:exit). */
     setTabExited(tabID: string, exitStatus?: number): void {
-        const { tabs } = this.state;
-        this.set({
-            tabs: tabs.map((t) =>
-                t.id === tabID ? { ...t, state: "closed", exitStatus } : t,
-            ),
-        });
+        const loc = findTab(this.state, tabID);
+        if (!loc) {
+            return;
+        }
+        const groups = this.state.groups.map((g, i) =>
+            i === loc.groupIndex
+                ? {
+                      ...g,
+                      tabs: g.tabs.map((t) =>
+                          t.id === tabID ? { ...t, state: "closed" as TabState, exitStatus } : t,
+                      ),
+                  }
+                : g,
+        );
+        this.set({ groups });
     }
 
     /** Swap an optimistic temp tabID for the real tabID Connect returned. */
     replaceTab(oldID: string, newID: string): void {
-        const { tabs, activeTabID } = this.state;
-        if (!tabs.some((t) => t.id === oldID)) {
+        const loc = findTab(this.state, oldID);
+        if (!loc) {
             return;
         }
-        this.set({
-            tabs: tabs.map((t) => (t.id === oldID ? { ...t, id: newID } : t)),
-            activeTabID: activeTabID === oldID ? newID : activeTabID,
+        const groups = this.state.groups.map((g, i) => {
+            if (i !== loc.groupIndex) {
+                return g;
+            }
+            const tabs = g.tabs.map((t) => (t.id === oldID ? { ...t, id: newID } : t));
+            return { ...g, tabs, activeTabID: g.activeTabID === oldID ? newID : g.activeTabID };
         });
+        this.set({ groups });
     }
 
     /**
@@ -609,18 +808,28 @@ class Store {
      * the setting is on — right-docked only (plan sftp-panel-side).
      */
     setTabState(tabID: string, state: TabState, message?: string): void {
-        const { tabs, activeTabID, settings } = this.state;
-        if (!tabs.some((t) => t.id === tabID)) {
+        const loc = findTab(this.state, tabID);
+        if (!loc) {
             return;
         }
+        const { settings } = this.state;
         const patch: Partial<StoreState> = {
-            tabs: tabs.map((t) =>
-                t.id === tabID ? { ...t, state, errorMessage: message || undefined } : t,
+            groups: this.state.groups.map((g, i) =>
+                i === loc.groupIndex
+                    ? {
+                          ...g,
+                          tabs: g.tabs.map((t) =>
+                              t.id === tabID
+                                  ? { ...t, state, errorMessage: message || undefined }
+                                  : t,
+                          ),
+                      }
+                    : g,
             ),
         };
         if (
             state === "ready" &&
-            tabID === activeTabID &&
+            tabID === activeTabID(this.state) &&
             settings.sftpBrowserEnabled &&
             settings.sftpPanelSide === "right"
         ) {
@@ -630,9 +839,61 @@ class Store {
     }
 }
 
+// ----------------------------------------------------------- selectors ---
+//
+// Pure read-only helpers over StoreState. Every consumer (shell, monitor bar,
+// SFTP panel, shortcuts, terminal view) uses these instead of walking
+// `groups` by hand, so the "globally active tab = focused group's active tab"
+// rule lives in exactly one place.
+
+/** Flatten every tab in group order (left group → right group). */
+export function allTabs(state: StoreState): Tab[] {
+    const out: Tab[] = [];
+    for (const g of state.groups) {
+        for (const t of g.tabs) {
+            out.push(t);
+        }
+    }
+    return out;
+}
+
+/** Locate a tab across all groups. */
+export function findTab(
+    state: StoreState,
+    id: string,
+): { group: TabGroup; groupIndex: number; tabIndex: number } | undefined {
+    for (let gi = 0; gi < state.groups.length; gi++) {
+        const group = state.groups[gi];
+        const tabIndex = group.tabs.findIndex((t) => t.id === id);
+        if (tabIndex !== -1) {
+            return { group, groupIndex: gi, tabIndex };
+        }
+    }
+    return undefined;
+}
+
+/** The focused group, if any. */
+export function activeGroup(state: StoreState): TabGroup | undefined {
+    return state.groups.find((g) => g.id === state.activeGroupID);
+}
+
+/** The globally active tab (the focused group's active tab). */
+export function activeTab(state: StoreState): Tab | undefined {
+    const group = activeGroup(state);
+    if (!group || !group.activeTabID) {
+        return undefined;
+    }
+    return group.tabs.find((t) => t.id === group.activeTabID);
+}
+
+/** The globally active tab's id (or null). */
+export function activeTabID(state: StoreState): string | null {
+    return activeGroup(state)?.activeTabID ?? null;
+}
+
 /** True when the active tab exists and is "ready" (reused by shell + store). */
 export function hasReadyActiveTab(state: StoreState): boolean {
-    const tab = state.tabs.find((t) => t.id === state.activeTabID);
+    const tab = activeTab(state);
     return !!tab && tab.state === "ready";
 }
 

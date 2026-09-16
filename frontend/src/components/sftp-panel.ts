@@ -21,7 +21,7 @@
 // cache.
 
 import { SftpService } from "../rpc";
-import { store, sftpPanelVisible, type SftpEntryDTO } from "../store";
+import { store, activeTab, activeTabID, sftpPanelVisible, type SftpEntryDTO } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { confirmDialog } from "./confirm";
 import { openDialog } from "../ui/dialog";
@@ -108,8 +108,8 @@ function parentOf(p: string): string {
  * per-session value (if set) → global settings default → "~".
  */
 function initialPath(): string {
-    const { activeTabID, tabs, settings } = store.getState();
-    const t = tabs.find((x) => x.id === activeTabID);
+    const { settings } = store.getState();
+    const t = activeTab(store.getState());
     const per = (t?.session && t.session.sftpInitialPath) || "";
     return per || settings.sftpInitialPath || "~";
 }
@@ -126,9 +126,8 @@ export function renderSftpPanel(target: HTMLElement): void {
     unsub = store.subscribe(() => refresh());
     buildStatic(target);
 
-    const { activeTabID, tabs } = store.getState();
-    const t = tabs.find((x) => x.id === activeTabID);
-    tabID = t && t.state === "ready" ? activeTabID! : "";
+    const t = activeTab(store.getState());
+    tabID = t && t.state === "ready" ? t.id : "";
     curPath = initialPath();
     lastGoodPath = curPath;
     selected = null;
@@ -153,9 +152,8 @@ function refresh(): void {
         return;
     }
     const st = store.getState();
-    const { activeTabID, tabs } = st;
-    const t = tabs.find((x) => x.id === activeTabID);
-    const ready = t && t.state === "ready" ? activeTabID! : "";
+    const t = activeTab(st);
+    const ready = t && t.state === "ready" ? t.id : "";
     const tabChanged = ready !== tabID;
     if (tabChanged) {
         // Active tab changed → reset navigation.
@@ -307,7 +305,7 @@ async function loadList(): Promise<void> {
     renderList();
     try {
         const res = await SftpService.List(tabID, curPath);
-        if (store.getState().activeTabID !== tabID) {
+        if (activeTabID(store.getState()) !== tabID) {
             return; // tab switched while awaiting
         }
         entries = res;

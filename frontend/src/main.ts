@@ -8,7 +8,14 @@
 import { events, AppService, VaultService, SessionService } from "./rpc";
 import type { WindowState } from "./rpc/types";
 
-import { store, normalizeSettings, type Settings, type VaultState, type TabState } from "./store";
+import {
+    store,
+    normalizeSettings,
+    activeTabID,
+    type Settings,
+    type VaultState,
+    type TabState,
+} from "./store";
 import { initTheme, onThemeApplied } from "./ui/theme";
 import { renderUnlockGate, type UnlockMode } from "./components/unlock";
 import { renderShell } from "./components/shell";
@@ -63,7 +70,8 @@ function destroyTerminals(): void {
  */
 function restoreTerminalFocus(): void {
     const st = store.getState();
-    if (st.vaultState !== "unlocked" || !st.activeTabID) {
+    const id = activeTabID(st);
+    if (st.vaultState !== "unlocked" || !id) {
         return;
     }
     const ae = document.activeElement;
@@ -73,7 +81,7 @@ function restoreTerminalFocus(): void {
     ) {
         return;
     }
-    TermPool.activate(st.activeTabID);
+    TermPool.activate(id);
 }
 
 // Tracks whether the app shell is currently rendered. The unlock success
@@ -132,8 +140,8 @@ function handleEvent(name: string, payload: unknown): void {
                 store.set({
                     vaultState: next,
                     tree: [],
-                    tabs: [],
-                    activeTabID: null,
+                    groups: [],
+                    activeGroupID: null,
                     selectedID: null,
                     searchQ: "",
                     credentials: [],

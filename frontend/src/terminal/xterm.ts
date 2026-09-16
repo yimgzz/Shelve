@@ -39,7 +39,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 
 import { TerminalService } from "../rpc";
-import type { TerminalSettings } from "../store";
+import { store, type TerminalSettings } from "../store";
 import { currentThemeTokens } from "../ui/theme";
 import { copyText, readText } from "../ui/clipboard";
 import { controlCharForCode, isCtrlShiftC, isCtrlShiftV } from "../ui/keys";
@@ -445,11 +445,29 @@ export const TermPool = {
         // previous word (canonical-mode werase with IEXTEN, bash readline,
         // zsh, fish, and vim insert mode all honor it).
         //
+        // Ctrl+\ / Ctrl+Shift+\: split this tab into a terminal group to the
+        // right / left (master plan §6, VS Code editor-group chords). Handled
+        // here as well as in the global router because xterm captures keydown
+        // while the terminal has focus; both dispatch through the store's
+        // `splitActiveTab` so the target (the focused group's active tab —
+        // which is always the terminal owning DOM focus) cannot diverge.
+        // Accepted tradeoff: Ctrl+\ no longer forwards 0x1c (SIGQUIT).
+        //
         // Returning false stops xterm from processing the event, so onData
         // never fires again for these keys (no double-send).
         term.attachCustomKeyEventHandler((e) => {
             if (e.type !== "keydown") {
                 return true;
+            }
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                !e.altKey &&
+                (e.code === "Backslash" || e.code === "IntlBackslash")
+            ) {
+                e.preventDefault();
+                e.stopPropagation();
+                store.splitActiveTab(e.shiftKey ? "left" : "right");
+                return false;
             }
             if (isCtrlShiftV(e)) {
                 // preventDefault: the browser's own paste accelerator could

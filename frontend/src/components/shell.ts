@@ -27,8 +27,7 @@ import { renderSearch } from "./search";
 import { renderTreeBody, openNewSession, openNewFolderAt } from "./tree";
 import { renderSftpPanel } from "./sftp-panel";
 import { openGearMenu } from "./gear";
-import { renderTabStrip } from "./tabs";
-import { renderTerminalView } from "./terminal-view";
+import { renderTerminalArea } from "./terminal-view";
 import { renderMonitorBar } from "./monitor-bar";
 
 const MIN_LEFT = 240;
@@ -309,15 +308,10 @@ export function renderShell(root: HTMLElement): void {
     right.className = "right-pane";
     right.setAttribute("aria-label", "Terminal area");
 
-    const tabHost = document.createElement("div");
-    tabHost.className = "tab-strip-host";
-    right.appendChild(tabHost);
-    renderTabStrip(tabHost);
-
-    const paneHost = document.createElement("div");
-    paneHost.className = "terminal-pane-host";
-    right.appendChild(paneHost);
-    renderTerminalView(paneHost);
+    const areaHost = document.createElement("div");
+    areaHost.className = "terminal-area-host";
+    right.appendChild(areaHost);
+    renderTerminalArea(areaHost);
 
     root.appendChild(right);
 

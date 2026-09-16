@@ -4,7 +4,7 @@
 // (their connections would be dropped); otherwise it locks immediately.
 
 import { AppService, VaultService } from "../rpc";
-import { store } from "../store";
+import { store, allTabs } from "../store";
 import { openContextMenu } from "./context-menu";
 import { openSettingsDialog } from "./settings-dialog";
 import { openCredentialManager } from "./credential-dialog";
@@ -34,7 +34,7 @@ export function openGearMenu(x: number, y: number): void {
  * in main.ts on the resulting `vault:state-changed` event (the 4a switch).
  */
 async function lockVault(): Promise<void> {
-    const ready = store.getState().tabs.filter((t) => t.state === "ready").length;
+    const ready = allTabs(store.getState()).filter((t) => t.state === "ready").length;
     if (ready > 0) {
         const ok = await confirmDialog({
             title: "Lock the vault?",

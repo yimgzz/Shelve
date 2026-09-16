@@ -12,7 +12,7 @@
 // tabID or the visibility flag changes.
 
 import { MonitorService } from "../rpc";
-import { store, type MonitorMetrics } from "../store";
+import { store, activeTab, type MonitorMetrics } from "../store";
 import { toast } from "./toasts";
 
 /** Snapshots older than this render dimmed placeholders. */
@@ -214,7 +214,7 @@ function render(): void {
         return;
     }
     const st = store.getState();
-    const tab = st.tabs.find((t) => t.id === st.activeTabID);
+    const tab = activeTab(st);
     const visible = st.settings.monitoringEnabled && !!tab && tab.state === "ready";
     const wantMonitored = visible && tab ? tab.id : null;
 

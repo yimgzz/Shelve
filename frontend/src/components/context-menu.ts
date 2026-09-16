@@ -7,6 +7,8 @@ export interface MenuItem {
     action: () => void;
     danger?: boolean;
     disabled?: boolean;
+    /** Render a separator line above this item (existing callers omit it). */
+    separatorBefore?: boolean;
 }
 
 /** Open a context menu at the given screen coordinates. */
@@ -18,6 +20,12 @@ export function openContextMenu(x: number, y: number, items: MenuItem[]): void {
     menu.setAttribute("role", "menu");
 
     for (const item of items) {
+        if (item.separatorBefore) {
+            const sep = document.createElement("div");
+            sep.className = "context-menu-sep";
+            sep.setAttribute("role", "separator");
+            menu.appendChild(sep);
+        }
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = `context-menu-item${item.danger ? " danger" : ""}`;

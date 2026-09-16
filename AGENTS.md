@@ -312,6 +312,15 @@ queue blocks the emitter rather than dropping a lifecycle event.
   `Lock` and app exit.
 - **Tabs are ephemeral (A3):** closing the app closes all sessions; no tab
   restoration on relaunch. No auto-reconnect (A4) — manual [Retry]/[Close].
+- **Terminal split groups:** tabs live in VS Code-style editor groups (a
+  left→right row in the terminal area). Each group has its own tab strip and one
+  visible terminal; the focused group's active tab is the globally active tab
+  (monitor bar + SFTP bind to it, new sessions open in it). The tab context menu
+  offers Split to Right / Split to Left (move only the clicked tab into the
+  adjacent group or a new group on that side; an emptied group is removed) plus
+  group-scoped Close Others / Close All Tabs / Close Tabs to the Right. Tabs
+  drag within a group or onto another group's strip; `.group-splitter` dividers
+  rebalance ephemeral widths (min 240 px, never persisted).
 - **Session card:** exactly one auth method (password XOR key path); Jump Hosts
   are structured fields; Extra Args uses a strict parser (`internal/sshx/args`).
   Key passphrases are prompted once per connection, cached only in memory.
@@ -325,14 +334,19 @@ queue blocks the emitter rather than dropping a lifecycle event.
 - **Destructive tree ops** (delete folder with children, delete session) require
   a confirm dialog showing the affected count (A8).
 - **UI language is English only.** Shortcuts: Ctrl+K/L search, Ctrl+T connect,
-  Ctrl+W close tab, Ctrl+Tab cycle, Ctrl+, settings, F2/Delete rename/delete,
-  Esc close modal, Ctrl+Shift+E toggle SFTP browser. All shortcuts and terminal
-  control keys are keyed to the physical key position (US layout) via
+  Ctrl+W close tab, Ctrl+Tab cycle, Ctrl+1..9 nth tab, Ctrl+\ / Ctrl+Shift+\
+  split the focused group's active tab right/left, Ctrl+, settings, F2/Delete
+  rename/delete, Esc close modal, Ctrl+Shift+E toggle SFTP browser. All
+  shortcuts and terminal control keys are keyed to the physical key position (US
+  layout) via
   `KeyboardEvent.code`, so they fire identically under any keyboard layout;
-  plain text input remains layout-aware. Terminal keys: Ctrl+C always sends
+  plain text input remains layout-aware. Tab-cycle/close shortcuts act within the
+  focused group. Terminal keys: Ctrl+C always sends
   the interrupt (ETX, even with a selection); Shift+Backspace deletes the
   previous word (^W); Ctrl+Shift+V pastes the system clipboard into the active
   terminal; Ctrl+Shift+C copies the terminal selection (no-op when empty).
+  Ctrl+\ no longer forwards `0x1c` (SIGQUIT) to the remote shell (it is the
+  split-right chord now).
 - **HiDPI/zoom model:** OS scale comes from Chromium per-monitor; the renderer
   watches `matchMedia('(resolution: Ndppx)')` plus the main-process debounced
   display event and re-measures/refits (no reload). User zoom is separate

@@ -394,6 +394,12 @@
     cursor: not-allowed;
 }
 
+.context-menu-sep {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--border);
+}
+
 /* ---------- Dev hook ---------- */
 .dev-banner {
     padding: 4px 8px;
@@ -602,15 +608,14 @@
     right: -1px;
 }
 
-/* ---------- Terminal panes (Phase 4c) ---------- */
-#terminal-pane {
-    height: 100%;
-    display: flex;
-    min-width: 0;
-    position: relative;
+/* Focus indicator for the active terminal group (its active tab is the
+   globally active tab; monitor bar + SFTP bind to it). */
+.term-group.active .tab-strip-host {
+    box-shadow: inset 0 2px 0 var(--accent);
 }
 
-.term-pane {
+/* ---------- Terminal panes (Phase 4c) ---------- */
+.terminal-area .term-pane {
     flex: 1;
     min-width: 0;
     position: relative;

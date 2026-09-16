@@ -14,7 +14,7 @@
 // The router only acts while the vault is unlocked (no tree/tabs when locked).
 
 import { AppService } from "../rpc";
-import { store } from "../store";
+import { store, activeGroup, activeTabID } from "../store";
 import { focusSearch } from "../components/search";
 import {
     connectSession,
@@ -37,31 +37,32 @@ function isTypingTarget(t: EventTarget | null): boolean {
     return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable;
 }
 
-/** Cycle active tab by `dir` (±1), wrapping around the strip order. */
+/** Cycle the focused group's active tab by `dir` (±1), wrapping around. */
 function cycleTab(dir: number): void {
-    const { tabs, activeTabID } = store.getState();
-    if (tabs.length === 0) {
+    const group = activeGroup(store.getState());
+    if (!group || group.tabs.length === 0) {
         return;
     }
-    const idx = tabs.findIndex((t) => t.id === activeTabID);
+    const tabs = group.tabs;
+    const idx = tabs.findIndex((t) => t.id === group.activeTabID);
     const next = (idx + dir + tabs.length) % tabs.length;
     store.activateTab(tabs[next].id);
 }
 
-/** Activate the nth tab (1-based). */
+/** Activate the nth tab of the focused group (1-based). */
 function activateNth(n: number): void {
-    const { tabs } = store.getState();
-    const tab = tabs[n - 1];
+    const group = activeGroup(store.getState());
+    const tab = group?.tabs[n - 1];
     if (tab) {
         store.activateTab(tab.id);
     }
 }
 
-/** Ctrl+W: close the active tab with no confirmation (master A3). */
+/** Ctrl+W: close the focused group's active tab (master A3, no confirm). */
 function closeActiveTab(): void {
-    const { activeTabID } = store.getState();
-    if (activeTabID) {
-        void store.closeTab(activeTabID);
+    const id = activeTabID(store.getState());
+    if (id) {
+        void store.closeTab(id);
     }
 }
 
@@ -138,6 +139,15 @@ export function initShortcuts(): void {
         if (ctrl && !shift && !alt && code === "Comma") {
             e.preventDefault();
             openSettingsDialog();
+            return;
+        }
+
+        // Ctrl+\ / Ctrl+Shift+\ → split the focused group's active tab to the
+        // right / left (VS Code editor-group chords, master plan §6). Accepted
+        // tradeoff: Ctrl+\ no longer forwards 0x1c (SIGQUIT) to remote shells.
+        if (ctrl && !alt && (code === "Backslash" || code === "IntlBackslash")) {
+            e.preventDefault();
+            store.splitActiveTab(shift ? "left" : "right");
             return;
         }
 

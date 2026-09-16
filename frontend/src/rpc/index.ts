@@ -90,10 +90,14 @@ export interface SftpServiceApi {
     Mkdir(tabID: string, path: string): Promise<void>;
     Rename(tabID: string, from: string, to: string): Promise<void>;
     Remove(tabID: string, path: string): Promise<void>;
-    PickLocalFiles(tabID: string, multi: boolean): Promise<string[]>;
     Upload(tabID: string, localPaths: string[], remoteDir: string): Promise<void>;
     Download(tabID: string, remotePath: string): Promise<string>;
-    DownloadThenSave(tabID: string, remotePath: string): Promise<string>;
+    DownloadTo(
+        tabID: string,
+        remotePath: string,
+        destDir: string,
+        overwrite: boolean,
+    ): Promise<string>;
     EditRemoteText(tabID: string, remotePath: string): Promise<void>;
     CancelEdit(tabID: string): Promise<void>;
 }

@@ -825,6 +825,40 @@ function registerIpc(): void {
         }
         return result.filePaths[0] ?? "";
     });
+
+    // SFTP upload: a native multi-file picker. Returns [] on cancel; only the
+    // selected paths are shared with the backend (master plan A5).
+    ipcMain.handle("dialog:pickFiles", async (event) => {
+        trusted(event);
+        if (!win || win.isDestroyed()) {
+            return [];
+        }
+        const result = await dialog.showOpenDialog(win, {
+            title: "Select files to upload",
+            properties: ["openFile", "multiSelections"],
+        });
+        if (result.canceled) {
+            return [];
+        }
+        return result.filePaths;
+    });
+
+    // SFTP download: a native directory picker. Returns "" on cancel; the
+    // backend streams the remote file directly into the chosen directory.
+    ipcMain.handle("dialog:pickDirectory", async (event) => {
+        trusted(event);
+        if (!win || win.isDestroyed()) {
+            return "";
+        }
+        const result = await dialog.showOpenDialog(win, {
+            title: "Select download destination",
+            properties: ["openDirectory", "createDirectory"],
+        });
+        if (result.canceled) {
+            return "";
+        }
+        return result.filePaths[0] ?? "";
+    });
 }
 
 // ------------------------------------------------------------------ boot ---

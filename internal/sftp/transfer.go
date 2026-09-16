@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -49,10 +50,17 @@ type ToastPayload struct {
 	Message string `json:"message"`
 }
 
-// ErrSftpDialogUnsupported is returned by PickLocalFiles when the native
-// open-file dialog is unavailable in this build. The 5c frontend then shows a
-// manual multi-path prompt instead (master plan phase 5b task 1 fallback).
-var ErrSftpDialogUnsupported = errors.New("sftp: native file dialog unsupported in this build")
+// ErrDestExists is returned by DownloadTo when the destination file already
+// exists and overwrite was false (including a file that appears at the target
+// while the transfer is running). The renderer shows a replace-confirm dialog
+// and retries with overwrite=true.
+var ErrDestExists = errors.New("sftp: destination exists")
+
+// ErrDestIsDir is returned by DownloadTo when the destination path is an
+// existing directory. Directories are never replaced, even with
+// overwrite=true, so the renderer toasts this directly instead of offering the
+// Replace action.
+var ErrDestIsDir = errors.New("sftp: destination is a directory")
 
 // Progress throttle thresholds (master plan phase 5b task 1).
 const (
@@ -67,6 +75,8 @@ type transferJob struct {
 	localPaths []string // upload
 	remoteDir  string   // upload
 	remotePath string   // download
+	destDir    string   // download-to (DownloadTo); "" selects the tmp primitive
+	overwrite  bool     // download-to: replace an existing destination file
 	result     chan transferResult
 }
 
@@ -197,6 +207,8 @@ func (m *Manager) transferWorker(tabID string, ch chan *transferJob) {
 		res := transferResult{}
 		if job.upload {
 			res.err = m.doUpload(job.tabID, job.localPaths, job.remoteDir)
+		} else if job.destDir != "" {
+			res.path, res.err = m.doDownloadTo(job.tabID, job.remotePath, job.destDir, job.overwrite)
 		} else {
 			res.path, res.err = m.doDownload(job.tabID, job.remotePath)
 		}
@@ -346,24 +358,131 @@ func (m *Manager) doDownload(tabID, remotePath string) (string, error) {
 	return tempPath, nil
 }
 
-// DownloadThenSave downloads to a temp file and returns the final path. This
-// build uses the documented fallback: no native save dialog API is wired, so
-// it keeps the temp file, shows an app:toast with the path, and returns it
-// (master plan phase 5b task 1 fallback — recorded in the commit message).
-func (m *Manager) DownloadThenSave(tabID, remotePath string) (string, error) {
-	p, err := m.Download(tabID, remotePath)
+// DownloadTo streams a remote file directly into destDir as
+// <destDir>/<remote basename> and returns the final path. It rides the same
+// per-tab FIFO worker as Upload/Download. An existing destination file is
+// refused with ErrDestExists unless overwrite is true; an existing directory
+// at the target path is refused with ErrDestIsDir and never replaced. The
+// bytes are written to a hidden sibling temp (0600) and committed atomically,
+// so a failed transfer never truncates a pre-existing destination; without
+// overwrite the commit is a no-replace link, so a file that appears during the
+// transfer is not clobbered without confirmation.
+func (m *Manager) DownloadTo(tabID, remotePath, destDir string, overwrite bool) (string, error) {
+	job := &transferJob{
+		tabID:      tabID,
+		remotePath: remotePath,
+		destDir:    destDir,
+		overwrite:  overwrite,
+		result:     make(chan transferResult, 1),
+	}
+	m.enqueue(job)
+	res := <-job.result
+	return res.path, res.err
+}
+
+// doDownloadTo runs the actual download-to-directory on the worker goroutine.
+func (m *Manager) doDownloadTo(tabID, remotePath, destDir string, overwrite bool) (string, error) {
+	c, err := m.ClientFor(tabID)
 	if err != nil {
 		return "", err
 	}
-	m.emitToast("info", "Downloaded to "+p)
-	return p, nil
+	abs, err := m.resolve(tabID, remotePath)
+	if err != nil {
+		return "", err
+	}
+	st, err := c.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("sftp: stat %s: %w", abs, err)
+	}
+	if st.IsDir() {
+		return "", fmt.Errorf("sftp: download %s: is a directory", abs)
+	}
+	di, err := os.Stat(destDir)
+	if err != nil {
+		return "", fmt.Errorf("sftp: destination %s: %w", destDir, err)
+	}
+	if !di.IsDir() {
+		return "", fmt.Errorf("sftp: destination %s: not a directory", destDir)
+	}
+	base := path.Base(abs)
+	target := filepath.Join(destDir, base)
+	if ti, statErr := os.Stat(target); statErr == nil {
+		if ti.IsDir() {
+			return "", fmt.Errorf("%w: %s", ErrDestIsDir, target)
+		}
+		if !overwrite {
+			return "", fmt.Errorf("%w: %s", ErrDestExists, target)
+		}
+	} else if !os.IsNotExist(statErr) {
+		return "", fmt.Errorf("sftp: stat %s: %w", target, statErr)
+	}
+
+	tempPath := filepath.Join(destDir, "."+base+".shelve-"+newULID())
+	f, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", err
+	}
+	rf, err := c.Open(abs)
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(tempPath)
+		return "", fmt.Errorf("sftp: open %s: %w", abs, err)
+	}
+	transferID := newULID()
+	sink := &progressSink{
+		m: m, tabID: tabID, transferID: transferID, direction: "down",
+		fileName: base, total: st.Size(), lastEmitTime: time.Now(),
+	}
+	done, cerr := m.streamCopy(f, rf, sink)
+	_ = rf.Close()
+	// A deferred flush error (e.g. ENOSPC) surfaces only on Close; renaming a
+	// file that failed to close could replace the destination with a truncated
+	// copy, so the close result gates the commit.
+	if closeErr := f.Close(); cerr == nil {
+		cerr = closeErr
+	}
+	if cerr == nil {
+		if overwrite {
+			cerr = os.Rename(tempPath, target) // atomic replace on Linux
+		} else {
+			cerr = commitNoReplace(tempPath, target)
+		}
+	}
+	if cerr != nil {
+		_ = os.Remove(tempPath)
+		if errors.Is(cerr, ErrDestExists) {
+			// A file appeared at the target during the transfer. Report the
+			// terminal progress without a toast: the renderer's confirm/retry
+			// flow owns the user-facing message.
+			sink.final(done, cerr.Error())
+			return "", cerr
+		}
+		merr := fmt.Errorf("sftp: download %s: %w", abs, cerr)
+		sink.final(done, merr.Error())
+		m.emitToast("error", merr.Error())
+		return "", merr
+	}
+	sink.final(st.Size(), "") // terminal event, done == total
+	m.emitToast("info", "Downloaded to "+target)
+	return target, nil
 }
 
-// PickLocalFiles opens the native file picker. This build has no wired dialog
-// API, so it always returns the typed ErrSftpDialogUnsupported; the 5c
-// frontend falls back to a manual multi-path prompt (task 1, recorded).
-func (m *Manager) PickLocalFiles(multi bool) ([]string, error) {
-	return nil, ErrSftpDialogUnsupported
+// commitNoReplace atomically publishes tempPath as target without replacing an
+// existing target: os.Link fails with EEXIST if a file is already there (even
+// one created after the pre-transfer check), closing the check-then-rename
+// race. On success the temp link is removed; any other error leaves the temp
+// for the caller to clean up.
+func commitNoReplace(tempPath, target string) error {
+	if err := os.Link(tempPath, target); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%w: %s", ErrDestExists, target)
+		}
+		return err
+	}
+	// Both names now reference the same inode; the target is already
+	// published, so dropping the hidden name is best-effort.
+	_ = os.Remove(tempPath)
+	return nil
 }
 
 // ensureTmp creates the config tmp/ directory as 0700 (master plan §4, §8.8).

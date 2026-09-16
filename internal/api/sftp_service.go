@@ -78,18 +78,8 @@ func (s *SftpService) Remove(tabID, path string) error {
 // Phase 5b transfers + remote text editing (real implementations).
 // ---------------------------------------------------------------------
 
-// PickLocalFiles opens the native file picker and returns the chosen paths.
-// tabID is ignored by this build's dialog-free fallback (kept in the contract
-// per master plan §5). It returns the typed ErrSftpDialogUnsupported; the 5c
-// frontend then shows a manual multi-path prompt.
-func (s *SftpService) PickLocalFiles(tabID string, multi bool) ([]string, error) {
-	if err := s.requireUnlocked(); err != nil {
-		return nil, err
-	}
-	return s.mgr.PickLocalFiles(multi)
-}
-
-// Upload streams local files into remoteDir with progress events.
+// Upload streams local files (paths chosen by the renderer through the native
+// picker) into remoteDir with progress events.
 func (s *SftpService) Upload(tabID string, localPaths []string, remoteDir string) error {
 	if err := s.requireUnlocked(); err != nil {
 		return err
@@ -105,14 +95,17 @@ func (s *SftpService) Download(tabID, remotePath string) (string, error) {
 	return s.mgr.Download(tabID, remotePath)
 }
 
-// DownloadThenSave downloads a remote file to a temp path. This build uses
-// the documented fallback (no native save-dialog API wired): it returns the
-// temp path and shows an app:toast with it.
-func (s *SftpService) DownloadThenSave(tabID, remotePath string) (string, error) {
+// DownloadTo streams a remote file directly into destDir (chosen by the
+// renderer through the native directory picker) as <destDir>/<basename> and
+// returns the final path. It refuses to replace an existing file unless
+// overwrite is true (sftp.ErrDestExists); an existing directory at the target
+// is refused with sftp.ErrDestIsDir and never replaced. The renderer confirms
+// a file replace and retries.
+func (s *SftpService) DownloadTo(tabID, remotePath, destDir string, overwrite bool) (string, error) {
 	if err := s.requireUnlocked(); err != nil {
 		return "", err
 	}
-	return s.mgr.DownloadThenSave(tabID, remotePath)
+	return s.mgr.DownloadTo(tabID, remotePath, destDir, overwrite)
 }
 
 // EditRemoteText downloads the file (any name, ≤ 2 MiB, content probing as

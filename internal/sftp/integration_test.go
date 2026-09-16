@@ -269,16 +269,18 @@ func TestIntegrationDownloadAndSave(t *testing.T) {
 		t.Fatalf("downloaded content = %q (err %v), want %q", got, err, want)
 	}
 
-	// DownloadThenSave → fallback branch returns the temp path.
-	p2, err := m.DownloadThenSave(tab, remote)
+	// DownloadTo → streams directly into the chosen destination directory.
+	dest := t.TempDir()
+	p2, err := m.DownloadTo(tab, remote, dest, true)
 	if err != nil {
-		t.Fatalf("DownloadThenSave: %v", err)
+		t.Fatalf("DownloadTo: %v", err)
 	}
-	if p2 == "" {
-		t.Fatal("DownloadThenSave returned empty path")
+	want2 := filepath.Join(dest, "a.txt")
+	if p2 != want2 {
+		t.Fatalf("DownloadTo path = %q, want %q", p2, want2)
 	}
-	if _, err := os.Stat(p2); err != nil {
-		t.Fatalf("DownloadThenSave file missing: %v", err)
+	if got, err := os.ReadFile(p2); err != nil || string(got) != want {
+		t.Fatalf("DownloadTo content = %q (err %v), want %q", got, err, want)
 	}
 }
 

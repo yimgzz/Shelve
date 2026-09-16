@@ -233,6 +233,10 @@ export interface ShelveNative {
     pickSaveFile(defaultName: string): Promise<string>;
     /** Native open dialog for configuration import; resolves "" when cancelled. */
     pickOpenFile(): Promise<string>;
+    /** Native multi-file picker for SFTP upload; resolves [] when cancelled. */
+    pickFiles(): Promise<string[]>;
+    /** Native directory picker for SFTP download; resolves "" when cancelled. */
+    pickDirectory(): Promise<string>;
     /** Window geometry changes (debounced in main); returns an unsubscribe. */
     windowState: {
         onChange(cb: (state: WindowState) => void): () => void;

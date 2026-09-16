@@ -12,8 +12,11 @@
 // List rows: icon / name / size / modified.
 // Double-click: dir → navigate, file → EditRemoteText (Edit as text).
 // Context menu: Edit as text / Download… / Upload to here… / New folder… /
-// Rename… / Delete…. "Edit as text" (EditRemoteText) downloads the file
-// (any name; the backend rejects >2 MiB and binary content) to tmp/, opens
+// Rename… / Delete…. Upload opens the native multi-file picker and streams the
+// selected paths into the current remote directory; Download… opens the native
+// directory picker and streams the remote file there (replacing an existing
+// file only after a confirm). "Edit as text" (EditRemoteText) downloads the
+// file (any name; the backend rejects >2 MiB and binary content) to tmp/, opens
 // the configured editor and re-uploads it on save-detection — the backend
 // is silent except for "Saved to …" / error toasts, so the panel keeps no
 // per-file "editing" state.
@@ -24,7 +27,6 @@ import { SftpService } from "../rpc";
 import { store, activeTab, activeTabID, sftpPanelVisible, type SftpEntryDTO } from "../store";
 import { openContextMenu, type MenuItem } from "./context-menu";
 import { confirmDialog } from "./confirm";
-import { openDialog } from "../ui/dialog";
 import { toast } from "./toasts";
 
 // ----------------------------------------------------------------- module ---
@@ -55,6 +57,14 @@ let listEl: HTMLElement | null = null;
 let progressEl: HTMLElement | null = null;
 
 const modFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" });
+
+/**
+ * Stable prefix of the backend `sftp.ErrDestExists` message
+ * (internal/sftp/transfer.go). The RPC error envelope carries only the Go
+ * error string, so this literal is the cross-language contract; the Go unit
+ * test TestErrDestExistsMessageStable pins the backend side.
+ */
+const ERR_DEST_EXISTS = "sftp: destination exists";
 
 // ----------------------------------------------------------- path helpers ---
 
@@ -460,11 +470,39 @@ async function startEdit(entry: SftpEntryDTO): Promise<void> {
 }
 
 async function downloadSave(entry: SftpEntryDTO): Promise<void> {
+    let destDir: string;
     try {
-        // Backend DownloadThenSave emits an app:toast with the saved path.
-        await SftpService.DownloadThenSave(tabID, joinRemote(curPath, entry.name));
+        destDir = await window.shelve.pickDirectory();
     } catch (err) {
         toast("error", String(err));
+        return;
+    }
+    if (!destDir) {
+        return;
+    }
+    const remote = joinRemote(curPath, entry.name);
+    try {
+        await SftpService.DownloadTo(tabID, remote, destDir, false);
+    } catch (err) {
+        const msg = String(err);
+        if (!msg.includes(ERR_DEST_EXISTS)) {
+            toast("error", msg);
+            return;
+        }
+        const ok = await confirmDialog({
+            title: "Replace existing file?",
+            message: `${entry.name} already exists in the selected folder. Replace it?`,
+            confirmLabel: "Replace",
+            danger: true,
+        });
+        if (!ok) {
+            return;
+        }
+        try {
+            await SftpService.DownloadTo(tabID, remote, destDir, true);
+        } catch (retryErr) {
+            toast("error", String(retryErr));
+        }
     }
 }
 
@@ -490,93 +528,17 @@ async function removeEntry(entry: SftpEntryDTO): Promise<void> {
 }
 
 async function doUpload(): Promise<void> {
-    let paths: string[] = [];
     try {
-        const picked = await SftpService.PickLocalFiles(tabID, true);
-        paths = picked ?? [];
-    } catch (err) {
-        const msg = String(err);
-        if (/unsupported|no native/i.test(msg)) {
-            // 5b fallback: manual multi-path prompt when the dialog is out.
-            paths = await promptLocalPaths();
-        } else {
-            toast("error", msg);
+        const paths = await window.shelve.pickFiles();
+        if (!paths || paths.length === 0) {
             return;
         }
-    }
-    if (paths.length === 0) {
-        return;
-    }
-    try {
         await SftpService.Upload(tabID, paths, curPath);
         void loadList();
         toast("info", "Upload complete");
     } catch (err) {
         toast("error", String(err));
     }
-}
-
-/** Manual multi-path upload prompt (5b fallback; ErrSftpDialogUnsupported). */
-function promptLocalPaths(): Promise<string[]> {
-    return new Promise((resolve) => {
-        const body = document.createElement("div");
-        body.style.display = "flex";
-        body.style.flexDirection = "column";
-        body.style.gap = "10px";
-        const intro = document.createElement("p");
-        intro.style.margin = "0";
-        intro.textContent = "Enter the absolute path of each file to upload, one per line:";
-        const ta = document.createElement("textarea");
-        ta.className = "input mono";
-        ta.rows = 6;
-        ta.placeholder = "/home/me/report.pdf\n/home/me/notes.txt";
-        ta.autocomplete = "off";
-        ta.spellcheck = false;
-        body.append(intro, ta);
-
-        const footer = document.createElement("div");
-        const cancel = document.createElement("button");
-        cancel.type = "button";
-        cancel.className = "btn";
-        cancel.textContent = "Cancel";
-        const upload = document.createElement("button");
-        upload.type = "button";
-        upload.className = "btn primary";
-        upload.textContent = "Upload";
-
-        const finish = (paths: string[]) => {
-            dlg.close(paths);
-            if (dlg.el.parentNode) {
-                dlg.el.remove();
-            }
-        };
-        cancel.addEventListener("click", () => finish([]));
-        const submit = () => {
-            const parts = ta.value
-                .split(/[\n,]/)
-                .map((s) => s.trim())
-                .filter((s) => s.length > 0);
-            finish(parts);
-        };
-        upload.addEventListener("click", submit);
-        ta.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                submit();
-            }
-        });
-        footer.append(cancel, upload);
-
-        const dlg = openDialog<string[]>({
-            title: "Upload files",
-            body,
-            footer,
-            backdropClose: true,
-            width: 460,
-        });
-        requestAnimationFrame(() => ta.focus());
-        void dlg.done.then((p) => resolve(p ?? []));
-    });
 }
 
 // ----------------------------------------------------------- inline rows ---
@@ -729,7 +691,7 @@ function openPanelContext(x: number, y: number, entry: SftpEntryDTO): void {
         // only directories are excluded. The backend still enforces the
         // 2 MiB cap and toasts the error if the file is over it.
         { label: "Edit as text", disabled: entry.isDir, action: () => void startEdit(entry) },
-        { label: "Download…", action: () => void downloadSave(entry) },
+        { label: "Download…", disabled: entry.isDir, action: () => void downloadSave(entry) },
         { label: "Upload to here…", action: () => void doUpload() },
         {
             label: "New folder…",

@@ -33,7 +33,7 @@ func TestServiceSurfaceGolden(t *testing.T) {
 		"CredentialService": {"List", "Create", "Update", "Delete", "Get", "Usage"},
 		"JumpHostService":   {"List", "Create", "Update", "Delete", "Get", "Usage"},
 		"TerminalService":   {"Connect", "Disconnect", "Write", "Resize", "Reconnect"},
-		"SftpService":       {"IsActive", "List", "Mkdir", "Rename", "Remove", "PickLocalFiles", "Upload", "Download", "DownloadThenSave", "EditRemoteText", "CancelEdit"},
+		"SftpService":       {"IsActive", "List", "Mkdir", "Rename", "Remove", "Upload", "Download", "DownloadTo", "EditRemoteText", "CancelEdit"},
 		"MonitorService":    {"Start", "Stop"},
 		"TransferService":   {"Export", "Import"},
 	}

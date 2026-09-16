@@ -3,10 +3,10 @@
 //
 // Bundled to CommonJS (dist-electron/preload.cjs) because ESM preload scripts
 // are unsupported in sandboxed renderers. The surface is deliberately tiny
-// and reviewed: the backend endpoint, the clipboard, the native single-file
-// picker, the debounced window geometry/display changes and the zoom level.
-// No Node, no arbitrary IPC, no secrets (the per-run token rides
-// `bridgeEndpoint()` only, never a log).
+// and reviewed: the backend endpoint, the clipboard, the native file pickers
+// (single/multi-file + directory), the debounced window geometry/display
+// changes and the zoom level. No Node, no arbitrary IPC, no secrets (the
+// per-run token rides `bridgeEndpoint()` only, never a log).
 import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from "electron";
 
 // The IPC payloads are declared once for main + preload + renderer in
@@ -38,6 +38,12 @@ contextBridge.exposeInMainWorld("shelve", {
     pickSaveFile: (defaultName: string): Promise<string> =>
         ipcRenderer.invoke("dialog:pickSaveFile", defaultName),
     pickOpenFile: (): Promise<string> => ipcRenderer.invoke("dialog:pickOpenFile"),
+
+    // SFTP upload/download pickers: a native multi-file open dialog for
+    // uploads (resolves [] on cancel) and a directory picker for downloads
+    // (resolves "" on cancel). Only the selected paths cross the bridge.
+    pickFiles: (): Promise<string[]> => ipcRenderer.invoke("dialog:pickFiles"),
+    pickDirectory: (): Promise<string> => ipcRenderer.invoke("dialog:pickDirectory"),
 
     // Debounced window geometry from the main process; the renderer merges it
     // into settings and persists through AppService.SaveSettings (A7).

@@ -2,8 +2,8 @@ package sftp
 
 // Phase 5b transfer unit tests (master plan §9): upload/download streaming
 // against the mem SFTP server, progress-event throttling/terminal semantics,
-// batch-stop on failure, and the dialog-free fallbacks. A capturing emitter
-// records sftp:progress / app:toast payloads.
+// batch-stop on failure, and the download-to-directory primitive. A capturing
+// emitter records sftp:progress / app:toast payloads.
 
 import (
 	"bytes"
@@ -229,7 +229,7 @@ func TestDownloadReturnsTempWithPerms(t *testing.T) {
 	}
 }
 
-func TestDownloadThenSaveFallback(t *testing.T) {
+func TestDownloadToWritesIntoDestDir(t *testing.T) {
 	m, emit := newTestManagerEmit(t)
 	tab := "tab1"
 
@@ -239,34 +239,157 @@ func TestDownloadThenSaveFallback(t *testing.T) {
 	}
 	putFile(t, c, "/doc.md", []byte("# hello"))
 
-	p, err := m.DownloadThenSave(tab, "/doc.md")
+	dest := t.TempDir()
+	p, err := m.DownloadTo(tab, "/doc.md", dest, false)
 	if err != nil {
-		t.Fatalf("DownloadThenSave: %v", err)
+		t.Fatalf("DownloadTo: %v", err)
+	}
+	want := filepath.Join(dest, "doc.md")
+	if p != want {
+		t.Fatalf("DownloadTo path = %q, want %q", p, want)
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != "# hello" {
-		t.Fatalf("temp content = %q", data)
+		t.Fatalf("content = %q", data)
 	}
-	// Fallback path shows an info toast with the path.
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("perms = %o, want 0600", fi.Mode().Perm())
+	}
+	// Success shows the destination path.
 	emit.mu.Lock()
 	var found bool
 	for _, toast := range emit.toasts {
-		if toast.Level == "info" && toast.Message == "Downloaded to "+p {
+		if toast.Level == "info" && toast.Message == "Downloaded to "+want {
 			found = true
 		}
 	}
 	emit.mu.Unlock()
 	if !found {
-		t.Fatal("expected an info toast with the downloaded path")
+		t.Fatal("expected an info toast with the destination path")
 	}
 }
 
-func TestPickLocalFilesUnsupported(t *testing.T) {
+func TestDownloadToCollisionAndOverwrite(t *testing.T) {
 	m, _ := newTestManagerEmit(t)
-	if _, err := m.PickLocalFiles(true); !errors.Is(err, ErrSftpDialogUnsupported) {
-		t.Fatalf("PickLocalFiles = %v, want ErrSftpDialogUnsupported", err)
+	tab := "tab1"
+
+	c, err := m.ClientFor(tab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putFile(t, c, "/notes.txt", []byte("remote content"))
+
+	dest := t.TempDir()
+	target := filepath.Join(dest, "notes.txt")
+	if err := os.WriteFile(target, []byte("old local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// No overwrite → ErrDestExists; the pre-existing file is untouched.
+	if _, err := m.DownloadTo(tab, "/notes.txt", dest, false); !errors.Is(err, ErrDestExists) {
+		t.Fatalf("DownloadTo collision err = %v, want ErrDestExists", err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "old local" {
+		t.Fatalf("collision overwrote target: %q", got)
+	}
+
+	// overwrite=true replaces it atomically.
+	p, err := m.DownloadTo(tab, "/notes.txt", dest, true)
+	if err != nil {
+		t.Fatalf("DownloadTo overwrite: %v", err)
+	}
+	if p != target {
+		t.Fatalf("DownloadTo overwrite path = %q, want %q", p, target)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "remote content" {
+		t.Fatalf("overwrite content = %q", got)
+	}
+
+	// An existing directory at the target is a distinct error and is never
+	// replaced, even with overwrite=true.
+	dirTarget := filepath.Join(dest, "adir")
+	if err := os.Mkdir(dirTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	putFile(t, c, "/adir", nil)
+	if _, err := m.DownloadTo(tab, "/adir", dest, true); !errors.Is(err, ErrDestIsDir) {
+		t.Fatalf("DownloadTo dir collision err = %v, want ErrDestIsDir", err)
+	}
+}
+
+func TestCommitNoReplaceRefusesExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, ".tmp.shelve-x")
+	target := filepath.Join(dir, "out.txt")
+	if err := os.WriteFile(src, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitNoReplace(src, target); !errors.Is(err, ErrDestExists) {
+		t.Fatalf("commitNoReplace err = %v, want ErrDestExists", err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "old" {
+		t.Fatalf("commitNoReplace replaced target: %q", got)
+	}
+
+	// A free target is published and the temp name is dropped.
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitNoReplace(src, target); err != nil {
+		t.Fatalf("commitNoReplace free target: %v", err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "new" {
+		t.Fatalf("committed content = %q", got)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("temp link still present after commit: %v", err)
+	}
+}
+
+// TestErrDestExistsMessageStable pins the cross-language contract: the
+// renderer matches on this exact substring (ERR_DEST_EXISTS in sftp-panel.ts).
+func TestErrDestExistsMessageStable(t *testing.T) {
+	if got := ErrDestExists.Error(); got != "sftp: destination exists" {
+		t.Fatalf("ErrDestExists message = %q, want %q", got, "sftp: destination exists")
+	}
+}
+
+func TestDownloadToRejectsMissingDestDir(t *testing.T) {
+	m, _ := newTestManagerEmit(t)
+	tab := "tab1"
+	c, err := m.ClientFor(tab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	putFile(t, c, "/a.txt", []byte("x"))
+
+	missing := filepath.Join(t.TempDir(), "nope")
+	if _, err := m.DownloadTo(tab, "/a.txt", missing, false); err == nil {
+		t.Fatal("expected an error for a missing destination directory")
+	}
+}
+
+func TestDownloadToRejectsRemoteDirectory(t *testing.T) {
+	m, _ := newTestManagerEmit(t)
+	tab := "tab1"
+	c, err := m.ClientFor(tab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Mkdir("/somedir"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.DownloadTo(tab, "/somedir", t.TempDir(), false); err == nil {
+		t.Fatal("expected an error downloading a remote directory")
 	}
 }

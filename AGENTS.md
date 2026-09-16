@@ -221,15 +221,17 @@ Errors are the Go error string; the TS client rejects with `new Error(msg)`.
 - **JumpHostService**: `List`, `Create`, `Update`, `Delete`, `Get`, `Usage`.
 - **TerminalService**: `Connect`, `Disconnect`, `Write`, `Resize`, `Reconnect`.
 - **SftpService**: `IsActive`, `List`, `Mkdir`, `Rename`, `Remove`,
-  `PickLocalFiles`, `Upload`, `Download`, `DownloadThenSave`, `EditRemoteText`,
-  `CancelEdit`.
+  `Upload`, `Download`, `DownloadTo`, `EditRemoteText`, `CancelEdit`.
 - **MonitorService**: `Start`, `Stop`.
 - **TransferService**: `Export`, `Import` (encrypted `.shelve` configuration
   export/import; Merge/Replace modes; paths only).
 
-Native file picking is `window.shelve.pickFile()` in the main process, not a
-service method; configuration export/import use `pickSaveFile()`/`pickOpenFile()`
-and pass the resulting path to `TransferService`.
+Native file picking lives in the main process, not a service: uploads use
+`window.shelve.pickFiles()` (multi-file) and downloads use
+`window.shelve.pickDirectory()` (destination folder); the single-file
+`pickFile()` serves SSH key paths, and configuration export/import use
+`pickSaveFile()`/`pickOpenFile()` and pass the resulting path to
+`TransferService`.
 
 ### Event contract (backend → renderer, over `/rpc`)
 

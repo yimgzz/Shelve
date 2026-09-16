@@ -126,10 +126,12 @@ variant in `main.ts` / `store.ts`) with the rpc module. No other change in
   `{width,height}` to the renderer; the renderer merges it into the settings
   object and persists through `AppService.SaveSettings` (single writer = Go,
   same atomic path as `leftWidth`/`sftpWidth`). Clamp to `minWidth`/`minHeight`.
-- Do **not** add native dialogs for `PickLocalFiles`/`DownloadThenSave`: this
-  build's behavior is the documented manual/fallback path, and the no-change
-  rule forbids altering it. (A native-dialog enhancement is a separate future
-  plan.)
+- Native dialogs for `PickLocalFiles`/`DownloadThenSave` were deferred in this
+  phase (the build used the documented manual/fallback path). They are now
+  implemented by the follow-up plan
+  `.kilo/plans/1789554521939-sftp-native-file-dialogs.md`, which replaces those
+  methods with `window.shelve.pickFiles()`/`pickDirectory()` and
+  `SftpService.DownloadTo`.
 
 ### 7. `frontend/index.html` + CSP
 

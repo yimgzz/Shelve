@@ -51,7 +51,7 @@ const blockingConcurrency = 4
 var blockingMethods = map[string]struct{}{
 	"SftpService.Upload":            {},
 	"SftpService.Download":          {},
-	"SftpService.DownloadThenSave":  {},
+	"SftpService.DownloadTo":        {},
 	"SessionService.TestConnection": {},
 }
 

@@ -651,12 +651,6 @@
     right: -1px;
 }
 
-/* Focus indicator for the active terminal group (its active tab is the
-   globally active tab; monitor bar + SFTP bind to it). */
-.term-group.active .tab-strip-host {
-    box-shadow: inset 0 2px 0 var(--accent);
-}
-
 /* ---------- Terminal panes (Phase 4c) ---------- */
 .terminal-area .term-pane {
     flex: 1;

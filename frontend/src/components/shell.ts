@@ -165,7 +165,10 @@ export function renderShell(root: HTMLElement): void {
     root.appendChild(splitter);
 
     const applyWidth = (w: number) => {
-        const clamped = Math.min(MAX_LEFT, Math.max(MIN_LEFT, w));
+        // clientX is a double (fractional under HiDPI/fractional scaling or
+        // non-integer zoom); round before it reaches settings.window.leftWidth,
+        // which the Go backend decodes as an int.
+        const clamped = Math.round(Math.min(MAX_LEFT, Math.max(MIN_LEFT, w)));
         document.documentElement.style.setProperty("--left-w", `${clamped}px`);
         store.set({ leftPanelWidth: clamped });
     };
@@ -244,7 +247,9 @@ export function renderShell(root: HTMLElement): void {
             lo,
             Math.min(MAX_SFTP, window.innerWidth - store.getState().leftPanelWidth - SPLITTER_TOTAL - SFTP_TERM_MIN),
         );
-        return Math.min(hi, Math.max(lo, w));
+        // Round: window.innerWidth - clientX can be fractional, and the Go
+        // backend decodes settings.window.sftpWidth as an int.
+        return Math.round(Math.min(hi, Math.max(lo, w)));
     };
     const applySftpWidth = (w: number): void => {
         store.set({ sftpPanelWidth: clampSftpWidth(w) });

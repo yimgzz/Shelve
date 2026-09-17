@@ -8,38 +8,31 @@ frontend (vanilla TypeScript + Vite + xterm.js), no bundled GUI toolkit of our
 own. Sessions live in an encrypted vault (Argon2id + AES-256-GCM)
 under `$XDG_CONFIG_HOME/shelve`.
 
-**Status: v2.0 — Electron architecture.** Phases E1–E6 of the migration
-roadmap are done (legacy toolchain fully removed, docs rewritten); E7 is the
-acceptance/QA gate. Linux only: `make build && make run` and `make appimage`.
-All user-visible functionality is unchanged from the pre-migration app.
+**Status: v2.1 — Electron architecture.** The Electron migration phases E1–E7
+are complete (legacy toolchain fully removed, docs rewritten); the per-phase and
+per-feature plans are consolidated into the single master plan. Linux only:
+`make build && make run` and `make appimage`. All user-visible functionality is
+unchanged from the pre-migration app.
 
 ---
 
 ## 1. Read these first
 
-The project is driven by a detailed, single-source-of-truth planning system in
-`plans/`. Before touching any code, read the relevant plan:
+The project's single source of truth is
+[`plans/1789467100000-master-plan.md`](plans/1789467100000-master-plan.md):
+architecture, data model, interfaces, security model, build strategy, the
+workstream index and acceptance criteria (§1–§12). Read the sections relevant to
+your change before touching any code.
 
-| Reference | File | Contents |
-|---|---|---|
-| Master plan | [`plans/1789467100000-master-plan.md`](plans/1789467100000-master-plan.md) | Architecture, data model, interfaces, security model, build strategy, roadmap index (§1–§12). **The single source of truth.** |
-| Migration roadmap | [`plans/1789467100000-electron-migration-roadmap.md`](plans/1789467100000-electron-migration-roadmap.md) | Migration strategy, transport contract, phase index E1–E7, cross-cutting gates and risks. |
-| Migration phases | `plans/1789467200000-electron-e1-*.md` … `plans/1789467800000-electron-e7-*.md` | Per-phase backend bridge, Electron shell/build, frontend transport, HiDPI/GPU, packaging, cleanup, acceptance. |
-
-Every phase plan references the master plan sections (`§`) that must be read
-before implementing. **Follow the "read the §s before starting" instructions at
-the top of each phase plan.**
-
-- The roadmap is executed **strictly in order**; sub-phases were sized to fit a
-  single focused agent session.
-- A phase is done only when its exit criteria **plus `make lint` plus `make test`**
-  pass on a clean container (`make test-integration` where stated), and it is
-  committed after each sub-phase.
-- The plan set is now **small on purpose**: the 28 legacy per-feature plans
-  were deleted in E6 because they described a substrate that no longer exists
-  (a beta GUI toolkit built on an embedded browser engine); their durable rules
-  were ported into the master plan before deletion. Do not resurrect them — add
-  new work to the master plan and a phase file instead.
+- A change is done only when the relevant exit criteria **plus `make lint` plus
+  `make test`** pass on a clean container (`make test-integration` where stated),
+  and it is committed.
+- The plan set is **small on purpose**: the 28 legacy per-feature plans were
+  deleted in E6, and the Electron migration phase/feature plans were
+  consolidated into the master plan, because they described a substrate (a beta
+  GUI toolkit built on an embedded browser engine) or a migration that no longer
+  exists. Do not resurrect them — add new work to the master plan (§10
+  workstream index) and the affected `§`s.
 
 ## 2. Project layout
 
@@ -145,6 +138,7 @@ Notes:
 | IDs | `github.com/oklog/ulid/v2` |
 | RPC WS | `github.com/coder/websocket` (pinned) |
 | Transport | `internal/bridge`: one token-gated `127.0.0.1` listener serving `/rpc` (JSON) + `/terminal` (binary) |
+| Packaging | `electron-builder` AppImage (xz-compressed, `en-US` locales only) + `electron-builder --linux dir` for local `make run` |
 
 ### Layering rules (critical)
 
@@ -233,6 +227,18 @@ Native file picking lives in the main process, not a service: uploads use
 `pickSaveFile()`/`pickOpenFile()` and pass the resulting path to
 `TransferService`.
 
+### Concurrent RPC dispatch
+
+- Normal RPC methods dispatch sequentially on the read loop. An explicit
+  allow-list of long-blocking methods runs on bounded goroutines
+  (`blockingConcurrency = 4`): `SftpService.Upload`, `SftpService.Download`,
+  `SftpService.DownloadTo`, `SessionService.TestConnection`. A multi-GB transfer
+  or a dial timeout therefore cannot starve tree/search/editor/monitor calls.
+- All socket writes go through the single `writeLoop`/out channel (coder/websocket
+  allows one writer); responses are matched by `id`, so completion order is
+  irrelevant. The read loop waits for a semaphore slot, so a flooding client
+  cannot spawn unbounded goroutines.
+
 ### Event contract (backend → renderer, over `/rpc`)
 
 | Event | Payload | Producer |
@@ -267,6 +273,11 @@ queue blocks the emitter rather than dropping a lifecycle event.
 
 - One goroutine per SSH connection (read pump, forward accepts); store access
   via mutex; per-tab emitter buffers.
+- Monitor cadence: the per-tab ticker runs a core-only script every 2 s and the
+  full `df -h` listing only every `dfRefreshTicks = 5` ticks; `dfText` on the
+  lighter ticks reuses the cached listing (the tooltip may lag up to 5 ticks).
+  The dedicated per-tab monitor SSH connection is kept; running monitor execs on
+  the PTY connection is not adopted.
 - `Lock()` disconnects all sessions, zeroizes the key, emits
   `vault:state-changed`.
 - Disconnect while active → `error` state + message, tab kept (A4); Reconnect
@@ -386,6 +397,14 @@ queue blocks the emitter rather than dropping a lifecycle event.
 - **GPU:** hardware acceleration on by default (VSCode parity); `--disable-gpu`
   / `--disable-hardware-acceleration` is the only off-switch; `--gpu-info`
   prints the GPU feature status and exits.
+- **Packaging size & runtime performance:** `electron-builder.yml` sets
+  `electronLanguages: ["en-US"]` (Chromium locales pruned; UI is English-only)
+  and `appImage.compression: "xz"` (much slower packaging, much smaller
+  artifact). The shipped `shelve-backend` is built
+  `CGO_ENABLED=0 -trimpath -ldflags="-s -w"`. The GPU/SwiftShader/codec
+  libraries and the ~220 MB Chromium binary are intentionally kept (GPU parity +
+  `--disable-gpu` fallback); `LICENSES.chromium.html` is kept pending legal
+  sign-off — do not prune these.
 - **No functional change rule:** a change must not alter a user-visible
   behavior, DTO field, event name, or event payload. `internal/{vault,model,
   store,sshx,sshengine,sftp,monitor,config}` are preserved from the pre-Electron
@@ -406,16 +425,18 @@ queue blocks the emitter rather than dropping a lifecycle event.
   disconnect event correctness, SFTP ops + edit, monitor metrics, 300-session
   perf smoke.
 - **Frontend:** `tsc --noEmit` in `make lint`. No e2e framework; manual QA
-  checklists per phase.
-- **Electron manual matrix** (E4/E7): scale factors 100–200 %, X11 + Wayland,
-  monitor moves, GPU on/off, AppImage launch.
+  checklists instead.
+- **Electron manual matrix:** scale factors 100–200 %, X11 + Wayland, monitor
+  moves, GPU on/off, AppImage launch (`make appimage` + `make appimage-check`
+  with `en-US`-only locales, xz), and a concurrent-RPC check (multi-GB SFTP
+  upload while browsing/searching).
 - **Perf budgets:** search over 300 nodes < 10 ms; tree DOM rebuild < 50 ms;
   terminal responsive at 100 KB/s sustained output (3 MB/s flood survives).
 
 ## 9. Do's and don'ts
 
 **Do:**
-- Read the master-plan sections referenced by the phase plan before coding.
+- Read the master-plan sections relevant to your change before coding.
 - Keep all frontend↔backend traffic inside `internal/bridge` + the `/terminal`
   WS; keep the preload API minimal and reviewed.
 - Use atomic writes for `vault.json` and `settings.json` (tmp + rename).
@@ -440,10 +461,11 @@ queue blocks the emitter rather than dropping a lifecycle event.
 
 ## 10. Getting started for new work
 
-1. Read `plans/` — pick the relevant master-plan sections + phase plan.
+1. Read `plans/1789467100000-master-plan.md` — find the sections relevant to
+   your change.
 2. Make changes within the affected package(s); keep the Go/Electron layering
    (no GUI toolkit in Go; all traffic through the bridge).
 3. Run `make test`, `make lint` (and `make test-integration` if the change
    touches SSH/SFTP networking) on a clean container.
-4. Follow the phase plan's exit criteria and QA checklist; commit after each
-   logical unit.
+4. Meet the relevant §-level exit criteria and add any new work to the §10
+   workstream index; commit after each logical unit.

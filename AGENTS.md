@@ -19,7 +19,7 @@ unchanged from the pre-migration app.
 ## 1. Read these first
 
 The project's single source of truth is
-[`plans/1789467100000-master-plan.md`](plans/1789467100000-master-plan.md):
+[`.kilo/plans/1789467100000-master-plan.md`](.kilo/plans/1789467100000-master-plan.md):
 architecture, data model, interfaces, security model, build strategy, the
 workstream index and acceptance criteria (§1–§12). Read the sections relevant to
 your change before touching any code.
@@ -188,9 +188,12 @@ Notes:
 - The renderer is sandboxed (`contextIsolation: true`, `nodeIntegration: false`,
   `sandbox: true`) and reaches native capabilities only through the reviewed
   preload API (bridge endpoint, file dialog, clipboard, window state, display
-  changes, zoom, window controls). The window is frameless by default and the
-  renderer draws the title bar; `SHELVE_TITLEBAR=native` restores the OS frame
-  and hides the bar.
+  changes, zoom, window controls). `webPreferences` parity:
+  `backgroundThrottling: false` (terminal output stays live when unfocused),
+  `spellcheck: false`, `enableWebSQL: false`,
+  `autoplayPolicy: "user-gesture-required"`. The window is frameless by default
+  and the renderer draws the title bar; `SHELVE_TITLEBAR=native` restores the OS
+  frame and hides the bar.
 - No application data crosses stdio.
 
 ### RPC envelope
@@ -396,7 +399,13 @@ queue blocks the emitter rather than dropping a lifecycle event.
   forces one global scale.
 - **GPU:** hardware acceleration on by default (VSCode parity); `--disable-gpu`
   / `--disable-hardware-acceleration` is the only off-switch; `--gpu-info`
-  prints the GPU feature status and exits.
+  prints the GPU feature status and exits. Parity switch set: enable
+  `EarlyEstablishGpuChannel`, `EstablishGpuChannelAsync` (plus
+  `GlobalShortcutsPortal` on Linux); disable `CalculateNativeWinOcclusion`;
+  `max-active-webgl-contexts=32`; Linux `xdg-portal-required-version=4` and
+  `--lang` from `LC_ALL`/`LANG`. Never append `--ignore-gpu-blocklist`,
+  `--enable-gpu-rasterization`, `--use-gl`, `--use-angle`, or
+  `--disable-lcd-text`.
 - **Packaging size & runtime performance:** `electron-builder.yml` sets
   `electronLanguages: ["en-US"]` (Chromium locales pruned; UI is English-only)
   and `appImage.compression: "xz"` (much slower packaging, much smaller
@@ -429,7 +438,8 @@ queue blocks the emitter rather than dropping a lifecycle event.
 - **Electron manual matrix:** scale factors 100–200 %, X11 + Wayland, monitor
   moves, GPU on/off, AppImage launch (`make appimage` + `make appimage-check`
   with `en-US`-only locales, xz), and a concurrent-RPC check (multi-GB SFTP
-  upload while browsing/searching).
+  upload while browsing/searching). The interactive rows are not yet executed on
+  a real desktop and are tracked as open work in the master plan's §10.
 - **Perf budgets:** search over 300 nodes < 10 ms; tree DOM rebuild < 50 ms;
   terminal responsive at 100 KB/s sustained output (3 MB/s flood survives).
 
@@ -461,8 +471,8 @@ queue blocks the emitter rather than dropping a lifecycle event.
 
 ## 10. Getting started for new work
 
-1. Read `plans/1789467100000-master-plan.md` — find the sections relevant to
-   your change.
+1. Read `.kilo/plans/1789467100000-master-plan.md` — find the sections relevant
+   to your change.
 2. Make changes within the affected package(s); keep the Go/Electron layering
    (no GUI toolkit in Go; all traffic through the bridge).
 3. Run `make test`, `make lint` (and `make test-integration` if the change

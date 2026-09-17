@@ -16,8 +16,8 @@ search, terminal tabs, an SFTP browser in a right-hand panel that is **enabled
 by default** (browse / upload / download / mkdir / rename / delete /
 edit-text-with-system-editor), and a MobaXterm-style **system monitor bar**
 under the terminal (hostname / CPU / RAM / network / uptime / disk — enabled
-by default). Roadmap: `plans/1789467100000-master-plan.md` (the single plan of
-record).
+by default). Roadmap: `.kilo/plans/1789467100000-master-plan.md` (the single plan
+of record).
 
 ## Prerequisites
 

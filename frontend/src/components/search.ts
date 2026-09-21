@@ -36,7 +36,7 @@ export function renderSearch(host: HTMLElement): void {
     const input = document.createElement("input");
     input.type = "text";
     input.className = "input search-input";
-    input.placeholder = "Search sessions…  Ctrl K";
+    input.placeholder = "Search sessions & folders…  Ctrl K";
     input.autocomplete = "off";
     input.spellcheck = false;
     searchInput = input;

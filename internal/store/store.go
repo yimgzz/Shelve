@@ -842,10 +842,13 @@ func indexSession(sess model.Session) lowerSess {
 	}
 }
 
-// Search returns every session whose Name, Host or User contains q as a
-// case-insensitive substring (master plan §2 A9), with its folder path
-// for display context. Results are sorted by ID for a stable order. The
-// flat scan over ≤300 nodes is well inside the master-plan §6 budget.
+// Search returns every session whose Name, Host, User or full slash-joined
+// folder path (any ancestor folder name) contains q as a case-insensitive
+// substring (master plan §2 A9), with its folder path for display context.
+// The folder-path check runs on demand (no index to keep in sync) and only
+// for sessions the pre-lowercased field scan does not already match.
+// Results are sorted by ID for a stable order. The flat scan over ≤300 nodes
+// is well inside the master-plan §6 budget.
 func (s *Store) Search(q string) []SearchHit {
 	q = strings.ToLower(strings.TrimSpace(q))
 	if q == "" {
@@ -857,7 +860,9 @@ func (s *Store) Search(q string) []SearchHit {
 	var out []SearchHit
 	for id, l := range s.searchIdx {
 		if !strings.Contains(l.name, q) && !strings.Contains(l.host, q) && !strings.Contains(l.user, q) {
-			continue
+			if !strings.Contains(strings.ToLower(s.folderPathLocked(s.sessions[id].FolderID)), q) {
+				continue
+			}
 		}
 		sess := s.sessions[id]
 		out = append(out, SearchHit{

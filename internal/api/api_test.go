@@ -305,6 +305,21 @@ func TestSessionServiceSearch(t *testing.T) {
 		t.Fatalf("Search(ALICE) = %+v, want db-prod-01 only", byUser)
 	}
 
+	// Folder-path match: "tion" is a substring of "Production" but of no
+	// fixture Name/Host/User, so every hit is a folder-path-only match.
+	byFolder, err := ss.Search("tion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byFolder) != 3 {
+		t.Fatalf(`Search("tion") = %d results, want 3 (folder-path only)`, len(byFolder))
+	}
+	for _, r := range byFolder {
+		if r.FolderPath != "Production" {
+			t.Fatalf("folder path = %q, want Production", r.FolderPath)
+		}
+	}
+
 	no, err := ss.Search("zzz-no-match")
 	if err != nil {
 		t.Fatal(err)

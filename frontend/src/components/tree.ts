@@ -712,7 +712,10 @@ function renderResultList(host: HTMLElement, q: string, results: SearchResultDTO
         name.className = "tree-name";
         const meta = document.createElement("span");
         meta.className = "result-meta";
-        meta.textContent = `${r.host}${r.folderPath ? ` — ${r.folderPath}` : ""}`;
+        meta.append(r.host);
+        if (r.folderPath) {
+            meta.append(" — ", highlight(r.folderPath, q));
+        }
 
         row.append(name, meta);
         row.classList.toggle("selected", store.getState().selectedID === r.id);

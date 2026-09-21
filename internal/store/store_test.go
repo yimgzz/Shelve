@@ -470,22 +470,30 @@ func TestStore300SessionsSearchBudget(t *testing.T) {
 	}
 
 	const runs = 20
-	best := time.Duration(1<<63 - 1)
-	for i := 0; i < runs; i++ {
-		t0 := time.Now()
-		hits := s.Search("host-")
-		el := time.Since(t0)
-		if el < best {
-			best = el
+	measure := func(q string) {
+		best := time.Duration(1<<63 - 1)
+		for i := 0; i < runs; i++ {
+			t0 := time.Now()
+			hits := s.Search(q)
+			el := time.Since(t0)
+			if el < best {
+				best = el
+			}
+			if len(hits) == 0 {
+				t.Fatalf("fixture search %q returned no hits", q)
+			}
 		}
-		if len(hits) == 0 {
-			t.Fatal("fixture search returned no hits")
+		t.Logf("search %q over the 331-node fixture: best of %d = %v (budget 10 ms)", q, runs, best)
+		if best > 10*time.Millisecond {
+			t.Fatalf("search %q took %v, budget 10 ms", q, best)
 		}
 	}
-	t.Logf("search over the 331-node fixture: best of %d = %v (budget 10 ms)", runs, best)
-	if best > 10*time.Millisecond {
-		t.Fatalf("search took %v, budget 10 ms", best)
-	}
+
+	// "host-" matches via the pre-lowercased field index. "Folder-05"
+	// appears in no Name/Host/User of the fixture, so this query exercises
+	// the on-demand folder-path walk for every one of the 331 rows.
+	measure("host-")
+	measure("Folder-05")
 }
 
 func TestStore300SessionsFullPayloadRoundTrip(t *testing.T) {
@@ -1132,5 +1140,92 @@ func TestSearchIndexSync(t *testing.T) {
 	}
 	if got := len(s2.Search("beta")); got != 1 {
 		t.Fatalf("after reload: Search(beta) = %d hits, want 1", got)
+	}
+}
+
+// TestSearchMatchesFolderPath verifies the A9 folder-path matching: the
+// slash-joined path of a session's ancestor folders matches too (the path
+// walk is on demand, so move/rename/delete are reflected without any index
+// sync), including cross-segment queries; a root-level session (empty path)
+// never matches a non-empty query.
+func TestSearchMatchesFolderPath(t *testing.T) {
+	s := New(nil)
+
+	pid, err := s.CreateFolder("", "Production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Name/Host/User contain no substring of the folder name.
+	sid, err := s.CreateSession(pid, testSession("alpha"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Root-level session: empty folder path, stays out of folder matches.
+	if _, err := s.CreateSession("", testSession("zeta-root")); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := s.Search("pro"); len(got) != 1 || got[0].ID != sid {
+		t.Fatalf(`Search("pro") = %+v, want only the Production session`, got)
+	}
+	if got := s.Search("PRODUCTION"); len(got) != 1 || got[0].ID != sid {
+		t.Fatalf(`Search("PRODUCTION") = %+v, want 1 hit (case-insensitive)`, got)
+	}
+
+	// Nested A/B: the joined path supports cross-segment and
+	// middle-segment queries.
+	aid, err := s.CreateFolder("", "Alder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bid, err := s.CreateFolder(aid, "Birch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns, err := s.CreateSession(bid, testSession("gamma"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Search("alder/birch"); len(got) != 1 || got[0].ID != ns {
+		t.Fatalf(`Search("alder/birch") = %+v, want the A/B session`, got)
+	}
+	if got := s.Search("birch"); len(got) != 1 || got[0].ID != ns {
+		t.Fatalf(`Search("birch") = %+v, want the A/B session`, got)
+	}
+
+	// MoveNode: the old folder stops matching, the new one starts.
+	if err := s.MoveNode(ns, pid, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Search("alder"); len(got) != 0 {
+		t.Fatalf(`after move: Search("alder") = %+v, want none`, got)
+	}
+	if got := s.Search("pro"); len(got) != 2 {
+		t.Fatalf(`after move: Search("pro") = %d hits, want 2`, len(got))
+	}
+	if err := s.MoveNode(ns, "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Search("pro"); len(got) != 1 || got[0].ID != sid {
+		t.Fatalf(`after move to root: Search("pro") = %+v, want only the original`, got)
+	}
+
+	// RenameFolder: the old name stops matching, the new one starts.
+	if err := s.RenameFolder(pid, "Release"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Search("pro"); len(got) != 0 {
+		t.Fatalf(`after rename: Search("pro") = %+v, want none`, got)
+	}
+	if got := s.Search("release"); len(got) != 1 || got[0].ID != sid {
+		t.Fatalf(`after rename: Search("release") = %+v, want the folder session`, got)
+	}
+
+	// DeleteNode of the folder removes its subtree from results.
+	if _, err := s.DeleteNode(pid); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Search("release"); len(got) != 0 {
+		t.Fatalf(`after folder delete: Search("release") = %+v, want none`, got)
 	}
 }

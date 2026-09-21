@@ -370,8 +370,10 @@ queue blocks the emitter rather than dropping a lifecycle event.
   (multi-round, pre-filled from the stored password); after auth the bastion
   relays the session channel. Target login == bastion login; target port 22 and
   hostname/IPv4 only, no ProxyJump.
-- **Search:** matches Name, Host, User (case-insensitive substring); folder path
-  shown in results (A9). Session ID is a ULID (A10).
+- **Search:** matches Name, Host, User, or the session's folder path — the
+  slash-joined path of all ancestor folder names (case-insensitive substring;
+  a query may span segments, `prod/db`). Folder path shown per result, with
+  the match highlighted (A9). Session ID is a ULID (A10).
 - **Destructive tree ops** (delete folder with children, delete session) require
   a confirm dialog showing the affected count (A8).
 - **UI language is English only.** Shortcuts: Ctrl+K/L search, Ctrl+T connect,

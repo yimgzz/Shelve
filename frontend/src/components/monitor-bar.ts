@@ -22,18 +22,94 @@ let host: HTMLElement | null = null;
 let unsub: (() => void) | null = null;
 /** tabID currently being monitored by the backend (Start already called). */
 let monitored: string | null = null;
-/** True while the Disk tooltip is open. Survives metric-driven rebuilds so
- *  the tooltip can be re-opened after the hovered node is replaced. */
+/** True while the Disk tooltip is open. */
 let diskTooltipOpen = false;
-/** Last known pointer position (document mousemove). Geometry-based hit-test
- *  for the rebuilt Disk item: on a 2 s refresh the hovered node is replaced,
- *  so neither mouseenter (never re-fires) nor :hover (may lag the insertion)
- *  can be relied on. */
+/** Last known pointer position (document mousemove); -1 before the first
+ *  move. Geometry-based hit-test for the rebuilt Disk item: on a 2 s refresh
+ *  the hovered node is replaced, so neither mouseenter (never re-fires) nor
+ *  :hover (may lag the insertion) can be relied on. */
 let lastPX = -1;
 let lastPY = -1;
+/** Last known pointer position provably inside THIS window: any mousemove in
+ *  this window sets it; blur/hidden clear it (while the window is in the
+ *  background the pointer lives in another window, so the recorded position
+ *  is stale and must not drive a reopen). */
+let pointerInWindow = false;
+/** Currently rendered Disk item + tooltip (null while the bar is empty or
+ *  stale), so mousemove/blur decisions need no DOM query. */
+let diskElRef: HTMLElement | null = null;
+let diskTipRef: HTMLElement | null = null;
+
+/** True when the last known pointer position is inside `rect`. No padding:
+ *  this is meant to mirror the browser's own hit-testing, so the JS decision
+ *  cannot disagree with mouseenter/mouseleave. (A padded test resurrected a
+ *  closed tooltip from a stale position a few px past the item edge.) */
+function isPointerInside(rect: DOMRect | null): boolean {
+    if (!rect || lastPX < 0 || lastPY < 0) {
+        return false;
+    }
+    return lastPX >= rect.left && lastPX <= rect.right && lastPY >= rect.top && lastPY <= rect.bottom;
+}
+
+/** Pointer over the live Disk item, or over the open tooltip (it floats
+ *  above the item but is its DOM child, so scrolling the df listing must
+ *  keep it open). Requires proven in-window pointer — see pointerInWindow. */
+function pointerOverDisk(): boolean {
+    if (!pointerInWindow || !diskElRef) {
+        return false;
+    }
+    if (isPointerInside(diskElRef.getBoundingClientRect())) {
+        return true;
+    }
+    return !!(diskTipRef && diskTooltipOpen && isPointerInside(diskTipRef.getBoundingClientRect()));
+}
+
+function hideDiskTip(): void {
+    if (diskTipRef) {
+        diskTipRef.style.display = "none";
+    }
+    diskTooltipOpen = false;
+}
+
 const pointerMove = (e: MouseEvent): void => {
     lastPX = e.clientX;
     lastPY = e.clientY;
+    pointerInWindow = true;
+    // The tooltip is anchored to the item, not the pointer, so every move
+    // re-evaluates membership against the item's live rect. This closes a
+    // tooltip that a metric rebuild re-opened after the pointer had already
+    // left the item, and re-opens one if the pointer is back over the item
+    // without a fresh mouseenter (a replaced node does not re-fire
+    // mouseenter until the pointer moves again).
+    if (!diskElRef || !diskTipRef) {
+        return;
+    }
+    if (pointerOverDisk()) {
+        showDiskTip();
+    } else if (diskTooltipOpen) {
+        hideDiskTip();
+    }
+};
+
+/** Window lost focus: the pointer is now in another window (or off-screen)
+ *  where no mouse events will reach us, so without this the open tooltip
+ *  would sit there forever. Standard tooltip behavior: dismiss on blur. Also
+ *  invalidate the recorded pointer position — it is about another window now,
+ *  and trusting it would let the next metric rebuild re-open the tooltip from
+ *  a stale position. */
+const onWindowBlur = (): void => {
+    pointerInWindow = false;
+    if (diskTooltipOpen) {
+        hideDiskTip();
+    }
+};
+const onVisibilityChange = (): void => {
+    if (document.visibilityState === "hidden") {
+        pointerInWindow = false;
+        if (diskTooltipOpen) {
+            hideDiskTip();
+        }
+    }
 };
 
 // ------------------------------------------------------------- formatters --
@@ -145,24 +221,9 @@ function uptimeItem(m: MonitorMetrics | null): HTMLElement {
     return monItem(labelSpan("Uptime"), m ? valueSpan(formatUptime(m.uptimeSeconds)) : staleValue());
 }
 
-/** True if the last known pointer position is over `item` (8 px tolerance for
- *  small layout shifts between metric renders). */
-function isPointerNear(item: HTMLElement | null): boolean {
-    if (!item || lastPX < 0 || lastPY < 0) {
-        return false;
-    }
-    const PAD = 8;
-    const r = item.getBoundingClientRect();
-    return (
-        lastPX >= r.left - PAD &&
-        lastPX <= r.right + PAD &&
-        lastPY >= r.top - PAD &&
-        lastPY <= r.bottom + PAD
-    );
-}
-
 /** Show + position the fixed Disk tooltip above `item`. Shared by the
- *  mouseenter handler and the post-rebuild reopen so both paths agree. */
+ *  mouseenter handler, the geometry re-evaluation and the post-rebuild
+ *  reopen so all paths agree. */
 function positionTooltip(item: HTMLElement, tip: HTMLElement): void {
     const r = item.getBoundingClientRect();
     tip.style.display = "block";
@@ -172,12 +233,40 @@ function positionTooltip(item: HTMLElement, tip: HTMLElement): void {
     tip.style.top = `${Math.max(4, r.top - h - 6)}px`;
 }
 
+/** Last anchor geometry the open tooltip was positioned for; lets
+ *  showDiskTip skip the (layout-forcing) reposition while the item and the
+ *  pointer sit still. Reset on every rebuild (the tooltip node is new). */
+let tipAnchorLeft = -1;
+let tipAnchorTop = -1;
+
+/** Open (or re-open) the Disk tooltip; idempotent. */
+function showDiskTip(): void {
+    if (!diskElRef || !diskTipRef) {
+        return;
+    }
+    const r = diskElRef.getBoundingClientRect();
+    if (diskTooltipOpen && r.left === tipAnchorLeft && r.top === tipAnchorTop) {
+        return;
+    }
+    positionTooltip(diskElRef, diskTipRef);
+    tipAnchorLeft = r.left;
+    tipAnchorTop = r.top;
+    diskTooltipOpen = true;
+}
+
 function diskItem(m: MonitorMetrics | null): HTMLElement {
     const el = document.createElement("div");
     el.className = "mon-item";
     el.appendChild(labelSpan("Disk"));
+    // The tooltip node is (re)created, so the position anchor resets.
+    tipAnchorLeft = -1;
+    tipAnchorTop = -1;
     if (!m) {
+        // Stale placeholder: no tooltip, and detach the stale refs so no
+        // geometry decision can linger on a removed node.
         el.appendChild(staleValue());
+        diskElRef = null;
+        diskTipRef = null;
         return el;
     }
     el.appendChild(gaugeFor(m.diskUsedPct));
@@ -185,21 +274,19 @@ function diskItem(m: MonitorMetrics | null): HTMLElement {
     // Hover tooltip with the full df -h listing (plan P004 item 7). The
     // tooltip is position:fixed so it escapes the status band's
     // overflow:hidden clipping; JS positions it above the item on hover.
+    // Visibility is a pure function of the pointer geometry (pointerOverDisk,
+    // re-evaluated on every mousemove and on every bar rebuild), not a
+    // mouseenter/leave latch: a metric rebuild replaces the hovered node —
+    // mouseenter never re-fires for it, and a mouseleave fired by the removed
+    // node must not be able to kill the decision either.
     el.classList.add("mon-disk");
     const tip = document.createElement("div");
     tip.className = "mon-tooltip";
     tip.textContent = m.dfText.trim() || "df unavailable";
     el.appendChild(tip);
-    const showTip = () => {
-        diskTooltipOpen = true;
-        positionTooltip(el, tip);
-    };
-    const hideTip = () => {
-        diskTooltipOpen = false;
-        tip.style.display = "none";
-    };
-    el.addEventListener("mouseenter", showTip);
-    el.addEventListener("mouseleave", hideTip);
+    diskElRef = el;
+    diskTipRef = tip;
+    el.addEventListener("mouseenter", showDiskTip);
     return el;
 }
 
@@ -248,16 +335,25 @@ function render(): void {
     }
     lastRenderKey = key;
 
-    // Was the pointer interacting with Disk when this refresh hit? Captured
-    // BEFORE the wipe: the rebuild removes the hovered node, which can also
-    // fire mouseleave on it (clearing diskTooltipOpen).
+    // Pointer geometry over the CURRENT disk item or its open tooltip,
+    // captured BEFORE the wipe: the rebuild removes the hovered node (fires
+    // its mouseleave and detaches it), so the decision must be made from
+    // geometry, not node events. The tooltip floats above the item, so it is
+    // checked too — the pointer may be there scrolling the df listing.
     const oldDisk = el.querySelector<HTMLElement>(".mon-disk");
     const oldTip = oldDisk?.querySelector<HTMLElement>(".mon-tooltip");
-    const diskWasHovered =
-        isPointerNear(oldDisk) || (diskTooltipOpen && oldTip?.style.display === "block");
+    // Gated by pointerInWindow: after a blur the recorded position belongs
+    // to another window and must not drive a reopen on the next refresh.
+    const pointerWasInsideOld =
+        pointerInWindow &&
+        (isPointerInside(oldDisk?.getBoundingClientRect() ?? null) ||
+            (diskTooltipOpen && isPointerInside(oldTip?.getBoundingClientRect() ?? null)));
     el.textContent = "";
 
     if (!visible || !tab) {
+        hideDiskTip();
+        diskElRef = null;
+        diskTipRef = null;
         return;
     }
 
@@ -280,15 +376,19 @@ function render(): void {
     el.appendChild(uptimeItem(data));
     const diskEl = diskItem(data);
     el.appendChild(diskEl);
-    // Re-open the tooltip if the refresh interrupted a hover: the replacement
-    // node cannot receive mouseenter again (and may have lost mouseleave to
-    // the removed node), so we replay the decision from captured geometry.
-    const tip = diskEl.querySelector<HTMLElement>(".mon-tooltip");
-    if (tip && diskWasHovered) {
-        diskTooltipOpen = true;
-        positionTooltip(diskEl, tip);
+    // Re-evaluate the tooltip against the replacement node: a metric refresh
+    // removes the hovered node mid-hover (its mouseenter can never re-fire,
+    // and the mouseleave fired by the removed node must not be able to kill
+    // the decision), so the answer comes from pointer geometry. The new item
+    // is laid out at the same place as the old one; testing both the new and
+    // the pre-wipe geometry covers the sub-pixel shift.
+    const nowOver =
+        (pointerInWindow && isPointerInside(diskElRef?.getBoundingClientRect() ?? null)) ||
+        pointerWasInsideOld;
+    if (nowOver) {
+        showDiskTip();
     } else {
-        diskTooltipOpen = false;
+        hideDiskTip();
     }
 }
 
@@ -297,6 +397,10 @@ export function renderMonitorBar(el: HTMLElement): void {
     host = el;
     document.removeEventListener("mousemove", pointerMove);
     document.addEventListener("mousemove", pointerMove);
+    window.removeEventListener("blur", onWindowBlur);
+    window.addEventListener("blur", onWindowBlur);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     if (unsub) {
         unsub();
     }

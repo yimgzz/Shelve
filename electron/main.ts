@@ -43,7 +43,17 @@ import { FRAMELESS_TITLEBAR_FLAG } from "../frontend/src/rpc/ipc";
 // ------------------------------------------------------------------ config ---
 
 const SHUTDOWN_TIMEOUT_MS = 3000;
-const HANDSHAKE_TIMEOUT_MS = 10_000;
+// Deadline for the backend's ready handshake. It only has to catch a backend
+// that starts but never reports ready: a missing/unexecutable binary raises
+// `error` and a crash raises `exit`, and both are reported immediately by
+// startBackend(). Packaged runs get a far larger budget because the first exec
+// of the backend happens through the AppImage's compressed squashfs while
+// Chromium is still paging its own 220 MB binary in through the same
+// single-threaded FUSE mount; on a cold start that easily costs tens of
+// seconds, and a 10 s deadline aborted the launch with
+// "No ready handshake ... within 10 s" before the backend ever got to run.
+const HANDSHAKE_TIMEOUT_DEV_MS = 10_000;
+const HANDSHAKE_TIMEOUT_PACKAGED_MS = 60_000;
 // Cap on unterminated stdout bytes before the handshake is parsed. stdout is
 // documented as handshake-only, so exceeding this means a stray writer; drop it
 // instead of accumulating for the process lifetime.
@@ -421,6 +431,7 @@ function startBackend(): void {
     const child = spawn(bin, [], { stdio: ["ignore", "pipe", "inherit"] });
     backend = child;
 
+    const deadline = app.isPackaged ? HANDSHAKE_TIMEOUT_PACKAGED_MS : HANDSHAKE_TIMEOUT_DEV_MS;
     const timer = setTimeout(() => {
         if (endpoint) {
             return;
@@ -428,10 +439,10 @@ function startBackend(): void {
         quitting = true;
         dialog.showErrorBox(
             "Shelve backend did not start",
-            `No ready handshake from ${bin} within ${HANDSHAKE_TIMEOUT_MS / 1000} s.`,
+            `No ready handshake from ${bin} within ${deadline / 1000} s.`,
         );
         app.quit();
-    }, HANDSHAKE_TIMEOUT_MS);
+    }, deadline);
 
     // stdout carries exactly one line (the handshake); stderr carries the logs.
     // Detach and stop reading as soon as the handshake is parsed so a stray

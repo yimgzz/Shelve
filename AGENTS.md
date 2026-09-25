@@ -138,7 +138,7 @@ Notes:
 | IDs | `github.com/oklog/ulid/v2` |
 | RPC WS | `github.com/coder/websocket` (pinned) |
 | Transport | `internal/bridge`: one token-gated `127.0.0.1` listener serving `/rpc` (JSON) + `/terminal` (binary) |
-| Packaging | `electron-builder` AppImage (xz-compressed, `en-US` locales only) + `electron-builder --linux dir` for local `make run` |
+| Packaging | `electron-builder` AppImage (gzip-compressed, `en-US` locales only) + `electron-builder --linux dir` for local `make run` |
 
 ### Layering rules (critical)
 
@@ -410,8 +410,13 @@ queue blocks the emitter rather than dropping a lifecycle event.
   `--disable-lcd-text`.
 - **Packaging size & runtime performance:** `electron-builder.yml` sets
   `electronLanguages: ["en-US"]` (Chromium locales pruned; UI is English-only)
-  and `appImage.compression: "xz"` (much slower packaging, much smaller
-  artifact). The shipped `shelve-backend` is built
+  and `appImage.compression: "gzip"`. Do **not** switch back to `xz`: the
+  AppImage is mounted, not extracted, so every page of the 220 MB Chromium
+  binary is inflated on demand by one squashfuse thread — with xz's 1 MiB
+  blocks a cold start cost tens of seconds and the backend missed its ready
+  handshake. The ~40 MB xz saves is not worth it. The packaged handshake
+  deadline (`HANDSHAKE_TIMEOUT_PACKAGED_MS`, 60 s vs 10 s unpackaged) covers the
+  remaining cold-start cost. The shipped `shelve-backend` is built
   `CGO_ENABLED=0 -trimpath -ldflags="-s -w"`. The GPU/SwiftShader/codec
   libraries and the ~220 MB Chromium binary are intentionally kept (GPU parity +
   `--disable-gpu` fallback); `LICENSES.chromium.html` is kept pending legal
@@ -439,7 +444,8 @@ queue blocks the emitter rather than dropping a lifecycle event.
   checklists instead.
 - **Electron manual matrix:** scale factors 100–200 %, X11 + Wayland, monitor
   moves, GPU on/off, AppImage launch (`make appimage` + `make appimage-check`
-  with `en-US`-only locales, xz), and a concurrent-RPC check (multi-GB SFTP
+  with `en-US`-only locales, gzip; time the cold start), and a concurrent-RPC
+  check (multi-GB SFTP
   upload while browsing/searching). The interactive rows are not yet executed on
   a real desktop and are tracked as open work in the master plan's §10.
 - **Perf budgets:** search over 300 nodes < 10 ms; tree DOM rebuild < 50 ms;

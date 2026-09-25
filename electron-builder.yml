@@ -62,7 +62,10 @@ linux:
 appImage:
   license: null
   executableArgs: []
-  # xz compresses far better than the legacy FUSE2 default (gzip) at the cost
-  # of a much slower package step. The legacy toolset forwards
-  # `-comp xz -Xdict-size 100% -b 1048576`.
-  compression: "xz"
+  # gzip, not xz. xz produces a ~40 MB smaller artifact, but the AppImage is
+  # *mounted*, not extracted: every page of the 220 MB Chromium binary is
+  # decompressed on demand by a single-threaded squashfuse process, and with
+  # `-comp xz -b 1048576` a random page fault costs a full 1 MiB block inflate.
+  # Cold starts took tens of seconds and the backend missed its ready
+  # handshake. gzip inflates several times faster, so keep it.
+  compression: "gzip"

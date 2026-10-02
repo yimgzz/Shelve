@@ -7,7 +7,7 @@
 appId: "io.shelve.app"
 productName: "Shelve"
 executableName: "shelve"
-copyright: "(c) 2026, Shelve"
+copyright: "Copyright (c) 2026 Shelve contributors"
 
 directories:
   output: "bin"
@@ -33,6 +33,14 @@ electronLanguages:
 extraResources:
   - from: "bin/shelve-backend"
     to: "backend/shelve-backend"
+  # Ship the project license and the third-party notices next to the app
+  # (resources/LICENSE, resources/THIRD-PARTY-NOTICES.md). Electron/Chromium
+  # notices (LICENSE.electron.txt, LICENSES.chromium.html) are placed at the
+  # AppDir root by electron-builder and referenced from the notices file.
+  - from: "LICENSE"
+    to: "LICENSE"
+  - from: "THIRD-PARTY-NOTICES.md"
+    to: "THIRD-PARTY-NOTICES.md"
 
 asar: true
 # No native modules: never rebuild anything against the Electron ABI.
@@ -53,10 +61,12 @@ linux:
   synopsis: "Lightweight local SSH session manager"
   description: "Local-first SSH session manager with an encrypted vault."
 
-# The app is GPL/private; do not embed a EULA into the AppImage. The desktop
-# Exec gets NO forced `--no-sandbox`: electron-builder would otherwise bake it
-# into `Exec=AppRun --no-sandbox %U` for the legacy AppImage toolset, which
-# would disable the Chromium sandbox for every desktop launch. With an empty
+# The app is MIT-licensed (see LICENSE); no EULA is embedded into the AppImage.
+# The desktop entry points at the shipped LICENSE / THIRD-PARTY-NOTICES.md via
+# the extraResources above. The desktop Exec gets NO forced `--no-sandbox`:
+# electron-builder would otherwise bake it into `Exec=AppRun --no-sandbox %U`
+# for the legacy AppImage toolset, which would disable the Chromium sandbox for
+# every desktop launch. With an empty
 # arg list, AppRun's own `unshare -Ur` probe (and main.ts) decides, so the
 # sandbox stays on where the host supports it (phase E5 task 2).
 appImage:

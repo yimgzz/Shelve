@@ -410,3 +410,18 @@ structured Jump Hosts list instead of several `ProxyJump=` tokens.
   `frontend/dist/` (gitignored). `dist-electron/` (gitignored) holds the
   esbuild main/preload bundles.
 - `electron-builder.yml`, `Dockerfile.dev`, `build/icon.png`, `scripts/`.
+
+## License
+
+Shelve is released under the **MIT License** — see [`LICENSE`](LICENSE)
+(`Copyright (c) 2026 Shelve contributors`). Contributions are accepted under
+MIT (inbound = outbound).
+
+The AppImage also ships [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md),
+which reproduces the license texts for every dependency bundled at runtime (the
+Go backend modules, the `@xterm/*` renderer packages, and pointers to
+Electron's `LICENSE.electron.txt` and Chromium's `LICENSES.chromium.html`). The
+machine-readable runtime manifest is
+[`third_party/runtime-deps.txt`](third_party/runtime-deps.txt); run
+`make licenses-check` (also part of `make lint`) after changing a runtime
+dependency.

@@ -1,0 +1,27 @@
+# Shelve runtime dependency manifest (machine-readable).
+#
+# Enforced by scripts/check-licenses.sh (`make licenses-check`, part of lint).
+# Lists only what actually ships inside the AppImage. Build-time-only packages
+# (vite, esbuild, electron-builder, typescript, lightningcss) are intentionally
+# absent; Electron and Chromium are referenced, not reproduced, by
+# THIRD-PARTY-NOTICES.md.
+#
+# Format: <ecosystem> <module-or-package> <SPDX-license-id>
+# ecosystem: go | npm
+#
+# Go: the exact production set for ./cmd/shelve-backend, i.e.
+#   go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}}{{end}}{{end}}' ./cmd/shelve-backend | sort -u
+go github.com/coder/websocket ISC
+go github.com/kr/fs BSD-3-Clause
+go github.com/oklog/ulid/v2 Apache-2.0
+go github.com/pkg/sftp BSD-2-Clause
+go golang.org/x/crypto BSD-3-Clause
+go golang.org/x/sys BSD-3-Clause
+#
+# npm: the runtime `dependencies` keys from package.json (bundled into
+# frontend/dist by Vite).
+npm @xterm/addon-fit MIT
+npm @xterm/addon-search MIT
+npm @xterm/addon-web-links MIT
+npm @xterm/addon-webgl MIT
+npm @xterm/xterm MIT

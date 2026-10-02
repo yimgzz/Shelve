@@ -79,7 +79,11 @@ electron-builder.yml         # AppImage + --linux dir packaging metadata
 Dockerfile.dev               # shelve-dev toolchain image (golang + Node + Electron/Chromium libs)
 Makefile                     # docker-driven targets (§3)
 build/icon.png               # the only file kept under build/ (electron-builder buildResources)
-scripts/                     # build-electron.mjs, host-runtime-libs.txt, verify-appimage.sh
+scripts/                     # build-electron.mjs, host-runtime-libs.txt, verify-appimage.sh,
+                             # check-licenses.sh (runtime-license drift guard)
+third_party/                 # runtime-deps.txt (machine-readable runtime license manifest)
+LICENSE                      # project license (MIT)
+THIRD-PARTY-NOTICES.md       # bundled runtime dependency notices (shipped in the AppImage)
 tsconfig.electron.json       # main/preload typecheck config
 package.json                 # the ONLY JS manifest (root); version is the source of truth
 docker/sshd/                 # integration-test sshd image (Dockerfile + sshd_config)
@@ -107,7 +111,8 @@ through the Makefile targets.
 | `make run` | Run the unpacked build on the host (needs the Electron runtime libs) |
 | `make test` / `make test-race` | Go unit tests in the container (with `-race`) |
 | `make test-integration` | SFTP/SSH integration tests via testcontainers (needs the Docker socket) |
-| `make lint` | `gofmt` + `go vet` (container) + renderer & Electron `tsc --noEmit` |
+| `make lint` | `gofmt` + `go vet` (container) + renderer & Electron `tsc --noEmit` + `licenses-check` |
+| `make licenses-check` | Verify runtime third-party notices are in sync (`scripts/check-licenses.sh`) |
 | `make smoke-vault` | Headless vault smoke test against a temp dir |
 | `make seed` / `make unseed` | Seed/remove a 300-session QA vault into the host config dir |
 | `make appimage` | Self-contained AppImage in the container → `bin/shelve-<version>-x86_64.AppImage` |
@@ -419,8 +424,20 @@ queue blocks the emitter rather than dropping a lifecycle event.
   remaining cold-start cost. The shipped `shelve-backend` is built
   `CGO_ENABLED=0 -trimpath -ldflags="-s -w"`. The GPU/SwiftShader/codec
   libraries and the ~220 MB Chromium binary are intentionally kept (GPU parity +
-  `--disable-gpu` fallback); `LICENSES.chromium.html` is kept pending legal
-  sign-off — do not prune these.
+  `--disable-gpu` fallback); `LICENSE.electron.txt` and `LICENSES.chromium.html`
+  are kept and shipped (referenced by `THIRD-PARTY-NOTICES.md`, asserted by
+  `make appimage-check`) — do not prune these.
+- **Licensing (MIT):** the project is MIT (`LICENSE`, `Copyright (c) 2026 Shelve
+  contributors`; contributions are accepted under MIT, inbound = outbound).
+  Runtime dependencies must stay permissive (MIT/BSD-2/BSD-3/ISC/Apache-2.0
+  allowlist) — no copyleft (GPL/AGPL/LGPL/SSPL). The AppImage ships `LICENSE` +
+  `THIRD-PARTY-NOTICES.md` (via `extraResources`). When a **runtime** Go module
+  or npm `dependencies` entry changes, update
+  `third_party/runtime-deps.txt` and `THIRD-PARTY-NOTICES.md` and run
+  `make licenses-check` (also wired as a prerequisite of `make lint`, so a
+  silent drift fails lint). Keep the Electron/Chromium notices; build-time-only
+  deps (`vite`, `esbuild`, `electron-builder`, `typescript`, `lightningcss`) are
+  out of scope.
 - **No functional change rule:** a change must not alter a user-visible
   behavior, DTO field, event name, or event payload. `internal/{vault,model,
   store,sshx,sshengine,sftp,monitor,config}` are preserved from the pre-Electron
@@ -442,6 +459,11 @@ queue blocks the emitter rather than dropping a lifecycle event.
   perf smoke.
 - **Frontend:** `tsc --noEmit` in `make lint`. No e2e framework; manual QA
   checklists instead.
+- **Licensing:** `make licenses-check` (also part of `make lint`) proves every
+  production Go module and runtime npm `dependencies` key is declared in
+  `third_party/runtime-deps.txt` and named in `THIRD-PARTY-NOTICES.md`, and
+  rejects copyleft ids; `make appimage-check` asserts the shipped license /
+  notices files.
 - **Electron manual matrix:** scale factors 100–200 %, X11 + Wayland, monitor
   moves, GPU on/off, AppImage launch (`make appimage` + `make appimage-check`
   with `en-US`-only locales, gzip; time the cold start), and a concurrent-RPC

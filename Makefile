@@ -195,8 +195,12 @@ unseed: ensure-image ## Remove the seeded vault.json + known_hosts (keeps settin
 
 # ----------------------------------------------------------------- lint ---
 
+.PHONY: licenses-check
+licenses-check: ensure-image ## Verify third-party runtime notices are in sync (scripts/check-licenses.sh)
+	$(DOCKER_RUN) $(IMAGE) ./scripts/check-licenses.sh
+
 .PHONY: lint
-lint: ensure-image node-deps ## gofmt + go vet (container) + electron & renderer tsc --noEmit
+lint: ensure-image node-deps licenses-check ## gofmt + go vet (container) + electron & renderer tsc --noEmit + licenses-check
 	$(DOCKER_RUN) $(IMAGE) sh -c '\
 		set -e; \
 		cd /app; \

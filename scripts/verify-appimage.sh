@@ -5,8 +5,11 @@
 #   1. The artifact extracts cleanly (--appimage-extract; FUSE not required).
 #   2. Required payload is present: the `shelve` Electron binary, the bundled
 #      Chromium `.so` set, `chrome-sandbox`, the desktop entry + icon, the app
-#      payload in `resources/app.asar`, and the Go backend at
-#      `resources/backend/shelve-backend` (executable, OUTSIDE the asar).
+#      payload in `resources/app.asar`, the Go backend at
+#      `resources/backend/shelve-backend` (executable, OUTSIDE the asar), and
+#      the license/notices files (`resources/LICENSE`,
+#      `resources/THIRD-PARTY-NOTICES.md`, `LICENSE.electron.txt`,
+#      `LICENSES.chromium.html`).
 #   3. The Go backend is NOT inside app.asar (parsed from the asar header).
 #   4. No `docker/sshd` integration-test fixture strings leaked into the
 #      payload (master plan §8: no test credentials ship).
@@ -89,6 +92,14 @@ check resources/app.asar
 check resources/backend/shelve-backend exec
 check shelve.desktop
 check .DirIcon
+
+# License / third-party notices must ship with the artifact (MIT compliance):
+# the project license + curated notices under resources/, and electron-builder's
+# verbatim Electron/Chromium notices at the AppDir root.
+check resources/LICENSE
+check resources/THIRD-PARTY-NOTICES.md
+check LICENSE.electron.txt
+check LICENSES.chromium.html
 
 # Chromium's bundled runtime libs (proves Electron's Chromium ships, so the
 # host needs no GTK4/WebKit stack; master plan §12 #6).

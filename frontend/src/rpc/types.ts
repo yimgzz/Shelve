@@ -201,6 +201,8 @@ export interface Settings {
     themeVariant: string;
     autoLockMinutes: number;
     sftpBrowserEnabled: boolean;
+    /** Open the SFTP browser automatically when a tab becomes ready. */
+    sftpAutoOpen: boolean;
     /** Dock side of the SFTP browser (config.SftpPanelSide). */
     sftpPanelSide: SftpPanelSide;
     monitoringEnabled: boolean;

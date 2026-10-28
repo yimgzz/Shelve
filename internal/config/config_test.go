@@ -434,11 +434,59 @@ func TestSettingsNeverContainsSecretFields(t *testing.T) {
 	}
 	for k := range m {
 		switch k {
-		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "sftpPanelSide", "monitoringEnabled",
+		case "theme", "themeVariant", "autoLockMinutes", "sftpBrowserEnabled", "sftpAutoOpen", "sftpPanelSide", "monitoringEnabled",
 			"terminal", "textEditorCommand", "sftpInitialPath", "window", "ui":
 		default:
 			t.Fatalf("unexpected settings key %q", k)
 		}
+	}
+}
+
+// TestSftpAutoOpenDefaultAndRoundTrip: the auto-open flag defaults to true, an
+// explicit `false` in an existing settings.json is respected, and an explicit
+// value round-trips through Save/Load.
+func TestSftpAutoOpenDefaultAndRoundTrip(t *testing.T) {
+	if d := DefaultSettings(); !d.SftpAutoOpen {
+		t.Fatal("default sftpAutoOpen must be true")
+	}
+
+	isolatedXDG(t)
+	if err := os.MkdirAll(Path(), DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(File(SettingsFileName), []byte(`{"theme":"dark"}`), FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !got.SftpAutoOpen {
+		t.Fatalf("absent sftpAutoOpen must default to true, got %+v", got)
+	}
+
+	if err := os.WriteFile(File(SettingsFileName), []byte(`{"sftpAutoOpen":false}`), FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	got, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.SftpAutoOpen {
+		t.Fatalf("explicit sftpAutoOpen:false must be respected, got %+v", got)
+	}
+
+	s := DefaultSettings()
+	s.SftpAutoOpen = true
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !got.SftpAutoOpen {
+		t.Fatalf("sftpAutoOpen = false, want true after round trip")
 	}
 }
 

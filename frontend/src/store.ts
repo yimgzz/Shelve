@@ -123,9 +123,10 @@ export interface StoreState {
     vaultState: VaultState;
     /**
      * SFTP panel open state (ephemeral, like tabs — A3). Defaults to false so
-     * the left-docked default shows the session tree. The store auto-opens it
-     * when a tab becomes/activates ready while the browser setting is on, on
-     * BOTH dock sides (plan ui-ux-refinements §B); the toolbar [SFTP] and the
+     * the left-docked default shows the session tree. When the browser setting
+     * and `sftpAutoOpen` are both on, the store auto-opens it when a tab
+     * becomes/activates ready, on BOTH dock sides (plan ui-ux-refinements §B);
+     * with auto-open off the panel stays closed until the toolbar [SFTP] or
      * panel-header [Sessions]/[×] buttons toggle it. When docked right it only
      * controls the right-hand SFTP column; when docked left it switches the
      * left column between the tree and the browser.
@@ -203,6 +204,8 @@ export function normalizeSettings(raw: Record<string, unknown>): Settings {
         themeVariant: typeof raw.themeVariant === "string" ? raw.themeVariant : "",
         autoLockMinutes: Number(raw.autoLockMinutes ?? 0),
         sftpBrowserEnabled: Boolean(raw.sftpBrowserEnabled),
+        // Auto-open defaults ON (backend keeps `true` when the key is absent).
+        sftpAutoOpen: Boolean(raw.sftpAutoOpen ?? true),
         // Dock side (plan sftp-panel-side): only an explicit "right" keeps the
         // browser on the right; anything else (absent/unknown) is "left".
         sftpPanelSide: normalizeSftpPanelSide(raw.sftpPanelSide),
@@ -237,6 +240,7 @@ export const initialState: StoreState = {
         // persisted value via normalizeSettings). Same rule for the plan-P004
         // system monitor.
         sftpBrowserEnabled: true,
+        sftpAutoOpen: true,
         sftpPanelSide: "left",
         monitoringEnabled: true,
         terminal: { fontFamily: "monospace", fontSize: 13, scrollback: 10000 },
@@ -453,9 +457,14 @@ class Store {
         );
         const patch: Partial<StoreState> = { groups, activeGroupID: group.id };
         // Auto-open the SFTP panel when activating a ready tab (both dock
-        // sides — plan ui-ux-refinements §B). The tree/panel swap on the left
-        // is visible immediately; the [Sessions] button returns to the tree.
-        if (tab.state === "ready" && this.state.settings.sftpBrowserEnabled) {
+        // sides — plan ui-ux-refinements §B) and auto-open is enabled. The
+        // tree/panel swap on the left is visible immediately; the [Sessions]
+        // button returns to the tree.
+        if (
+            tab.state === "ready" &&
+            this.state.settings.sftpBrowserEnabled &&
+            this.state.settings.sftpAutoOpen
+        ) {
             patch.sftpPanelOpen = true;
         }
         this.set(patch);
@@ -801,8 +810,9 @@ class Store {
      * late event for a tab the user already closed and must be ignored (the
      * bridge writes responses and events from separate goroutines, so the
      * Disconnect response can overtake its own terminal:status "closed"
-     * event). Auto-opens the SFTP panel when the active tab turns ready and
-     * the setting is on — both dock sides (plan ui-ux-refinements §B).
+     * event). Auto-opens the SFTP panel when the active tab turns ready, the
+     * setting is on and auto-open is enabled — both dock sides (plan
+     * ui-ux-refinements §B).
      */
     setTabState(tabID: string, state: TabState, message?: string): void {
         const loc = findTab(this.state, tabID);
@@ -827,7 +837,8 @@ class Store {
         if (
             state === "ready" &&
             tabID === activeTabID(this.state) &&
-            settings.sftpBrowserEnabled
+            settings.sftpBrowserEnabled &&
+            settings.sftpAutoOpen
         ) {
             patch.sftpPanelOpen = true;
         }

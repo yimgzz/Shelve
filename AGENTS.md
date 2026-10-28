@@ -357,8 +357,11 @@ queue blocks the emitter rather than dropping a lifecycle event.
   own column (`×` closes, toolbar `[SFTP]` reopens); docked left (the default)
   it replaces the tree in the left column — toolbar `[SFTP]` opens it and the
   panel-header `[Sessions]` button returns to the tree (the panel `×` is hidden
-  on the left). Auto-open applies to **both** sides: a tab reaching `ready` (or
-  a ready tab being activated) opens the browser while the setting is on.
+  on the left). Auto-open applies to **both** sides and is conditional on
+  `settings.sftpAutoOpen` (default on): a tab reaching `ready` (or a ready tab
+  being activated) opens the browser only while both the browser setting and
+  auto-open are on. With auto-open off the panel stays closed until `[SFTP]`
+  opens it; it never force-closes a manually opened panel.
 - **Session tree:** 18 px indent per level, a chevron-width spacer on session
   rows so icons align per depth, and a vertical indent guide per children block;
   the search row carries `⊟` Collapse all / `⊞` Expand all (mirrored in the

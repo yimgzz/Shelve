@@ -174,6 +174,16 @@ export function openSettingsDialog(): void {
     sftpWrap.classList.add("settings-check-wrap");
     general.appendChild(sftpWrap);
 
+    const autoOpenCheck = document.createElement("input");
+    autoOpenCheck.type = "checkbox";
+    autoOpenCheck.className = "settings-check";
+    autoOpenCheck.checked = current.sftpAutoOpen;
+    const autoOpenWrap = settingField("Open SFTP browser automatically", autoOpenCheck, {
+        hint: "Opens the browser when a session becomes ready. When off, use the [SFTP] button to open it.",
+    });
+    autoOpenWrap.classList.add("settings-check-wrap");
+    general.appendChild(autoOpenWrap);
+
     // SFTP panel position (plan sftp-panel-side): the dock side of the browser.
     // Docked left it replaces the session tree in the left column (toggle at
     // the top of the column); docked right it gets its own column.
@@ -313,6 +323,7 @@ export function openSettingsDialog(): void {
                 themeVariant: selVariant,
                 autoLockMinutes: clamp(Math.floor(Number(autoLock.value) || 0), 0, 60 * 24),
                 sftpBrowserEnabled: sftpCheck.checked,
+                sftpAutoOpen: autoOpenCheck.checked,
                 sftpPanelSide: normalizeSftpPanelSide(sftpSide.value),
                 monitoringEnabled: monCheck.checked,
                 terminal: {

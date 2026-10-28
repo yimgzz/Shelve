@@ -51,6 +51,7 @@ type Settings struct {
 	ThemeVariant       string           `json:"themeVariant"` // "" = family default; concrete palette id
 	AutoLockMinutes    int              `json:"autoLockMinutes"`
 	SftpBrowserEnabled bool             `json:"sftpBrowserEnabled"`
+	SftpAutoOpen       bool             `json:"sftpAutoOpen"`      // open the browser when a tab becomes ready
 	SftpPanelSide      string           `json:"sftpPanelSide"`     // "left" | "right" — dock side
 	MonitoringEnabled  bool             `json:"monitoringEnabled"` // bottom-bar system monitor (plan P004)
 	Terminal           TerminalSettings `json:"terminal"`
@@ -70,6 +71,7 @@ func DefaultSettings() Settings {
 		ThemeVariant:       "",
 		AutoLockMinutes:    0,
 		SftpBrowserEnabled: true,
+		SftpAutoOpen:       true,
 		SftpPanelSide:      SftpPanelSideLeft,
 		MonitoringEnabled:  true,
 		Terminal: TerminalSettings{
